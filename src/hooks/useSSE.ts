@@ -49,11 +49,11 @@ export function useSSE(options: UseSSEOptions) {
     });
   }, [machineId, enabled]);
 
-  // Disconnect SSE
-  const disconnect = useCallback(() => {
-    console.log("[SSE] Requesting Rust backend to disconnect...");
-    invoke("disconnect_sse").catch((err: unknown) => {
-      console.error("[SSE] Failed to disconnect:", err);
+  // Destroy SSE (disconnect + cleanup, idempotent)
+  const destroy = useCallback(() => {
+    console.log("[SSE] Requesting Rust backend to destroy...");
+    invoke("destroy_sse").catch((err: unknown) => {
+      console.error("[SSE] Failed to destroy:", err);
     });
   }, []);
 
@@ -125,7 +125,7 @@ export function useSSE(options: UseSSEOptions) {
     };
   }, [machineId, enabled, connect, onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConnectionChange]);
 
-  return { disconnect };
+  return { destroy };
 }
 
 export default useSSE;

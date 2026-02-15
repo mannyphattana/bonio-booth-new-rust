@@ -58,7 +58,7 @@ export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClos
 
   const handleCloseApp = async () => {
     try {
-      // Disconnect SSE before closing
+      // Destroy SSE before closing
       if (onBeforeClose) onBeforeClose();
       // exit_app sends app-closed notification to backend then exits
       await invoke("exit_app");

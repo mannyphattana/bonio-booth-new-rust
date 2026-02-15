@@ -3,7 +3,7 @@ use log::{error, info, warn};
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Notify;
 
@@ -17,6 +17,8 @@ pub struct SseClient {
     connected: Arc<AtomicBool>,
     shutdown: Arc<Notify>,
     running: Arc<AtomicBool>,
+    destroyed: Arc<AtomicBool>,
+    app_handle: Arc<Mutex<Option<AppHandle>>>,
 }
 
 impl SseClient {
@@ -25,6 +27,8 @@ impl SseClient {
             connected: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(Notify::new()),
             running: Arc::new(AtomicBool::new(false)),
+            destroyed: Arc::new(AtomicBool::new(false)),
+            app_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -41,6 +45,9 @@ impl SseClient {
             info!("[SSE] Already running, disconnecting first...");
             self.disconnect();
         }
+
+        // Store app handle for disconnect event emission
+        *self.app_handle.lock().unwrap() = Some(app.clone());
 
         self.running.store(true, Ordering::Relaxed);
         let connected = self.connected.clone();
@@ -211,9 +218,44 @@ impl SseClient {
     /// Disconnect the SSE connection gracefully.
     pub fn disconnect(&self) {
         info!("[SSE] Disconnecting...");
+
+        // Emit SSE_DISCONNECTED event if was connected
+        if self.connected.load(Ordering::Relaxed) {
+            if let Some(app) = self.app_handle.lock().unwrap().as_ref() {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let _ = app.emit(
+                    "sse-event",
+                    serde_json::json!({
+                        "type": "sse-disconnected",
+                        "data": {
+                            "timestamp": timestamp as u64,
+                            "reason": "manual-disconnect"
+                        }
+                    }),
+                );
+            }
+        }
+
         self.running.store(false, Ordering::Relaxed);
         self.connected.store(false, Ordering::Relaxed);
         self.shutdown.notify_waiters();
+    }
+
+    /// Destroy the SSE client instance (idempotent).
+    /// Calls disconnect() and marks the client as destroyed.
+    /// Safe to call multiple times.
+    pub fn destroy(&self) {
+        if self.destroyed.load(Ordering::Relaxed) {
+            info!("[SSE] Already destroyed, skipping.");
+            return;
+        }
+        self.destroyed.store(true, Ordering::Relaxed);
+        info!("[SSE] Destroying instance...");
+        self.disconnect();
+        info!("[SSE] Instance destroyed");
     }
 }
 

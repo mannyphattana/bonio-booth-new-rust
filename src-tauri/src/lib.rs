@@ -28,17 +28,17 @@ fn connect_sse(
 }
 
 #[tauri::command]
-fn disconnect_sse(sse_client: tauri::State<'_, Mutex<SseClient>>) {
+fn destroy_sse(sse_client: tauri::State<'_, Mutex<SseClient>>) {
     let client = sse_client.lock().unwrap();
-    client.disconnect();
+    client.destroy();
 }
 
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle, sse_client: tauri::State<'_, Mutex<SseClient>>) {
-    // Disconnect SSE - the backend will detect the drop and send Telegram notification
+    // Destroy SSE - the backend will detect the drop and send Telegram notification
     {
         let client = sse_client.lock().unwrap();
-        client.disconnect();
+        client.destroy();
     }
     // Small delay to ensure TCP FIN is sent
     std::thread::sleep(std::time::Duration::from_millis(200));
@@ -101,6 +101,40 @@ fn resolve_lut_path(app: tauri::AppHandle, lut_file: String) -> Result<String, S
     }
 }
 
+/// Debug command to diagnose path issues in production
+#[tauri::command]
+fn debug_paths(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let exe_path = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    
+    let filters_resource = resource_dir.join("filters");
+    let filters_exists = filters_resource.exists();
+    
+    // List filters dir contents
+    let mut filter_files = Vec::new();
+    if filters_exists {
+        if let Ok(entries) = std::fs::read_dir(&filters_resource) {
+            for entry in entries.flatten() {
+                filter_files.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    // Check ffmpeg
+    let ffmpeg_path = crate::video::get_ffmpeg_path_public();
+    
+    Ok(serde_json::json!({
+        "resource_dir": resource_dir.to_string_lossy().to_string(),
+        "exe_path": exe_path,
+        "cwd": cwd,
+        "filters_dir": filters_resource.to_string_lossy().to_string(),
+        "filters_exists": filters_exists,
+        "filter_files": filter_files,
+        "ffmpeg_path": ffmpeg_path,
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -111,15 +145,25 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            // Open DevTools in debug/release for troubleshooting
+            #[cfg(debug_assertions)]
+            {
+                let window = app.get_webview_window("main").unwrap();
+                window.open_devtools();
+            }
+            Ok(())
+        })
         .manage(AppState::new())
         .manage(Mutex::new(SseClient::new()))
         .invoke_handler(tauri::generate_handler![
             // App utilities
             get_app_dir,
             resolve_lut_path,
+            debug_paths,
             exit_app,
             connect_sse,
-            disconnect_sse,
+            destroy_sse,
             // API commands
             api::verify_machine,
             api::init_machine,

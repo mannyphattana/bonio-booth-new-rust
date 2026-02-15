@@ -118,7 +118,7 @@ function App() {
   };
 
   // SSE connection - receive events from backend
-  const { disconnect: disconnectSSE } = useSSE({
+  const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
     enabled: isVerified && !!machineData?._id,
     onShutdown: (countdownMinutes) => {
@@ -196,7 +196,7 @@ function App() {
       )}
 
       <Routes>
-        <Route path="/" element={<Home theme={themeData!} machineData={machineData!} onFormatReset={handleFormatReset} onBeforeClose={disconnectSSE} />} />
+        <Route path="/" element={<Home theme={themeData!} machineData={machineData!} onFormatReset={handleFormatReset} onBeforeClose={destroySSE} />} />
         <Route path="/payment-selection" element={<PaymentSelection theme={themeData!} machineData={machineData!} />} />
         <Route path="/coupon-entry" element={<CouponEntry theme={themeData!} machineData={machineData!} />} />
         <Route path="/payment-qr" element={<PaymentQR theme={themeData!} machineData={machineData!} />} />

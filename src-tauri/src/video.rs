@@ -17,6 +17,11 @@ fn hidden_command(program: &str) -> std::process::Command {
     cmd
 }
 
+/// Public getter for ffmpeg path (used by debug_paths)
+pub fn get_ffmpeg_path_public() -> String {
+    get_ffmpeg_path()
+}
+
 /// Get the FFmpeg binary path
 /// Checks: 1) next to exe (production) 2) node_modules/@ffmpeg-installer (dev) 3) system PATH
 fn get_ffmpeg_path() -> String {
