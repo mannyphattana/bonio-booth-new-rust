@@ -47,35 +47,45 @@ fn exit_app(app: tauri::AppHandle, sse_client: tauri::State<'_, Mutex<SseClient>
 
 #[tauri::command]
 fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
-    // Try to get the resource directory (where the exe is)
-    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-    let filters_dir = resource_dir.join("filters");
-    if filters_dir.exists() {
-        return Ok(filters_dir.to_string_lossy().to_string());
+    // 1. Try resource_dir (Tauri 2 NSIS: {install_dir}\_up_\)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let filters_dir = resource_dir.join("filters");
+        if filters_dir.exists() {
+            return Ok(filters_dir.to_string_lossy().to_string());
+        }
     }
 
-    // Fallback: look relative to the executable
+    // 2. Try relative to the executable
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
+            // 2a. Same dir as exe (portable)
             let filters_dir = exe_dir.join("filters");
             if filters_dir.exists() {
                 return Ok(filters_dir.to_string_lossy().to_string());
             }
-            // Try parent directories (for dev mode)
-            if let Some(parent) = exe_dir.parent() {
-                if let Some(grandparent) = parent.parent() {
-                    if let Some(ggparent) = grandparent.parent() {
-                        let filters_dir = ggparent.join("filters");
-                        if filters_dir.exists() {
-                            return Ok(filters_dir.to_string_lossy().to_string());
-                        }
-                    }
+            // 2b. _up_/filters (NSIS installed)
+            let filters_dir = exe_dir.join("_up_").join("filters");
+            if filters_dir.exists() {
+                return Ok(filters_dir.to_string_lossy().to_string());
+            }
+            // 2c. Dev mode: exe is at src-tauri/target/debug/bonio-booth.exe
+            //     filters is at project_root/filters (4 levels up)
+            let mut dir = exe_dir.to_path_buf();
+            for _ in 0..5 {
+                let filters_dir = dir.join("filters");
+                if filters_dir.exists() {
+                    return Ok(filters_dir.to_string_lossy().to_string());
+                }
+                if let Some(parent) = dir.parent() {
+                    dir = parent.to_path_buf();
+                } else {
+                    break;
                 }
             }
         }
     }
 
-    // Final fallback: current working directory
+    // 3. Current working directory
     if let Ok(cwd) = std::env::current_dir() {
         let filters_dir = cwd.join("filters");
         if filters_dir.exists() {

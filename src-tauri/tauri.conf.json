@@ -33,10 +33,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "../EDSDK/**",
-      "../filters/*"
-    ],
+    "resources": {
+      "../EDSDK/**/*": "EDSDK/",
+      "../filters/*": "filters/",
+      "../node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe": "ffmpeg.exe"
+    },
     "windows": {
       "nsis": {
         "installMode": "both",
