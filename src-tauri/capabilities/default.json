@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "shell:allow-execute",
+    "shell:allow-open",
+    "shell:allow-spawn",
+    "fs:default",
+    "fs:read-all",
+    "fs:write-all",
+    "fs:scope",
+    "dialog:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api-booth.boniolabs.com/**" },
+        { "url": "https://sgp1.digitaloceanspaces.com/**" },
+        { "url": "https://**" }
+      ]
+    }
+  ]
+}
