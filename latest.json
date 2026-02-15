@@ -1,11 +1,11 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "notes": "Initial release",
   "pub_date": "2026-02-15T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNGJLWGJubGFMeTVIM005bkhxd2hvam5SLzJxcW1wbkNjdnNSUUdYR25ZL0VPcmVhYjdUUkRBRFVBY1pwejU2SWVWWTFZM2RTL040OG5OeTQ2L3YxNnFrQnhCd1V0emdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcxMTc0MTI0CWZpbGU6Qm9uaW8gQm9vdGhfMC4xLjBfeDY0LXNldHVwLmV4ZQpxTEV0a2xoYlo5b2ZRWXF6dFVrQVJzUkZ3WjVKZkdaN2ttUVBldGRKYW53TTBzcE94b0paYTJzZnRXT0dKQU1TZ3dhb3pvNFc3Vlc4NWt1eFhTbGlCQT09Cg==",
-      "url": "https://github.com/mannyphattana/bonio-booth-new-rust/releases/download/v0.3.0/Bonio.Booth_0.3.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNGJLWGJubGFMeTVIM005bkhxd2hvam5SLzJxcW1wbkNjdnNSUUdYR25ZL0VPcmVhYjdUUkRBRFVBY1pwejU2SWVWWTFZM2RTL040OG5OeTQ2L3YxNnFrQnhCd1V0emdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzcxMTc0MTI0CWZpbGU6Qm9uaW8gQm9vdGhfMC40LjBfeDY0LXNldHVwLmV4ZQpxTEV0a2xoYlo5b2ZRWXF6dFVrQVJzUkZ3WjVKZkdaN2ttUVBldGRKYW53TTBzcE94b0paYTJzZnRXT0dKQU1TZ3dhb3pvNFc3Vlc4NWt1eFhTbGlCQT09Cg==",
+      "url": "https://github.com/mannyphattana/bonio-booth-new-rust/releases/download/v0.4.0/Bonio.Booth_0.4.0_x64-setup.exe"
     }
   }
 }
