@@ -3,6 +3,20 @@ use image::GenericImageView;
 use std::fs;
 use std::path::Path;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Create a Command that hides the console window on Windows
+fn hidden_command(program: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 /// Get the FFmpeg binary path
 /// Checks: 1) next to exe (production) 2) node_modules/@ffmpeg-installer (dev) 3) system PATH
 fn get_ffmpeg_path() -> String {
@@ -71,7 +85,7 @@ pub async fn ensure_ffmpeg() -> Result<bool, String> {
         return Ok(true);
     }
     // Check system PATH
-    match std::process::Command::new("ffmpeg").arg("-version").output() {
+    match hidden_command("ffmpeg").arg("-version").output() {
         Ok(output) => Ok(output.status.success()),
         Err(_) => Ok(false),
     }
@@ -84,7 +98,7 @@ pub async fn check_ffmpeg_available() -> Result<bool, String> {
     if path != "ffmpeg" {
         return Ok(true);
     }
-    match std::process::Command::new("ffmpeg").arg("-version").output() {
+    match hidden_command("ffmpeg").arg("-version").output() {
         Ok(output) => Ok(output.status.success()),
         Err(_) => Ok(false),
     }
@@ -130,7 +144,7 @@ pub async fn create_looped_video(
 
     // Use ffmpeg to loop video 3 times (3s * 3 = 9s)
     let ffmpeg = get_ffmpeg_path();
-    let status = std::process::Command::new(&ffmpeg)
+    let status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
             "-stream_loop",
@@ -181,7 +195,7 @@ pub async fn apply_lut_to_video(
     let lut_filter = format!("lut3d={}", lut_filename);
 
     let ffmpeg = get_ffmpeg_path();
-    let status = std::process::Command::new(&ffmpeg)
+    let status = hidden_command(&ffmpeg)
         .current_dir(&temp_dir)
         .args(&[
             "-y",
@@ -220,7 +234,7 @@ pub async fn convert_video_to_mp4(
     let output_path = temp_dir.join(&output_filename);
 
     let ffmpeg = get_ffmpeg_path();
-    let status = std::process::Command::new(&ffmpeg)
+    let status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
             "-i",
@@ -259,7 +273,7 @@ pub async fn process_frame_video(
     // Step 1: Loop to 9 seconds
     let ffmpeg = get_ffmpeg_path();
     let looped_path = temp_dir.join("looped_temp.mp4");
-    let loop_status = std::process::Command::new(&ffmpeg)
+    let loop_status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
             "-stream_loop", "2",
@@ -286,7 +300,7 @@ pub async fn process_frame_video(
         let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
         let lut_filter = format!("lut3d={}", lut_filename);
 
-        let filter_status = std::process::Command::new(&ffmpeg)
+        let filter_status = hidden_command(&ffmpeg)
             .current_dir(&temp_dir)
             .args(&[
                 "-y",
@@ -475,7 +489,7 @@ pub async fn compose_frame_video(
 
     println!("[compose_frame_video] running ffmpeg with {} args", final_args.len());
 
-    let status = std::process::Command::new(&get_ffmpeg_path())
+    let status = hidden_command(&get_ffmpeg_path())
         .current_dir(&temp_dir)
         .args(&final_args)
         .output()

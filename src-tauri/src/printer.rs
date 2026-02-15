@@ -2,6 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use tauri::Manager;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Create a Command that hides the console window on Windows
+fn hidden_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PrinterInfo {
     pub name: String,
@@ -45,7 +59,7 @@ pub async fn list_dslr_cameras() -> Result<Vec<DslrCameraInfo>, String> {
         if ($devices.Count -eq 0) { "[]" } else { $devices | ConvertTo-Json }
     "#;
 
-    let output = Command::new("powershell")
+    let output = hidden_command("powershell")
         .args(&["-NoProfile", "-Command", ps_cmd])
         .output()
         .map_err(|e| format!("Failed to list DSLR cameras: {}", e))?;
@@ -79,7 +93,7 @@ pub async fn list_dslr_cameras() -> Result<Vec<DslrCameraInfo>, String> {
 
 #[tauri::command]
 pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
-    let output = Command::new("powershell")
+    let output = hidden_command("powershell")
         .args(&[
             "-NoProfile",
             "-Command",
@@ -148,7 +162,7 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
         printer_name.replace('\'', "''")
     );
 
-    let output = Command::new("powershell")
+    let output = hidden_command("powershell")
         .args(&["-NoProfile", "-Command", &ps_cmd])
         .output()
         .map_err(|e| format!("Failed to check printer: {}", e))?;
@@ -243,7 +257,7 @@ pub async fn print_photo(
         vert_val = vert_val,
     );
 
-    let output = Command::new("powershell")
+    let output = hidden_command("powershell")
         .args(&["-NoProfile", "-NonInteractive", "-Command", &ps_script])
         .output()
         .map_err(|e| format!("Print failed: {}", e))?;
