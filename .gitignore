@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# EDSDK (Canon SDK - proprietary, do not commit)
+/EDSDK/

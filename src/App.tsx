@@ -17,6 +17,7 @@ import CameraConfigModal from "./components/CameraConfigModal";
 import PrinterConfigModal from "./components/PrinterConfigModal";
 import { useSSE } from "./hooks/useSSE";
 import { useDeviceCheck } from "./hooks/useDeviceCheck";
+import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import "./App.css";
 
 export interface ThemeData {
@@ -139,6 +140,9 @@ function App() {
     sendStartupReport: true,
     onMaintenanceNeeded: handleMaintenanceNeeded,
   });
+
+  // Auto-update check every 5 minutes
+  useAutoUpdate({ enabled: isVerified });
 
   const handleMaintenanceResolved = useCallback(() => {
     setShowMaintenance(false);
