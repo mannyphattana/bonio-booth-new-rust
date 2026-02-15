@@ -64,7 +64,7 @@ export default function FrameSelection({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "20px 0",
+        padding: "160px 0",
       }}
     >
       <button className="back-button" onClick={handleBack}>
@@ -109,15 +109,11 @@ export default function FrameSelection({ theme }: Props) {
                 onClick={() => handleSelectFrame(frame)}
                 style={{
                   flexShrink: 0,
-                  width: 100,
-                  height: 140,
-                //   borderRadius: 12,
-                //   overflow: "hidden",
+                  height: 160,
                   border:
                     selectedFrame?._id === frame._id
                       ? `3px solid ${theme.primaryColor}`
-                      : "3px solid transparent",
-                //   background: "rgba(0,0,0,0.3)",
+                      : "",
                   padding: 0,
                 }}
               >
@@ -142,17 +138,16 @@ export default function FrameSelection({ theme }: Props) {
             style={{
               flex: 1,
               display: "flex",
-              alignItems: "center",
               justifyContent: "center",
-              padding: "16px 24px",
+              padding: "200px 24px",
               width: "100%",
             }}
           >
             {selectedFrame ? (
               <div
                 style={{
-                  maxWidth: "70%",
-                  maxHeight: "60vh",
+                  maxWidth: "40%",
+                  maxHeight: "40vh",
                 }}
               >
                 <img

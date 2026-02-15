@@ -159,7 +159,7 @@ export default function SlotSelection({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "20px 0",
+        padding: "160px 0px",
         overflow: "hidden",
       }}
     >
@@ -307,7 +307,7 @@ export default function SlotSelection({ theme }: Props) {
           flexWrap: "wrap",
           gap: 8,
           justifyContent: "center",
-          alignContent: "flex-start",
+          alignContent: "center",
         }}
       >
         {captures.map((cap, idx) => {

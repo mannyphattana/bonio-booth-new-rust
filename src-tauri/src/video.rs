@@ -169,8 +169,6 @@ pub async fn create_looped_video(
             "fast",
             "-crf",
             "23",
-            "-color_range",
-            "pc",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -221,8 +219,6 @@ pub async fn apply_lut_to_video(
             "fast",
             "-crf",
             "23",
-            "-color_range",
-            "pc",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -261,8 +257,6 @@ pub async fn convert_video_to_mp4(
             "23",
             "-movflags",
             "+faststart",
-            "-color_range",
-            "pc",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -298,7 +292,6 @@ pub async fn process_frame_video(
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "23",
-            "-color_range", "pc",
             &looped_path.to_string_lossy(),
         ])
         .output()
@@ -327,7 +320,6 @@ pub async fn process_frame_video(
                 "-preset", "fast",
                 "-crf", "23",
                 "-movflags", "+faststart",
-                "-color_range", "pc",
                 &output_path.to_string_lossy(),
             ])
             .output()
@@ -435,9 +427,9 @@ pub async fn compose_frame_video(
         let sw = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).round() as i64;
         let sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).round() as i64;
 
-        // Chain: scale to cover (preserve full color range) → crop to exact slot → optional LUT → format → reset pts
+        // Chain: scale to cover → crop to exact slot → optional LUT → format → reset pts
         let mut chain = format!(
-            "[{}:v]scale={}:{}:force_original_aspect_ratio=increase:in_range=pc:out_range=pc,crop={}:{}",
+            "[{}:v]scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}",
             i, sw, sh, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
@@ -502,11 +494,6 @@ pub async fn compose_frame_video(
         "-t".to_string(), "9".to_string(),
         "-an".to_string(),
         "-movflags".to_string(), "+faststart".to_string(),
-        // Preserve full color range (browser WebM uses pc/full range)
-        "-color_range".to_string(), "pc".to_string(),
-        "-colorspace".to_string(), "bt709".to_string(),
-        "-color_primaries".to_string(), "bt709".to_string(),
-        "-color_trc".to_string(), "bt709".to_string(),
         output_path.to_string_lossy().to_string(),
     ]);
 

@@ -477,7 +477,7 @@ export default function PhotoResult({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "20px 0",
+        padding: "160px 0",
       }}
     >
 

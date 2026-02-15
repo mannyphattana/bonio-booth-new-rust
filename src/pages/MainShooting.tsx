@@ -326,14 +326,24 @@ export default function MainShooting({ theme, machineData }: Props) {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+
+    // Cap photo resolution to 1920px max dimension (webcam may report higher)
+    const maxDim = 1920;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w > maxDim || h > maxDim) {
+      const ratio = Math.min(maxDim / w, maxDim / h);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+    }
+    canvas.width = w;
+    canvas.height = h;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return "";
 
-    ctx.drawImage(video, 0, 0);
-    return canvas.toDataURL("image/jpeg", 1.0);
+    ctx.drawImage(video, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.92);
   }, []);
 
   // Save video blob to temp file for FFmpeg processing
@@ -518,7 +528,7 @@ export default function MainShooting({ theme, machineData }: Props) {
       }}
     >
       {/* Title */}
-      <div style={{ textAlign: "center", marginTop: "3%", zIndex: 5 }}>
+      <div style={{ textAlign: "center", marginTop: "160px", zIndex: 5 }}>
         <h1 style={{ fontSize: "2.5rem", fontWeight: 700, color: theme.fontColor, margin: "0 0 4px" }}>
           มองกล้อง!
         </h1>
@@ -671,7 +681,7 @@ export default function MainShooting({ theme, machineData }: Props) {
       <div
         style={{
           width: "100%",
-          padding: "12px 24px 24px",
+          padding: "12px 24px 160px",
           display: "flex",
           justifyContent: "center",
           flexShrink: 0,
