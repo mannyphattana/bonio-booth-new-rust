@@ -286,7 +286,11 @@ unsafe extern "system" fn state_event_handler(
     if event == kEdsStateEvent_Shutdown {
         info!("[Canon] Camera shutdown/disconnect detected");
         if let Some(manager) = CAMERA_MANAGER.get() {
-            if let Ok(mut m) = manager.lock() {
+            // IMPORTANT: use try_lock to avoid deadlock.
+            // This callback may fire from EdsGetEvent() while CAMERA_MANAGER
+            // is held by the caller.  If we can't lock, the disconnect will
+            // be detected naturally when the next EDSDK call fails.
+            if let Ok(mut m) = manager.try_lock() {
                 if let Some(camera_ref) = m.camera_ref.take() {
                     let _ = EdsCloseSession(camera_ref);
                     EdsRelease(camera_ref);
@@ -294,6 +298,8 @@ unsafe extern "system" fn state_event_handler(
                 m.session_open = false;
                 m.event_handler_registered = false;
                 m.state_event_handler_registered = false;
+            } else {
+                warn!("[Canon] state_event_handler: could not lock manager, disconnect will be detected later");
             }
         }
     }
@@ -813,46 +819,9 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
 
         match image_data {
             Some(data) => {
-                // Resize image if larger than MAX_DIM to reduce transfer size
-                const MAX_DIM: u32 = 3000;
-                const JPEG_QUALITY: u8 = 90;
-                let original_len = data.len();
-
-                let final_data = match image::load_from_memory(&data) {
-                    Ok(img) => {
-                        let (w, h) = (img.width(), img.height());
-                        if w > MAX_DIM || h > MAX_DIM {
-                            let resized = img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Lanczos3);
-                            info!("[Canon] Resized {}x{} → {}x{}", w, h, resized.width(), resized.height());
-                            let mut buf = std::io::Cursor::new(Vec::new());
-                            if let Err(e) = resized.write_to(&mut buf, image::ImageFormat::Jpeg) {
-                                warn!("[Canon] JPEG re-encode failed ({}), using original", e);
-                                data
-                            } else {
-                                // Re-encode with specific quality
-                                let mut quality_buf = std::io::Cursor::new(Vec::new());
-                                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut quality_buf, JPEG_QUALITY);
-                                match resized.write_with_encoder(encoder) {
-                                    Ok(()) => quality_buf.into_inner(),
-                                    Err(_) => buf.into_inner(),
-                                }
-                            }
-                        } else {
-                            info!("[Canon] Image {}x{} within limit, no resize needed", w, h);
-                            data
-                        }
-                    }
-                    Err(e) => {
-                        warn!("[Canon] Failed to decode image for resize ({}), using original", e);
-                        data
-                    }
-                };
-
                 use base64::Engine;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&final_data);
-                info!("[Canon] Capture success: original {} bytes ({:.1} MB) → final {} bytes ({:.1} MB)",
-                    original_len, original_len as f64 / 1024.0 / 1024.0,
-                    final_data.len(), final_data.len() as f64 / 1024.0 / 1024.0);
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                info!("[Canon] Capture success: {} bytes ({:.1} MB)", data.len(), data.len() as f64 / 1024.0 / 1024.0);
                 Ok(CaptureResult {
                     success: true,
                     error: None,
@@ -1057,8 +1026,15 @@ pub fn canon_process_events() -> bool {
         if IS_CAPTURING.load(Ordering::SeqCst) {
             return true;
         }
-        unsafe {
-            let _ = EdsGetEvent();
+        // Use try_lock to avoid running concurrently with other EDSDK operations.
+        // If CAMERA_MANAGER is locked (e.g. by canon_get_live_view_frame),
+        // skip this cycle — events will be processed in the next cycle.
+        if let Some(manager) = CAMERA_MANAGER.get() {
+            if let Ok(_guard) = manager.try_lock() {
+                unsafe {
+                    let _ = EdsGetEvent();
+                }
+            }
         }
         true
     }
@@ -1171,7 +1147,12 @@ pub fn canon_get_live_view_frame() -> Result<Option<LiveViewFrame>, String> {
             .get()
             .ok_or("Camera manager not initialized")?;
 
-        let manager = manager.lock().map_err(|e| e.to_string())?;
+        // Use try_lock: if another invoke is already grabbing a frame,
+        // skip this cycle instead of blocking the thread pool.
+        let manager = match manager.try_lock() {
+            Ok(m) => m,
+            Err(_) => return Ok(None),
+        };
 
         let camera_ref = manager.camera_ref.ok_or("No camera connected")?;
         if !manager.session_open {
@@ -1179,6 +1160,11 @@ pub fn canon_get_live_view_frame() -> Result<Option<LiveViewFrame>, String> {
         }
 
         unsafe {
+            // Process pending SDK events while we hold the lock.
+            // This replaces the separate event-polling interval and ensures
+            // EdsGetEvent never runs concurrently with other EDSDK calls.
+            let _ = EdsGetEvent();
+
             let mut stream: EdsStreamRef = ptr::null_mut();
             let error = EdsCreateMemoryStream(0, &mut stream);
             if error != EDS_ERR_OK {

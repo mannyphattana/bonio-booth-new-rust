@@ -211,6 +211,9 @@ export default function MainShooting({ theme, machineData }: Props) {
     }
     console.log("[Canon] Camera connected OK");
 
+    // Brief delay to let camera settle after session open
+    await new Promise((r) => setTimeout(r, 300));
+
     // 3. Start live view (with retry — Canon cameras need a brief pause after session open)
     let lvOk = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -222,7 +225,9 @@ export default function MainShooting({ theme, machineData }: Props) {
       await new Promise((r) => setTimeout(r, attempt * 500));
     }
     if (!lvOk) {
-      console.error("[Canon] Cannot start live view after 3 attempts");
+      console.error("[Canon] Cannot start live view after 3 attempts — cleaning up");
+      // Cleanup so the camera isn't left in a half-open state
+      await canonCamera.cleanup();
       setCameraError("Cannot start Canon live view");
       return;
     }
