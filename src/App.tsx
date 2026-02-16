@@ -82,6 +82,15 @@ function App() {
   const [maintenanceConfig, setMaintenanceConfig] = useState<"camera" | "printer" | null>(null);
   const [lineUrl, setLineUrl] = useState<string>("");
 
+  // Restore camera type from localStorage to Rust AppState on startup
+  // Otherwise AppState defaults to "webcam" even if user configured "canon"
+  useEffect(() => {
+    const savedCameraType = localStorage.getItem("cameraType");
+    if (savedCameraType) {
+      invoke("set_camera_type", { cameraType: savedCameraType }).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     const savedMachineId = localStorage.getItem("machineId");
     if (savedMachineId) {

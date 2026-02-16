@@ -54,6 +54,7 @@ pub struct LiveViewFrame {
 static SDK_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static CAMERA_MANAGER: OnceLock<Arc<Mutex<CameraManager>>> = OnceLock::new();
 static CAPTURE_DATA: OnceLock<Arc<Mutex<CaptureData>>> = OnceLock::new();
+static IS_CAPTURING: AtomicBool = AtomicBool::new(false);
 
 struct CaptureData {
     image_data: Option<Vec<u8>>,
@@ -114,37 +115,44 @@ fn check_error(error: EdsError) -> Result<(), String> {
 
 /// Resolve EDSDK.dll path — tries multiple locations
 fn resolve_dll_path(app: &tauri::AppHandle) -> String {
+    // Helper: check both "EDSDK/Dll/EDSDK.dll" (dev) and "EDSDK/EDSDK.dll" (bundled/flat)
+    let candidates = |base: &std::path::Path| -> Option<String> {
+        // Original structure: EDSDK/Dll/EDSDK.dll
+        let dll = base.join("EDSDK").join("Dll").join("EDSDK.dll");
+        if dll.exists() {
+            return Some(dll.to_string_lossy().to_string());
+        }
+        // Flat bundled structure: EDSDK/EDSDK.dll
+        let dll = base.join("EDSDK").join("EDSDK.dll");
+        if dll.exists() {
+            return Some(dll.to_string_lossy().to_string());
+        }
+        None
+    };
+
     // 1. Resource dir (installed via NSIS)
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let dll = resource_dir.join("EDSDK").join("Dll").join("EDSDK.dll");
-        if dll.exists() {
-            return dll.to_string_lossy().to_string();
+        if let Some(path) = candidates(&resource_dir) {
+            return path;
         }
     }
 
     // 2. Relative to exe
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Same dir
-            let dll = exe_dir.join("EDSDK").join("Dll").join("EDSDK.dll");
-            if dll.exists() {
-                return dll.to_string_lossy().to_string();
+            // Same dir as exe
+            if let Some(path) = candidates(exe_dir) {
+                return path;
             }
             // _up_ (NSIS)
-            let dll = exe_dir
-                .join("_up_")
-                .join("EDSDK")
-                .join("Dll")
-                .join("EDSDK.dll");
-            if dll.exists() {
-                return dll.to_string_lossy().to_string();
+            if let Some(path) = candidates(&exe_dir.join("_up_")) {
+                return path;
             }
             // Dev mode: walk up
             let mut dir = exe_dir.to_path_buf();
             for _ in 0..5 {
-                let dll = dir.join("EDSDK").join("Dll").join("EDSDK.dll");
-                if dll.exists() {
-                    return dll.to_string_lossy().to_string();
+                if let Some(path) = candidates(&dir) {
+                    return path;
                 }
                 if let Some(parent) = dir.parent() {
                     dir = parent.to_path_buf();
@@ -157,9 +165,8 @@ fn resolve_dll_path(app: &tauri::AppHandle) -> String {
 
     // 3. CWD
     if let Ok(cwd) = std::env::current_dir() {
-        let dll = cwd.join("EDSDK").join("Dll").join("EDSDK.dll");
-        if dll.exists() {
-            return dll.to_string_lossy().to_string();
+        if let Some(path) = candidates(&cwd) {
+            return path;
         }
     }
 
@@ -664,6 +671,25 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
             });
         }
 
+        // Prevent concurrent captures
+        if IS_CAPTURING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            warn!("[Canon] Capture already in progress");
+            return Ok(CaptureResult {
+                success: false,
+                error: Some("Capture already in progress".to_string()),
+                image_data: None,
+            });
+        }
+
+        // Use a guard to ensure IS_CAPTURING is reset even on panic/early return
+        struct CaptureGuard;
+        impl Drop for CaptureGuard {
+            fn drop(&mut self) {
+                IS_CAPTURING.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = CaptureGuard;
+
         let manager = CAMERA_MANAGER
             .get()
             .ok_or("Camera manager not initialized")?;
@@ -725,10 +751,13 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
             cd.capture_error = None;
         }
 
+        info!("[Canon] Sending TakePicture command...");
+
         // Send take picture command
         let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
 
         if take_error != EDS_ERR_OK {
+            error!("[Canon] TakePicture command failed: {}", error_to_string(take_error));
             return Ok(CaptureResult {
                 success: false,
                 error: Some(format!(
@@ -740,13 +769,22 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
         }
 
         // Wait for capture (max 30s)
-        for _ in 0..1500 {
+        // Call EdsGetEvent() to pump the event loop — this is the ONLY place
+        // calling EdsGetEvent during capture (frontend pauses its event polling)
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(30);
+        let mut event_count = 0;
+
+        while start.elapsed() < timeout {
             unsafe {
                 let _ = EdsGetEvent();
             }
+            event_count += 1;
 
             if let Ok(cd) = capture_data.lock() {
                 if cd.capture_complete {
+                    info!("[Canon] Capture complete after {} events, {:.1}s",
+                        event_count, start.elapsed().as_secs_f32());
                     break;
                 }
             }
@@ -765,6 +803,7 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
         };
 
         if let Some(err) = error_msg {
+            error!("[Canon] Capture error: {}", err);
             return Ok(CaptureResult {
                 success: false,
                 error: Some(err),
@@ -774,20 +813,60 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
 
         match image_data {
             Some(data) => {
+                // Resize image if larger than MAX_DIM to reduce transfer size
+                const MAX_DIM: u32 = 3000;
+                const JPEG_QUALITY: u8 = 90;
+                let original_len = data.len();
+
+                let final_data = match image::load_from_memory(&data) {
+                    Ok(img) => {
+                        let (w, h) = (img.width(), img.height());
+                        if w > MAX_DIM || h > MAX_DIM {
+                            let resized = img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Lanczos3);
+                            info!("[Canon] Resized {}x{} → {}x{}", w, h, resized.width(), resized.height());
+                            let mut buf = std::io::Cursor::new(Vec::new());
+                            if let Err(e) = resized.write_to(&mut buf, image::ImageFormat::Jpeg) {
+                                warn!("[Canon] JPEG re-encode failed ({}), using original", e);
+                                data
+                            } else {
+                                // Re-encode with specific quality
+                                let mut quality_buf = std::io::Cursor::new(Vec::new());
+                                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut quality_buf, JPEG_QUALITY);
+                                match resized.write_with_encoder(encoder) {
+                                    Ok(()) => quality_buf.into_inner(),
+                                    Err(_) => buf.into_inner(),
+                                }
+                            }
+                        } else {
+                            info!("[Canon] Image {}x{} within limit, no resize needed", w, h);
+                            data
+                        }
+                    }
+                    Err(e) => {
+                        warn!("[Canon] Failed to decode image for resize ({}), using original", e);
+                        data
+                    }
+                };
+
                 use base64::Engine;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                info!("[Canon] Capture success: {} bytes", data.len());
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&final_data);
+                info!("[Canon] Capture success: original {} bytes ({:.1} MB) → final {} bytes ({:.1} MB)",
+                    original_len, original_len as f64 / 1024.0 / 1024.0,
+                    final_data.len(), final_data.len() as f64 / 1024.0 / 1024.0);
                 Ok(CaptureResult {
                     success: true,
                     error: None,
                     image_data: Some(b64),
                 })
             }
-            None => Ok(CaptureResult {
-                success: false,
-                error: Some("Capture timeout - no image received".to_string()),
-                image_data: None,
-            }),
+            None => {
+                error!("[Canon] Capture timeout - no image received after {:.1}s", start.elapsed().as_secs_f32());
+                Ok(CaptureResult {
+                    success: false,
+                    error: Some("Capture timeout - no image received".to_string()),
+                    image_data: None,
+                })
+            }
         }
     }
 }
@@ -974,6 +1053,10 @@ pub fn canon_process_events() -> bool {
         if !SDK_INITIALIZED.load(Ordering::SeqCst) {
             return false;
         }
+        // Skip if capture is in progress — canon_take_picture pumps events itself
+        if IS_CAPTURING.load(Ordering::SeqCst) {
+            return true;
+        }
         unsafe {
             let _ = EdsGetEvent();
         }
@@ -1077,6 +1160,11 @@ pub fn canon_get_live_view_frame() -> Result<Option<LiveViewFrame>, String> {
     {
         if !SDK_INITIALIZED.load(Ordering::SeqCst) {
             return Err("SDK not initialized".to_string());
+        }
+
+        // Skip if capture is in progress — don't compete with EdsGetEvent loop
+        if IS_CAPTURING.load(Ordering::SeqCst) {
+            return Ok(None);
         }
 
         let manager = CAMERA_MANAGER

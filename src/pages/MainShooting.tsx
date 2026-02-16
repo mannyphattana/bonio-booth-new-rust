@@ -143,6 +143,7 @@ export default function MainShooting({ theme, machineData }: Props) {
   const [phase, setPhase] = useState<"ready" | "countdown" | "flash" | "preview" | "done">("ready");
   const [isRecording, setIsRecording] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
+  const [showGetReady, setShowGetReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraType, setCameraType] = useState("webcam");
   const [cameraReady, setCameraReady] = useState(false);
@@ -191,22 +192,37 @@ export default function MainShooting({ theme, machineData }: Props) {
 
   const initCanon = async () => {
     // 1. Initialize SDK
+    console.log("[Canon] Initializing SDK...");
     const sdkOk = await canonCamera.initialize();
     if (!sdkOk) {
+      console.error("[Canon] SDK initialization failed");
       setCameraError("Canon SDK initialization failed");
       return;
     }
+    console.log("[Canon] SDK initialized OK");
 
     // 2. Connect to camera (index 0 by default)
+    console.log("[Canon] Connecting to camera...");
     const connOk = await canonCamera.connect(0);
     if (!connOk) {
+      console.error("[Canon] Cannot connect to camera");
       setCameraError("Cannot connect to Canon camera");
       return;
     }
+    console.log("[Canon] Camera connected OK");
 
-    // 3. Start live view
-    const lvOk = await canonCamera.startLiveView();
+    // 3. Start live view (with retry — Canon cameras need a brief pause after session open)
+    let lvOk = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[Canon] Starting live view (attempt ${attempt}/3)...`);
+      lvOk = await canonCamera.startLiveView();
+      if (lvOk) break;
+      // Wait before retry — camera may need time after session open
+      console.warn(`[Canon] Live view attempt ${attempt} failed, retrying in ${attempt * 500}ms...`);
+      await new Promise((r) => setTimeout(r, attempt * 500));
+    }
     if (!lvOk) {
+      console.error("[Canon] Cannot start live view after 3 attempts");
       setCameraError("Cannot start Canon live view");
       return;
     }
@@ -431,17 +447,22 @@ export default function MainShooting({ theme, machineData }: Props) {
     async (frames: string[], fps: number): Promise<{ url: string; blob: Blob | null }> => {
       if (frames.length === 0) return { url: "", blob: null };
 
+      // Cap fps at 30 to avoid excessive encoding overhead
+      const cappedFps = Math.min(fps, 30);
+
       return new Promise((resolve) => {
         const offCanvas = document.createElement("canvas");
         offCanvas.width = 1920;
         offCanvas.height = 1280;
-        const ctx = offCanvas.getContext("2d");
+        // alpha:false → opaque canvas, avoids premultiplied-alpha color shift
+        // colorSpace:'srgb' → ensures consistent sRGB color matching the source JPEGs
+        const ctx = offCanvas.getContext("2d", { alpha: false, colorSpace: "srgb" });
         if (!ctx) {
           resolve({ url: "", blob: null });
           return;
         }
 
-        const stream = offCanvas.captureStream(fps);
+        const stream = offCanvas.captureStream(cappedFps);
         const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
           ? "video/webm;codecs=vp9"
           : "video/webm";
@@ -474,7 +495,7 @@ export default function MainShooting({ theme, machineData }: Props) {
           };
           img.src = frames[frameIdx];
           frameIdx++;
-        }, 1000 / fps);
+        }, 1000 / cappedFps);
       });
     },
     []
@@ -499,102 +520,192 @@ export default function MainShooting({ theme, machineData }: Props) {
     }
   }, []);
 
-  // Start shooting sequence - no more double-firing
+  // Start shooting sequence - optimized flow matching old project
+  // Flow: Get Ready → [countdown → stopRecording → takePhoto → flash → bg video → 1.5s wait] × N
   const startShootingSequence = useCallback(async () => {
     if (sequenceRunningRef.current) return;
     sequenceRunningRef.current = true;
 
-    const doCapture = async (captureIndex: number) => {
-      if (captureIndex >= totalCaptures) {
-        setPhase("done");
-        sequenceRunningRef.current = false;
-        return;
+    // ========================================
+    // Step 1: Wait for camera to be truly ready (fresh-frame detection)
+    // Canon: wait for 2 consecutive unique frames (exposure/focus settled)
+    // Webcam: fixed 1.5s warmup delay
+    // ========================================
+    if (cameraTypeRef.current === "canon") {
+      const FRESH_FRAME_TIMEOUT = 5000; // 5 seconds max wait
+      const POLL_MS = 50;
+      let elapsed = 0;
+      let lastFingerprint = "";
+      let freshCount = 0;
+      const REQUIRED_FRESH = 2;
+
+      console.log("[Canon] Waiting for fresh frames before first capture...");
+      setShowGetReady(true);
+
+      while (elapsed < FRESH_FRAME_TIMEOUT && freshCount < REQUIRED_FRESH) {
+        const frame = canonCamera.getLatestFrame();
+        if (frame) {
+          // Fingerprint: length + last 100 chars (JPEG tail changes most)
+          const fp = `${frame.length}:${frame.slice(-100)}`;
+          if (fp !== lastFingerprint) {
+            freshCount++;
+            lastFingerprint = fp;
+            console.log(`[Canon] Fresh frame ${freshCount}/${REQUIRED_FRESH} after ${elapsed}ms`);
+          }
+        }
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        elapsed += POLL_MS;
       }
 
-      setPhase("countdown");
-      setCountdown(cameraCountdown);
+      setShowGetReady(false);
+      if (freshCount >= REQUIRED_FRESH) {
+        console.log(`[Canon] Camera ready — ${freshCount} fresh frames in ${elapsed}ms`);
+      } else {
+        console.warn(`[Canon] Fresh frame timeout after ${elapsed}ms (got ${freshCount}/${REQUIRED_FRESH}) — proceeding anyway`);
+      }
+    } else {
+      // Webcam: fixed warmup delay for exposure/white balance
+      console.log("[Webcam] Warming up camera...");
+      setShowGetReady(true);
+      await new Promise((r) => setTimeout(r, 1500));
+      setShowGetReady(false);
+    }
 
-      // Determine when to start recording: always record last 3 seconds
+    console.log("[Capture] Camera warm-up done, starting capture loop");
+
+    // ========================================
+    // Step 2: Capture loop
+    // ========================================
+    for (let i = 0; i < totalCaptures; i++) {
+      console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
+
+      // --- Countdown with video recording ---
+      setPhase("countdown");
       const recordStartAt = Math.min(cameraCountdown, 3);
 
       await new Promise<void>((resolve) => {
         let currentCount = cameraCountdown;
+        setCountdown(currentCount);
 
         // Start recording immediately if countdown <= 3
         if (cameraCountdown <= 3) {
           startRecording();
         }
 
-        const timer = setInterval(async () => {
+        const timer = setInterval(() => {
           currentCount--;
           setCountdown(currentCount);
 
-          // Start recording when we reach recordStartAt seconds remaining
-          // (for countdown > 3, start at 3 seconds left)
+          // Start recording at 3 seconds remaining (for countdown > 3)
           if (currentCount === recordStartAt && cameraCountdown > 3 && !isRecordingRef.current) {
             startRecording();
           }
 
           if (currentCount <= 0) {
             clearInterval(timer);
-
-            // Wait for video to be ready (async!)
-            const { url: videoUrl, blob: videoBlob } = await waitForVideo();
-
-            // Save video to temp file for later FFmpeg processing
-            let videoPath = "";
-            if (videoBlob) {
-              videoPath = await saveVideoToTemp(videoBlob, captureIndex);
-            }
-
-            // Take photo
-            const photoData = await takePhoto();
-
-            // Flash effect
-            setShowFlash(true);
-            setPhase("flash");
-
-            setTimeout(async () => {
-              setShowFlash(false);
-              setPhase("preview");
-
-              const newCapture: Capture = {
-                photo: photoData,
-                video: videoUrl,
-                videoPath: videoPath,
-              };
-
-              setCaptures((prev) => [...prev, newCapture]);
-              setCurrentCapture(captureIndex + 1);
-
-              // Wait then proceed to next
-              setTimeout(() => {
-                if (captureIndex + 1 >= totalCaptures) {
-                  setPhase("done");
-                  sequenceRunningRef.current = false;
-                } else {
-                  doCapture(captureIndex + 1);
-                }
-              }, 2000);
-            }, 300);
-
             resolve();
           }
         }, 1000);
       });
-    };
 
-    // Start from capture 0
-    await doCapture(0);
-  }, [totalCaptures, cameraCountdown, startRecording, waitForVideo, takePhoto, saveVideoToTemp]);
+      // --- Countdown reached 0 → capture immediately ---
+
+      // 1. Stop recording (get frames data)
+      let recordingResult: { url: string; blob: Blob | null } = { url: "", blob: null };
+      if (cameraTypeRef.current === "canon") {
+        // Canon: just stop frame recording, get raw frames
+        const recording = canonCamera.stopFrameRecording();
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        // Store frames for background processing
+        (window as any).__lastCanonFrames = recording.frames;
+      } else {
+        // Webcam: stop MediaRecorder and wait for blob
+        recordingResult = await waitForVideo();
+      }
+
+      // 2. Take photo IMMEDIATELY (no blocking video processing first!)
+      const photoData = await takePhoto();
+
+      // 3. Flash effect
+      setShowFlash(true);
+      setPhase("flash");
+      await new Promise((r) => setTimeout(r, 300));
+      setShowFlash(false);
+
+      // 4. Save video — Canon: process in BACKGROUND (non-blocking)
+      let videoUrl = "";
+      let videoPath = "";
+
+      if (cameraTypeRef.current === "canon") {
+        const frames = (window as any).__lastCanonFrames as string[] || [];
+        if (frames.length > 0) {
+          const captureIndex = i;
+          console.log(`[Canon] Creating video in background from ${frames.length} frames...`);
+
+          // Non-blocking: process video in background, update state when ready
+          createVideoFromFrames(frames, 30)
+            .then(async (result) => {
+              console.log(`[Canon] Background video ready for capture ${captureIndex + 1}`);
+              // Save to temp file
+              if (result.blob) {
+                const path = await saveVideoToTemp(result.blob, captureIndex);
+                // Update the capture in state with video data
+                setCaptures((prev) => {
+                  const updated = [...prev];
+                  if (updated[captureIndex]) {
+                    updated[captureIndex] = {
+                      ...updated[captureIndex],
+                      video: result.url,
+                      videoPath: path,
+                    };
+                  }
+                  return updated;
+                });
+              }
+            })
+            .catch((err) => {
+              console.error(`[Canon] Background video processing failed:`, err);
+            });
+        }
+        (window as any).__lastCanonFrames = null;
+      } else {
+        // Webcam: video is already ready
+        videoUrl = recordingResult.url;
+        if (recordingResult.blob) {
+          videoPath = await saveVideoToTemp(recordingResult.blob, i);
+        }
+      }
+
+      // 5. Add capture to state
+      const newCapture: Capture = {
+        photo: photoData,
+        video: videoUrl,
+        videoPath: videoPath,
+      };
+      setCaptures((prev) => [...prev, newCapture]);
+      setCurrentCapture(i + 1);
+      setPhase("preview");
+
+      console.log(`[Capture] Capture ${i + 1}/${totalCaptures} completed`);
+
+      // 6. Check if done
+      if (i + 1 >= totalCaptures) {
+        setPhase("done");
+        sequenceRunningRef.current = false;
+        break;
+      }
+
+      // 7. Wait 1.5s before next capture (camera stabilization, matching old project)
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }, [totalCaptures, cameraCountdown, startRecording, waitForVideo, takePhoto, saveVideoToTemp, createVideoFromFrames]);
 
   // Auto-start after camera is initialized (single trigger, no double-fire)
+  // No artificial delay — Get Ready screen handles the camera warm-up
   useEffect(() => {
     if (cameraReady && !cameraError) {
-      const timer = setTimeout(() => {
-        startShootingSequence();
-      }, 2000);
-      return () => clearTimeout(timer);
+      startShootingSequence();
     }
   }, [cameraReady, cameraError]);
 
@@ -753,6 +864,46 @@ export default function MainShooting({ theme, machineData }: Props) {
               }}
             >
               Waiting for Canon Live View...
+            </div>
+          )}
+
+          {/* Get Ready overlay — shown while waiting for camera to settle */}
+          {showGetReady && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.4)",
+                zIndex: 25,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 48,
+                  fontWeight: 800,
+                  color: "#fff",
+                  textShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                  marginBottom: 12,
+                }}
+              >
+                เตรียมตัว!
+              </div>
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 500,
+                  color: "rgba(255,255,255,0.8)",
+                  textShadow: "0 2px 10px rgba(0,0,0,0.4)",
+                  textTransform: "uppercase",
+                  letterSpacing: 2,
+                }}
+              >
+                GET READY
+              </div>
             </div>
           )}
 

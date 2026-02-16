@@ -236,7 +236,7 @@ pub mod dynamic {
     use std::sync::OnceLock;
     use windows::core::PCSTR;
     use windows::Win32::Foundation::HMODULE;
-    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA, SetDllDirectoryA};
 
     struct SafeModule(HMODULE);
     unsafe impl Send for SafeModule {}
@@ -244,15 +244,32 @@ pub mod dynamic {
 
     static EDSDK_MODULE: OnceLock<Option<SafeModule>> = OnceLock::new();
 
-    /// Load EDSDK.dll from the given path
+    /// Load EDSDK.dll from the given path.
+    ///
+    /// Before loading, we call `SetDllDirectoryA` to add the parent folder of
+    /// EDSDK.dll to the DLL search path. This is critical because EDSDK.dll
+    /// depends on many sibling DLLs (EdsImage.dll, DppCore.dll, etc.) that
+    /// must be found at load time.
     pub unsafe fn load_edsdk(dll_path: &str) -> Result<(), String> {
         // Check if already loaded
         if EDSDK_MODULE.get().is_some() {
             return Ok(());
         }
 
+        // Set the DLL search directory to the parent folder of EDSDK.dll
+        // so that Windows can find dependent DLLs (EdsImage.dll, etc.)
+        if let Some(parent) = std::path::Path::new(dll_path).parent() {
+            let dir_str = parent.to_string_lossy().to_string();
+            if let Ok(dir_cstr) = std::ffi::CString::new(dir_str.as_str()) {
+                let _ = SetDllDirectoryA(PCSTR::from_raw(dir_cstr.as_ptr() as *const u8));
+            }
+        }
+
         let path_cstr = std::ffi::CString::new(dll_path).map_err(|e| e.to_string())?;
         let module = LoadLibraryA(PCSTR::from_raw(path_cstr.as_ptr() as *const u8));
+
+        // Reset the DLL search directory back to default
+        let _ = SetDllDirectoryA(PCSTR::null());
 
         match module {
             Ok(handle) => {

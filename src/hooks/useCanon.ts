@@ -15,6 +15,11 @@ export interface CanonState {
  * Lifecycle: initialize → connect → openSession → startLiveView → poll frames
  * Capture:   takePicture (stops LV internally, returns base64, restarts LV)
  * Cleanup:   stopLiveView → closeSession → terminate
+ *
+ * Key differences from the old Electron project (canonCameraServiceV2.ts):
+ * - EDSDK functions run on Tauri's blocking thread pool (need to avoid concurrency)
+ * - Event polling AND live view polling MUST pause during capture
+ * - Minimum 2-second delay enforced between captures
  */
 export function useCanon() {
   const [state, setState] = useState<CanonState>({
@@ -30,23 +35,87 @@ export function useCanon() {
   const latestFrameRef = useRef<string>("");
   const isCleanedUpRef = useRef(false);
 
+  // Capture guards (matching old project's canonCameraServiceV2.ts)
+  const isCapturingRef = useRef(false);
+  const lastCaptureTimeRef = useRef(0);
+  const captureNumberRef = useRef(0);
+
   // Frame recording for video/boomerang
   const isRecordingRef = useRef(false);
   const recordedFramesRef = useRef<string[]>([]);
   const recordedTimestampsRef = useRef<number[]>([]);
 
+  // ----- Helper: start/stop LV frame polling -----
+
+  const startLiveViewPolling = useCallback(() => {
+    if (liveViewIntervalRef.current) {
+      clearInterval(liveViewIntervalRef.current);
+    }
+
+    liveViewIntervalRef.current = setInterval(async () => {
+      if (isCleanedUpRef.current || isCapturingRef.current) return;
+      try {
+        const result = await invoke<{ data: string } | null>(
+          "canon_get_live_view_frame"
+        );
+        if (result && result.data) {
+          const dataUrl = result.data.startsWith("data:")
+            ? result.data
+            : `data:image/jpeg;base64,${result.data}`;
+          latestFrameRef.current = dataUrl;
+          setState((s) => ({ ...s, liveViewFrame: dataUrl }));
+
+          // If recording, accumulate frames
+          if (isRecordingRef.current) {
+            recordedFramesRef.current.push(dataUrl);
+            recordedTimestampsRef.current.push(Date.now());
+          }
+        }
+      } catch {
+        // frame fetch failed — skip (normal during transitions)
+      }
+    }, 33); // ~30fps
+  }, []);
+
+  const stopLiveViewPolling = useCallback(() => {
+    if (liveViewIntervalRef.current) {
+      clearInterval(liveViewIntervalRef.current);
+      liveViewIntervalRef.current = null;
+    }
+  }, []);
+
+  // ----- Helper: start/stop event polling -----
+
+  const startEventPolling = useCallback(() => {
+    if (eventPollIntervalRef.current) return;
+
+    eventPollIntervalRef.current = setInterval(async () => {
+      if (isCleanedUpRef.current || isCapturingRef.current) return;
+      try {
+        await invoke("canon_process_events");
+      } catch {
+        // ignore
+      }
+    }, 100);
+  }, []);
+
+  const stopEventPolling = useCallback(() => {
+    if (eventPollIntervalRef.current) {
+      clearInterval(eventPollIntervalRef.current);
+      eventPollIntervalRef.current = null;
+    }
+  }, []);
+
   // Initialize Canon SDK
   const initialize = useCallback(async (): Promise<boolean> => {
     try {
-      const result = await invoke<{ success: boolean; error?: string }>("canon_initialize");
-      if (result.success) {
-        setState((s) => ({ ...s, initialized: true, error: "" }));
-        return true;
-      }
-      setState((s) => ({ ...s, error: result.error || "SDK init failed" }));
-      return false;
+      await invoke<boolean>("canon_initialize");
+      setState((s) => ({ ...s, initialized: true, error: "" }));
+      return true;
     } catch (err: any) {
-      setState((s) => ({ ...s, error: `SDK init error: ${err}` }));
+      const errorMsg = typeof err === "string" ? err : JSON.stringify(err);
+      console.error("[useCanon] SDK init error:", errorMsg);
+      setState((s) => ({ ...s, error: `SDK init error: ${errorMsg}` }));
       return false;
     }
   }, []);
@@ -54,19 +123,11 @@ export function useCanon() {
   // Connect to a Canon camera by index
   const connect = useCallback(async (cameraIndex = 0): Promise<boolean> => {
     try {
-      await invoke("canon_connect", { cameraIndex });
+      await invoke("canon_connect", { index: cameraIndex });
       await invoke("canon_open_session");
 
       // Start event polling (required for EDSDK to process async events)
-      if (!eventPollIntervalRef.current) {
-        eventPollIntervalRef.current = setInterval(async () => {
-          try {
-            await invoke("canon_process_events");
-          } catch {
-            // ignore event poll errors
-          }
-        }, 100);
-      }
+      startEventPolling();
 
       setState((s) => ({ ...s, connected: true, error: "" }));
       return true;
@@ -74,133 +135,130 @@ export function useCanon() {
       setState((s) => ({ ...s, error: `Connect error: ${err}` }));
       return false;
     }
-  }, []);
+  }, [startEventPolling]);
 
   // Start live view and begin frame polling
   const startLiveView = useCallback(async (): Promise<boolean> => {
     try {
       await invoke("canon_start_live_view");
-
-      // Poll live view frames at ~30fps
-      if (liveViewIntervalRef.current) {
-        clearInterval(liveViewIntervalRef.current);
-      }
-
-      liveViewIntervalRef.current = setInterval(async () => {
-        if (isCleanedUpRef.current) return;
-        try {
-          const result = await invoke<{ success: boolean; imageData?: string }>(
-            "canon_get_live_view_frame"
-          );
-          if (result.success && result.imageData) {
-            const dataUrl = result.imageData.startsWith("data:")
-              ? result.imageData
-              : `data:image/jpeg;base64,${result.imageData}`;
-            latestFrameRef.current = dataUrl;
-            setState((s) => ({ ...s, liveViewFrame: dataUrl }));
-
-            // If recording, accumulate frames
-            if (isRecordingRef.current) {
-              recordedFramesRef.current.push(dataUrl);
-              recordedTimestampsRef.current.push(Date.now());
-            }
-          }
-        } catch {
-          // frame fetch failed — skip
-        }
-      }, 33); // ~30fps
-
+      startLiveViewPolling();
       setState((s) => ({ ...s, liveViewActive: true, error: "" }));
       return true;
     } catch (err: any) {
       setState((s) => ({ ...s, error: `Live view error: ${err}` }));
       return false;
     }
-  }, []);
+  }, [startLiveViewPolling]);
 
   // Stop live view
   const stopLiveView = useCallback(async () => {
-    if (liveViewIntervalRef.current) {
-      clearInterval(liveViewIntervalRef.current);
-      liveViewIntervalRef.current = null;
-    }
+    stopLiveViewPolling();
     try {
       await invoke("canon_stop_live_view");
     } catch {
       // ignore
     }
     setState((s) => ({ ...s, liveViewActive: false }));
-  }, []);
+  }, [stopLiveViewPolling]);
 
-  // Take a picture — returns base64 JPEG data URL
-  // The backend handles: stopLV → capture → startLV
+  /**
+   * Take a picture — returns base64 JPEG data URL.
+   *
+   * Optimized flow (matching old project's canonCameraServiceV2.ts):
+   * 1. Guard: prevent concurrent captures
+   * 2. Stop live view polling + camera LV (brief stabilization)
+   * 3. Stop event polling (prevent concurrent EdsGetEvent calls)
+   * 4. Send capture command (Rust side calls EdsGetEvent in its own loop)
+   * 5. Restart event polling + live view
+   *
+   * No minimum delay enforced here — the capture loop in MainShooting
+   * manages timing between captures (1.5s like old project).
+   */
   const takePicture = useCallback(async (): Promise<string> => {
-    try {
-      // Pause live view polling during capture
-      if (liveViewIntervalRef.current) {
-        clearInterval(liveViewIntervalRef.current);
-        liveViewIntervalRef.current = null;
-      }
+    // 1. Prevent concurrent captures
+    if (isCapturingRef.current) {
+      console.warn("[useCanon] Capture already in progress, skipping");
+      return "";
+    }
 
-      // Stop live view for capture
+    captureNumberRef.current++;
+    const captureNum = captureNumberRef.current;
+    lastCaptureTimeRef.current = Date.now();
+    isCapturingRef.current = true;
+
+    console.log(`[useCanon] Starting capture #${captureNum}...`);
+
+    try {
+      // 2. Stop live view polling + camera live view
+      stopLiveViewPolling();
       try {
         await invoke("canon_stop_live_view");
+        console.log("[useCanon] Live view stopped for capture");
       } catch {
-        // ignore
+        // LV wasn't active, fine
       }
-      await new Promise((r) => setTimeout(r, 300));
+      // Brief stabilization — 50ms is enough for the sensor to settle
+      await new Promise((r) => setTimeout(r, 50));
 
-      const result = await invoke<{ success: boolean; imageData?: string; error?: string }>(
-        "canon_take_picture"
-      );
+      // 3. Stop event polling — critical!
+      //    canon_take_picture calls EdsGetEvent() internally in its loop.
+      //    Having the event poll also calling EdsGetEvent() concurrently causes
+      //    race conditions (events get consumed by the wrong thread).
+      stopEventPolling();
 
-      // Restart live view after capture
+      // 4. Take picture (Rust function blocks until image download completes)
+      const result = await invoke<{
+        success: boolean;
+        image_data?: string;
+        error?: string;
+      }>("canon_take_picture");
+
+      // 5. Restart event polling + live view
+      isCapturingRef.current = false;
+
+      // Restart event polling first
+      startEventPolling();
+
+      // Restart live view
       try {
         await invoke("canon_start_live_view");
       } catch {
         // ignore
       }
 
-      // Resume live view polling
-      await new Promise((r) => setTimeout(r, 200));
+      // Brief wait for LV to stabilize, then restart polling
+      await new Promise((r) => setTimeout(r, 50));
       if (!isCleanedUpRef.current) {
-        liveViewIntervalRef.current = setInterval(async () => {
-          if (isCleanedUpRef.current) return;
-          try {
-            const frame = await invoke<{ success: boolean; imageData?: string }>(
-              "canon_get_live_view_frame"
-            );
-            if (frame.success && frame.imageData) {
-              const dataUrl = frame.imageData.startsWith("data:")
-                ? frame.imageData
-                : `data:image/jpeg;base64,${frame.imageData}`;
-              latestFrameRef.current = dataUrl;
-              setState((s) => ({ ...s, liveViewFrame: dataUrl }));
-              if (isRecordingRef.current) {
-                recordedFramesRef.current.push(dataUrl);
-                recordedTimestampsRef.current.push(Date.now());
-              }
-            }
-          } catch {
-            // skip
-          }
-        }, 33);
+        startLiveViewPolling();
       }
 
-      if (result.success && result.imageData) {
-        const dataUrl = result.imageData.startsWith("data:")
-          ? result.imageData
-          : `data:image/jpeg;base64,${result.imageData}`;
+      if (result.success && result.image_data) {
+        const dataUrl = result.image_data.startsWith("data:")
+          ? result.image_data
+          : `data:image/jpeg;base64,${result.image_data}`;
+        console.log(`[useCanon] Capture #${captureNum} success`);
         return dataUrl;
       }
 
-      console.error("Canon capture failed:", result.error);
+      console.error(`[useCanon] Capture #${captureNum} failed:`, result.error);
       return "";
     } catch (err: any) {
-      console.error("Canon takePicture error:", err);
+      console.error(`[useCanon] Capture #${captureNum} error:`, err);
+
+      // Always try to recover — restart LV + event polling
+      isCapturingRef.current = false;
+      startEventPolling();
+      try {
+        await invoke("canon_start_live_view");
+      } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 50));
+      if (!isCleanedUpRef.current) {
+        startLiveViewPolling();
+      }
+
       return "";
     }
-  }, []);
+  }, [stopLiveViewPolling, startLiveViewPolling, stopEventPolling, startEventPolling]);
 
   // Get the latest live view frame (instant, no async)
   const getLatestFrame = useCallback((): string => {
@@ -227,31 +285,14 @@ export function useCanon() {
   const cleanup = useCallback(async () => {
     isCleanedUpRef.current = true;
     isRecordingRef.current = false;
+    isCapturingRef.current = false;
 
-    if (liveViewIntervalRef.current) {
-      clearInterval(liveViewIntervalRef.current);
-      liveViewIntervalRef.current = null;
-    }
-    if (eventPollIntervalRef.current) {
-      clearInterval(eventPollIntervalRef.current);
-      eventPollIntervalRef.current = null;
-    }
+    stopLiveViewPolling();
+    stopEventPolling();
 
-    try {
-      await invoke("canon_stop_live_view");
-    } catch {
-      // ignore
-    }
-    try {
-      await invoke("canon_close_session");
-    } catch {
-      // ignore
-    }
-    try {
-      await invoke("canon_terminate");
-    } catch {
-      // ignore
-    }
+    try { await invoke("canon_stop_live_view"); } catch { /* ignore */ }
+    try { await invoke("canon_close_session"); } catch { /* ignore */ }
+    try { await invoke("canon_terminate"); } catch { /* ignore */ }
 
     setState({
       initialized: false,
@@ -260,7 +301,7 @@ export function useCanon() {
       liveViewFrame: "",
       error: "",
     });
-  }, []);
+  }, [stopLiveViewPolling, stopEventPolling]);
 
   // Cleanup on unmount
   useEffect(() => {

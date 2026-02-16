@@ -1,3 +1,4 @@
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use tauri::Manager;
@@ -218,9 +219,15 @@ pub async fn print_photo(
     let vert_val = vertical_offset.unwrap_or(0.0);
     let horiz_val = horizontal_offset.unwrap_or(0.0);
 
-    // Load original image
-    let img = image::open(&image_path)
-        .map_err(|e| format!("Failed to open image: {}", e))?;
+    // Load original image (auto-detect format from content, not extension)
+    let img = {
+        let reader = image::io::Reader::open(&image_path)
+            .map_err(|e| format!("Failed to open image file: {}", e))?
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?;
+        reader.decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?
+    };
 
     let original_width = img.width();
     let original_height = img.height();
@@ -342,51 +349,60 @@ pub async fn print_test_photo(
     // Find test.jpg - check multiple possible locations
     let test_image_path = {
         let mut found_path: Option<String> = None;
+        let mut searched: Vec<String> = Vec::new();
 
-        // Check resource directory
+        // Helper: check a path and track it
+        let mut try_path = |p: std::path::PathBuf| -> bool {
+            let exists = p.exists();
+            searched.push(format!("{} ({})", p.to_string_lossy(), if exists { "FOUND" } else { "not found" }));
+            if exists && found_path.is_none() {
+                found_path = Some(p.to_string_lossy().to_string());
+            }
+            exists
+        };
+
+        // 1. Resource directory (Tauri bundled)
         if let Ok(resource_dir) = app.path().resource_dir() {
-            let test_path = resource_dir.join("test.jpg");
-            if test_path.exists() {
-                found_path = Some(test_path.to_string_lossy().to_string());
-            }
+            try_path(resource_dir.join("test.jpg"));
         }
 
-        // Check relative to executable
-        if found_path.is_none() {
-            if let Ok(exe_path) = std::env::current_exe() {
-                if let Some(exe_dir) = exe_path.parent() {
-                    let test_path = exe_dir.join("test.jpg");
-                    if test_path.exists() {
-                        found_path = Some(test_path.to_string_lossy().to_string());
-                    }
-                    // Dev mode: check parent directories
-                    if found_path.is_none() {
-                        if let Some(parent) = exe_dir.parent() {
-                            if let Some(gp) = parent.parent() {
-                                if let Some(ggp) = gp.parent() {
-                                    let test_path = ggp.join("public").join("test.jpg");
-                                    if test_path.exists() {
-                                        found_path = Some(test_path.to_string_lossy().to_string());
-                                    }
-                                }
-                            }
-                        }
+        // 2. Next to executable
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                try_path(exe_dir.join("test.jpg"));
+                // NSIS _up_ directory
+                try_path(exe_dir.join("_up_").join("test.jpg"));
+                // Dev mode: walk up to project root
+                let mut dir = exe_dir.to_path_buf();
+                for _ in 0..5 {
+                    if let Some(parent) = dir.parent() {
+                        dir = parent.to_path_buf();
+                        try_path(dir.join("public").join("test.jpg"));
+                        try_path(dir.join("test.jpg"));
+                    } else {
+                        break;
                     }
                 }
             }
         }
 
-        // Check CWD
-        if found_path.is_none() {
-            if let Ok(cwd) = std::env::current_dir() {
-                let test_path = cwd.join("public").join("test.jpg");
-                if test_path.exists() {
-                    found_path = Some(test_path.to_string_lossy().to_string());
-                }
-            }
+        // 3. CWD
+        if let Ok(cwd) = std::env::current_dir() {
+            try_path(cwd.join("test.jpg"));
+            try_path(cwd.join("public").join("test.jpg"));
         }
 
-        found_path.ok_or_else(|| "test.jpg not found".to_string())?
+        // Log all searched paths for debugging
+        let search_log = searched.join("\n  ");
+        if found_path.is_some() {
+            log::info!("[Printer] test.jpg search:\n  {}", search_log);
+        }
+
+        found_path.ok_or_else(|| {
+            let msg = format!("test.jpg not found. Searched paths:\n  {}", search_log);
+            error!("[Printer] {}", msg);
+            msg
+        })?
     };
 
     let frame_type = if is_landscape { "6x4" } else { "4x6" };

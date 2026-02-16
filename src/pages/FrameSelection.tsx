@@ -130,7 +130,7 @@ export default function FrameSelection({ theme }: Props) {
               flex: 1,
               display: "flex",
               justifyContent: "center",
-              padding: "200px 24px",
+              padding: "40px 24px",
               width: "100%",
             }}
           >
