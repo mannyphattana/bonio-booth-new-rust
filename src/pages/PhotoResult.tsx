@@ -351,13 +351,13 @@ export default function PhotoResult({ theme }: Props) {
           }
         }
 
-        // Load paper position config
+        // Load paper position config (per-orientation: paperConfigPortrait / paperConfigLandscape)
         let scale = 100;
         let verticalOffset = 0;
         let horizontalOffset = 0;
         try {
-          const configKey = isLandscape ? "paperConfigLandscape" : "paperConfigPortrait";
-          const saved = localStorage.getItem(configKey);
+          const key = isLandscape ? "paperConfigLandscape" : "paperConfigPortrait";
+          const saved = localStorage.getItem(key);
           if (saved) {
             const config = JSON.parse(saved);
             scale = config.scale ?? 100;
@@ -477,7 +477,7 @@ export default function PhotoResult({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "160px 0",
+        padding: "120px 0",
       }}
     >
 

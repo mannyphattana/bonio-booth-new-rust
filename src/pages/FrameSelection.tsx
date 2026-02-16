@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import HorizontalScroll from "../components/HorizontalScroll";
 
 interface Props {
   theme: ThemeData;
@@ -64,7 +65,7 @@ export default function FrameSelection({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "160px 0",
+        padding: "120px 0",
       }}
     >
       <button className="back-button" onClick={handleBack}>
@@ -92,17 +93,7 @@ export default function FrameSelection({ theme }: Props) {
       ) : (
         <>
           {/* Scrollable frame thumbnails (top section) */}
-          <div
-            style={{
-              width: "100%",
-              overflowX: "auto",
-              overflowY: "hidden",
-              padding: "0 16px",
-              display: "flex",
-              gap: 12,
-              flexShrink: 0,
-            }}
-          >
+          <HorizontalScroll padding="0 48px" arrowColor={theme.fontColor}>
             {frames.map((frame) => (
               <button
                 key={frame._id}
@@ -131,7 +122,7 @@ export default function FrameSelection({ theme }: Props) {
                 />
               </button>
             ))}
-          </div>
+          </HorizontalScroll>
 
           {/* Selected frame preview (center/bottom) */}
           <div

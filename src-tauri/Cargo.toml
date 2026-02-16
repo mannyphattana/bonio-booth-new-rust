@@ -28,7 +28,7 @@ image = "0.25"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 qrcode = "0.14"
-windows = { version = "0.58", features = ["Win32_Graphics_Printing", "Win32_Foundation", "Win32_System_Com"] }
+windows = { version = "0.58", features = ["Win32_Graphics_Printing", "Win32_Foundation", "Win32_System_Com", "Win32_System_LibraryLoader"] }
 log = "0.4"
 env_logger = "0.11"
 tauri-plugin-updater = "2.10.0"

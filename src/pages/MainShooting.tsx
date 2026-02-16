@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import { useCanon } from "../hooks/useCanon";
 
 // CropOverlay: shows SVG mask overlay to indicate the crop area based on slot dimensions
 function CropOverlay({
@@ -127,10 +128,14 @@ export default function MainShooting({ theme, machineData }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraContainerRef = useRef<HTMLDivElement>(null);
+  const canonLiveViewRef = useRef<HTMLImageElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isRecordingRef = useRef(false);
   const sequenceRunningRef = useRef(false);
+  const cameraTypeRef = useRef("webcam");
+
+  const canonCamera = useCanon();
 
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [, setCurrentCapture] = useState(0);
@@ -170,17 +175,60 @@ export default function MainShooting({ theme, machineData }: Props) {
     try {
       const type: string = await invoke("get_camera_type");
       setCameraType(type);
+      cameraTypeRef.current = type;
 
       if (type === "webcam") {
         await initWebcam();
       } else {
-        // Canon DSLR - fallback to webcam for now
-        await initWebcam();
+        // Canon DSLR
+        await initCanon();
       }
     } catch (err: any) {
       setCameraError("Camera not found. Please check connection.");
       console.error("Camera init error:", err);
     }
+  };
+
+  const initCanon = async () => {
+    // 1. Initialize SDK
+    const sdkOk = await canonCamera.initialize();
+    if (!sdkOk) {
+      setCameraError("Canon SDK initialization failed");
+      return;
+    }
+
+    // 2. Connect to camera (index 0 by default)
+    const connOk = await canonCamera.connect(0);
+    if (!connOk) {
+      setCameraError("Cannot connect to Canon camera");
+      return;
+    }
+
+    // 3. Start live view
+    const lvOk = await canonCamera.startLiveView();
+    if (!lvOk) {
+      setCameraError("Cannot start Canon live view");
+      return;
+    }
+
+    // 4. Wait for first frame (up to 3 seconds)
+    let waitTime = 0;
+    while (!canonCamera.liveViewFrame && waitTime < 3000) {
+      await new Promise((r) => setTimeout(r, 100));
+      waitTime += 100;
+    }
+
+    // 5. Set Canon dimensions (live view is typically 1920x1280)
+    setVideoDimensions({ width: 1920, height: 1280 });
+    setCameraReady(true);
+
+    // Update container dimensions
+    setTimeout(() => {
+      if (cameraContainerRef.current) {
+        const rect = cameraContainerRef.current.getBoundingClientRect();
+        setContainerDimensions({ width: rect.width, height: rect.height });
+      }
+    }, 100);
   };
 
   const initWebcam = async () => {
@@ -250,6 +298,9 @@ export default function MainShooting({ theme, machineData }: Props) {
   };
 
   const stopCamera = () => {
+    if (cameraTypeRef.current === "canon") {
+      canonCamera.cleanup();
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -257,6 +308,14 @@ export default function MainShooting({ theme, machineData }: Props) {
   };
 
   const startRecording = useCallback(() => {
+    if (cameraTypeRef.current === "canon") {
+      // Canon: accumulate live view frames for video
+      canonCamera.startFrameRecording();
+      setIsRecording(true);
+      return;
+    }
+
+    // Webcam: use MediaRecorder
     if (!streamRef.current || isRecordingRef.current) return;
 
     const chunks: Blob[] = [];
@@ -292,6 +351,20 @@ export default function MainShooting({ theme, machineData }: Props) {
 
   // Wait for video blob to be ready after stopping recording
   const waitForVideo = useCallback((): Promise<{ url: string; blob: Blob | null }> => {
+    if (cameraTypeRef.current === "canon") {
+      // Canon: stop frame recording and create video from accumulated frames
+      const recording = canonCamera.stopFrameRecording();
+      isRecordingRef.current = false;
+      setIsRecording(false);
+
+      if (recording.frames.length > 0) {
+        // Create video from recorded JPEG frames using canvas + MediaRecorder
+        return createVideoFromFrames(recording.frames, 30).then((result) => result);
+      }
+      return Promise.resolve({ url: "", blob: null });
+    }
+
+    // Webcam: standard MediaRecorder flow
     return new Promise((resolve) => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
@@ -321,7 +394,14 @@ export default function MainShooting({ theme, machineData }: Props) {
     });
   }, []);
 
-  const takePhoto = useCallback((): string => {
+  const takePhoto = useCallback(async (): Promise<string> => {
+    if (cameraTypeRef.current === "canon") {
+      // Canon: use EDSDK shutter capture
+      const photo = await canonCamera.takePicture();
+      return photo;
+    }
+
+    // Webcam: grab frame from video element
     if (!videoRef.current || !canvasRef.current) return "";
 
     const video = videoRef.current;
@@ -345,6 +425,60 @@ export default function MainShooting({ theme, machineData }: Props) {
     ctx.drawImage(video, 0, 0, w, h);
     return canvas.toDataURL("image/jpeg", 0.92);
   }, []);
+
+  // Create video from JPEG frames (used for Canon frame recording)
+  const createVideoFromFrames = useCallback(
+    async (frames: string[], fps: number): Promise<{ url: string; blob: Blob | null }> => {
+      if (frames.length === 0) return { url: "", blob: null };
+
+      return new Promise((resolve) => {
+        const offCanvas = document.createElement("canvas");
+        offCanvas.width = 1920;
+        offCanvas.height = 1280;
+        const ctx = offCanvas.getContext("2d");
+        if (!ctx) {
+          resolve({ url: "", blob: null });
+          return;
+        }
+
+        const stream = offCanvas.captureStream(fps);
+        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ? "video/webm;codecs=vp9"
+          : "video/webm";
+        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          resolve({ url, blob });
+        };
+
+        recorder.start();
+
+        let frameIdx = 0;
+        const interval = setInterval(() => {
+          if (frameIdx >= frames.length) {
+            clearInterval(interval);
+            recorder.stop();
+            return;
+          }
+
+          const img = new Image();
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0, offCanvas.width, offCanvas.height);
+          };
+          img.src = frames[frameIdx];
+          frameIdx++;
+        }, 1000 / fps);
+      });
+    },
+    []
+  );
 
   // Save video blob to temp file for FFmpeg processing
   const saveVideoToTemp = useCallback(async (blob: Blob, index: number): Promise<string> => {
@@ -414,7 +548,7 @@ export default function MainShooting({ theme, machineData }: Props) {
             }
 
             // Take photo
-            const photoData = takePhoto();
+            const photoData = await takePhoto();
 
             // Flash effect
             setShowFlash(true);
@@ -480,12 +614,22 @@ export default function MainShooting({ theme, machineData }: Props) {
 
   // Camera disconnect check
   useEffect(() => {
-    const checkCamera = setInterval(() => {
+    const checkCamera = setInterval(async () => {
       if (cameraType === "webcam" && streamRef.current) {
         const videoTrack = streamRef.current.getVideoTracks()[0];
         if (!videoTrack || videoTrack.readyState === "ended") {
           setCameraError("กล้องถูกถอดออก กรุณาเชื่อมต่อใหม่");
           setTimeout(() => navigate("/"), 3000);
+        }
+      } else if (cameraType === "canon") {
+        try {
+          const connected = await invoke<boolean>("canon_is_connected");
+          if (!connected) {
+            setCameraError("กล้อง Canon ถูกถอดออก กรุณาเชื่อมต่อใหม่");
+            setTimeout(() => navigate("/"), 3000);
+          }
+        } catch {
+          // ignore check errors
         }
       }
     }, 2000);
@@ -562,19 +706,55 @@ export default function MainShooting({ theme, machineData }: Props) {
             aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
           }}
         >
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              transform: "scaleX(-1)", // Mirror
-              borderRadius: 20,
-            }}
-          />
+          {/* Webcam: <video> element */}
+          {cameraType === "webcam" && (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: "scaleX(-1)", // Mirror
+                borderRadius: 20,
+              }}
+            />
+          )}
+
+          {/* Canon: <img> element with live view frames */}
+          {cameraType === "canon" && canonCamera.liveViewFrame && (
+            <img
+              ref={canonLiveViewRef}
+              src={canonCamera.liveViewFrame}
+              alt="Canon Live View"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: "scaleX(-1)", // Mirror
+                borderRadius: 20,
+              }}
+            />
+          )}
+
+          {/* Canon waiting state */}
+          {cameraType === "canon" && !canonCamera.liveViewFrame && cameraReady && (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "rgba(255,255,255,0.6)",
+                fontSize: 18,
+              }}
+            >
+              Waiting for Canon Live View...
+            </div>
+          )}
 
           {/* CropOverlay guideline */}
           {currentSlot && cameraReady && (

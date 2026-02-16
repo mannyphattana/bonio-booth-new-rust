@@ -15,7 +15,9 @@ import MachineVerify from "./pages/MachineVerify";
 import Maintenance from "./pages/Maintenance";
 import CameraConfigModal from "./components/CameraConfigModal";
 import PrinterConfigModal from "./components/PrinterConfigModal";
+import ShutdownOverlay from "./components/ShutdownOverlay";
 import { useSSE } from "./hooks/useSSE";
+import { useShutdown } from "./hooks/useShutdown";
 import { useDeviceCheck } from "./hooks/useDeviceCheck";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import "./App.css";
@@ -118,16 +120,18 @@ function App() {
   };
 
   // SSE connection - receive events from backend
+  // Shutdown events are handled directly in Rust backend (shutdown manager)
   const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
     enabled: isVerified && !!machineData?._id,
-    onShutdown: (countdownMinutes) => {
-      console.log(`[SSE] Shutdown scheduled in ${countdownMinutes} minutes`);
-      // Could show a countdown overlay here
-    },
     onMaintenanceMode: (enabled) => {
       setShowMaintenance(enabled);
     },
+  });
+
+  // Shutdown countdown — listens to Rust shutdown manager events
+  const { state: shutdownState, notifyActivity: notifyShutdownActivity } = useShutdown({
+    enabled: isVerified,
   });
 
   // Device monitoring - centralized, runs when verified
@@ -171,6 +175,12 @@ function App() {
 
   return (
     <Router>
+      {/* Shutdown countdown overlay */}
+      <ShutdownOverlay
+        state={shutdownState}
+        onActivity={notifyShutdownActivity}
+      />
+
       {/* Maintenance overlay - blocks all usage when devices disconnected */}
       {showMaintenance && (
         <>

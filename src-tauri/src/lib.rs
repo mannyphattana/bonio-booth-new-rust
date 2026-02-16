@@ -1,12 +1,17 @@
 mod api;
+mod canon;
+#[cfg(target_os = "windows")]
+mod edsdk_sys;
 mod image_processing;
 mod printer;
+mod shutdown;
 mod sse;
 mod video;
 
 use api::AppState;
+use shutdown::ShutdownManager;
 use sse::SseClient;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 /// Connect SSE from the Rust backend. The backend maintains the persistent
@@ -155,17 +160,24 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .manage(AppState::new())
+        .manage(Mutex::new(SseClient::new()))
+        .manage(Arc::new(ShutdownManager::new()))
         .setup(|app| {
-            // Open DevTools in debug/release for troubleshooting
+            // Open DevTools in debug builds
             #[cfg(debug_assertions)]
             {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
+
+            // Give shutdown manager an app handle
+            if let Some(shutdown_mgr) = app.try_state::<Arc<ShutdownManager>>() {
+                shutdown_mgr.set_app_handle(app.handle().clone());
+            }
+
             Ok(())
         })
-        .manage(AppState::new())
-        .manage(Mutex::new(SseClient::new()))
         .invoke_handler(tauri::generate_handler![
             // App utilities
             get_app_dir,
@@ -174,6 +186,34 @@ pub fn run() {
             exit_app,
             connect_sse,
             destroy_sse,
+            // Shutdown management
+            shutdown::get_shutdown_state,
+            shutdown::start_shutdown_countdown,
+            shutdown::cancel_shutdown,
+            shutdown::notify_user_activity,
+            shutdown::start_transaction,
+            shutdown::end_transaction,
+            shutdown::execute_shutdown_now,
+            // Canon EDSDK
+            canon::canon_initialize,
+            canon::canon_terminate,
+            canon::canon_is_initialized,
+            canon::canon_get_camera_list,
+            canon::canon_connect,
+            canon::canon_open_session,
+            canon::canon_close_session,
+            canon::canon_is_connected,
+            canon::canon_take_picture,
+            canon::canon_send_shutter,
+            canon::canon_get_capture_result,
+            canon::canon_process_events,
+            canon::canon_start_live_view,
+            canon::canon_stop_live_view,
+            canon::canon_get_live_view_frame,
+            canon::canon_get_property,
+            canon::canon_set_property,
+            canon::canon_get_battery_level,
+            canon::canon_get_available_shots,
             // API commands
             api::verify_machine,
             api::init_machine,

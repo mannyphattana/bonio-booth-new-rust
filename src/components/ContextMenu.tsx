@@ -49,6 +49,7 @@ export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClos
     localStorage.removeItem("selectedCameraLabel");
     localStorage.removeItem("selectedCameraName");
     localStorage.removeItem("selectedPrinter");
+    localStorage.removeItem("paperConfig");
     localStorage.removeItem("paperConfigPortrait");
     localStorage.removeItem("paperConfigLandscape");
 

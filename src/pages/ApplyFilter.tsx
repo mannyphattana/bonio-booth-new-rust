@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, Capture } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { FILTERS, type FilterConfig } from "../config/filters";
+import HorizontalScroll from "../components/HorizontalScroll";
 
 interface Props {
   theme: ThemeData;
@@ -180,7 +181,7 @@ export default function ApplyFilter({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "160px 0",
+        padding: "120px 0",
       }}
     >
 
@@ -203,16 +204,7 @@ export default function ApplyFilter({ theme }: Props) {
       </p>
 
       {/* Filter thumbnails (scrollable) */}
-      <div
-        style={{
-          width: "100%",
-          overflowX: "auto",
-          padding: "0 16px",
-          display: "flex",
-          gap: 12,
-          flexShrink: 0,
-        }}
-      >
+      <HorizontalScroll padding="0 48px" arrowColor={theme.fontColor}>
         {FILTERS.map((filter) => (
           <button
             key={filter.id}
@@ -275,7 +267,7 @@ export default function ApplyFilter({ theme }: Props) {
             </span>
           </button>
         ))}
-      </div>
+      </HorizontalScroll>
 
       {/* Preview image (center) */}
       <div

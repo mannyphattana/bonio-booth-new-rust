@@ -159,7 +159,7 @@ export default function SlotSelection({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "160px 0px",
+        padding: "120px 0px",
         overflow: "hidden",
       }}
     >

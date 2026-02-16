@@ -4,7 +4,7 @@ use reqwest::Client;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Notify;
 
 const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
@@ -260,6 +260,7 @@ impl SseClient {
 }
 
 /// Process a parsed SSE event and emit it to the frontend via Tauri events.
+/// Also handles shutdown/maintenance events directly from the Rust backend.
 fn process_sse_event(app: &AppHandle, event_type: &str, data: &str) {
     // Try to parse data as JSON
     let parsed: Value = match serde_json::from_str(data) {
@@ -292,9 +293,50 @@ fn process_sse_event(app: &AppHandle, event_type: &str, data: &str) {
         }),
     );
 
-    // Handle close-app directly from backend
-    if event_name == "close-app" {
-        info!("[SSE] Close-app event received, exiting...");
-        app.exit(0);
+    // Handle shutdown events directly in Rust backend
+    match event_name.as_str() {
+        "shutdown-scheduled" | "shutdown" => {
+            // Extract countdown minutes from data
+            let minutes = parsed
+                .get("countdownMinutes")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+            let reason = parsed
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("manual");
+
+            info!(
+                "[SSE] Shutdown scheduled: {:?} minutes, reason: {}",
+                minutes, reason
+            );
+
+            // Trigger shutdown manager
+            if let Some(shutdown_mgr) = app.try_state::<std::sync::Arc<crate::shutdown::ShutdownManager>>() {
+                let reason = if reason == "timer" {
+                    crate::shutdown::ShutdownReason::Timer
+                } else {
+                    crate::shutdown::ShutdownReason::Manual
+                };
+                shutdown_mgr.start_countdown(minutes, reason);
+            }
+        }
+        "shutdown-immediate" => {
+            info!("[SSE] Immediate shutdown received");
+            if let Some(shutdown_mgr) = app.try_state::<std::sync::Arc<crate::shutdown::ShutdownManager>>() {
+                shutdown_mgr.execute_immediate_shutdown();
+            }
+        }
+        "cancel-shutdown" | "shutdown-cancel" => {
+            info!("[SSE] Shutdown cancelled");
+            if let Some(shutdown_mgr) = app.try_state::<std::sync::Arc<crate::shutdown::ShutdownManager>>() {
+                shutdown_mgr.cancel_shutdown();
+            }
+        }
+        "close-app" => {
+            info!("[SSE] Close-app event received, exiting...");
+            app.exit(0);
+        }
+        _ => {}
     }
 }

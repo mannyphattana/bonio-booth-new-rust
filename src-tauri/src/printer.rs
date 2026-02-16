@@ -214,59 +214,119 @@ pub async fn print_photo(
     horizontal_offset: Option<f64>,
     is_landscape: Option<bool>,
 ) -> Result<bool, String> {
-    // For DNP QW-410:
-    // 2x6 -> need to print on 4x6 and cut
-    // 4x6 or 6x4 -> no cut needed
-
-    let _needs_cut = frame_type == "2x6";
     let scale_val = scale.unwrap_or(100.0);
     let vert_val = vertical_offset.unwrap_or(0.0);
     let horiz_val = horizontal_offset.unwrap_or(0.0);
-    let landscape = is_landscape.unwrap_or(false);
 
-    // Build PowerShell script with position adjustments
-    let ps_script = format!(
-        r#"
-        Add-Type -AssemblyName System.Drawing
-        $img = [System.Drawing.Image]::FromFile('{image_path}')
-        $pd = New-Object System.Drawing.Printing.PrintDocument
-        $pd.PrinterSettings.PrinterName = '{printer_name}'
-        $pd.DefaultPageSettings.Landscape = ${landscape_str}
-        $pd.DocumentName = 'BonioBooth_{frame_type}'
-        $pd.add_PrintPage({{
-            param($sender, $e)
-            $bounds = $e.MarginBounds
-            $scale = {scale_val} / 100.0
-            $newW = $bounds.Width * $scale
-            $newH = $bounds.Height * $scale
-            $offsetX = ($bounds.Width - $newW) / 2 + $bounds.X + ({horiz_val})
-            $offsetY = ($bounds.Height - $newH) / 2 + $bounds.Y + ({vert_val})
-            $destRect = New-Object System.Drawing.RectangleF($offsetX, $offsetY, $newW, $newH)
-            $e.Graphics.DrawImage($img, $destRect)
-        }})
-        $pd.Print()
-        $img.Dispose()
-        $pd.Dispose()
-        "#,
-        image_path = image_path.replace('\\', "\\\\").replace('\'', "''"),
-        printer_name = printer_name.replace('\'', "''"),
-        landscape_str = if landscape { "true" } else { "false" },
-        frame_type = frame_type,
-        scale_val = scale_val,
-        horiz_val = horiz_val,
-        vert_val = vert_val,
-    );
+    // Load original image
+    let img = image::open(&image_path)
+        .map_err(|e| format!("Failed to open image: {}", e))?;
 
-    let output = hidden_command("powershell")
-        .args(&["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-        .output()
-        .map_err(|e| format!("Print failed: {}", e))?;
+    let original_width = img.width();
+    let original_height = img.height();
 
-    if output.status.success() {
-        Ok(true)
+    // Apply scale: zoom content within fixed output dimensions
+    let scale_factor = scale_val / 100.0;
+
+    let scaled_w = (original_width as f64 * scale_factor) as u32;
+    let scaled_h = (original_height as f64 * scale_factor) as u32;
+
+    let processed: image::DynamicImage = if scale_factor < 1.0 {
+        // Zoom out: shrink content, white padding
+        let resized = img.resize_exact(scaled_w, scaled_h, image::imageops::FilterType::Lanczos3);
+
+        let pad_h = ((original_width as f64 - scaled_w as f64) / 2.0) as i64;
+        let pad_v = ((original_height as f64 - scaled_h as f64) / 2.0) as i64;
+
+        let mut canvas = image::RgbaImage::from_pixel(
+            original_width,
+            original_height,
+            image::Rgba([255, 255, 255, 255]),
+        );
+
+        let paste_x = (pad_h as f64 + horiz_val).max(0.0) as u32;
+        let paste_y = (pad_v as f64 + vert_val).max(0.0) as u32;
+
+        image::imageops::overlay(&mut canvas, &resized.to_rgba8(), paste_x as i64, paste_y as i64);
+        image::DynamicImage::ImageRgba8(canvas)
+    } else if scale_factor > 1.0 {
+        // Zoom in: enlarge content, crop center
+        let resized = img.resize_exact(scaled_w, scaled_h, image::imageops::FilterType::Lanczos3);
+
+        let crop_x = (((scaled_w as f64 - original_width as f64) / 2.0) - horiz_val)
+            .max(0.0)
+            .min((scaled_w - original_width) as f64) as u32;
+        let crop_y = (((scaled_h as f64 - original_height as f64) / 2.0) - vert_val)
+            .max(0.0)
+            .min((scaled_h - original_height) as f64) as u32;
+
+        resized.crop_imm(crop_x, crop_y, original_width, original_height)
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Print error: {}", stderr))
+        // scale = 100%, just apply offset if any
+        if horiz_val.abs() > 0.1 || vert_val.abs() > 0.1 {
+            let mut canvas = image::RgbaImage::from_pixel(
+                original_width,
+                original_height,
+                image::Rgba([255, 255, 255, 255]),
+            );
+            image::imageops::overlay(
+                &mut canvas,
+                &img.to_rgba8(),
+                horiz_val as i64,
+                vert_val as i64,
+            );
+            image::DynamicImage::ImageRgba8(canvas)
+        } else {
+            img
+        }
+    };
+
+    // Save processed image to temp PNG
+    let temp_dir = std::env::temp_dir().join("bonio-booth");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    let temp_path = temp_dir.join("print-processed.png");
+    processed
+        .save(&temp_path)
+        .map_err(|e| format!("Failed to save processed image: {}", e))?;
+
+    let temp_path_str = temp_path.to_string_lossy().to_string();
+
+    // Print using rundll32 shimgvw.dll (same as old project)
+    // This delegates all fit-to-page logic to the printer driver
+    #[cfg(target_os = "windows")]
+    {
+        let output = hidden_command("rundll32")
+            .args(&[
+                "shimgvw.dll,ImageView_PrintTo",
+                "/pt",
+                &temp_path_str,
+                &printer_name,
+            ])
+            .output()
+            .map_err(|e| format!("Print failed: {}", e))?;
+
+        if output.status.success() {
+            Ok(true)
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("Print error: {}", stderr))
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = hidden_command("lpr")
+            .args(&["-P", &printer_name, &temp_path_str])
+            .output()
+            .map_err(|e| format!("Print failed: {}", e))?;
+
+        if output.status.success() {
+            Ok(true)
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("Print error: {}", stderr))
+        }
     }
 }
 
