@@ -1017,7 +1017,7 @@ export default function MainShooting({ theme, machineData }: Props) {
       <div
         style={{
           width: "100%",
-          padding: "12px 24px 160px",
+          padding: "12px 24px 60px",
           display: "flex",
           justifyContent: "center",
           flexShrink: 0,
@@ -1030,6 +1030,9 @@ export default function MainShooting({ theme, machineData }: Props) {
             gap: 12,
             overflowX: "auto",
             padding: "4px 8px",
+            justifyContent: "center",
+            width: "100%",
+            maxWidth: 600,
           }}
         >
           {Array.from({ length: totalCaptures }).map((_, idx) => {
@@ -1039,7 +1042,8 @@ export default function MainShooting({ theme, machineData }: Props) {
               <div
                 key={idx}
                 style={{
-                  width: 70,
+                  width: `calc(25% - 10px)`,
+                  maxWidth: 100,
                   aspectRatio,
                   borderRadius: 8,
                   overflow: "hidden",

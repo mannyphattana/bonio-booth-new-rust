@@ -144,15 +144,32 @@ export default function PaperPositionModal({ open, onClose }: Props) {
               <span className="config-slider-value">{currentConfig.scale}%</span>
             </div>
             <p className="config-slider-desc">ขยายรูปให้เต็มกระดาษ (50% - 150%)</p>
-            <input
-              type="range"
-              min={50}
-              max={150}
-              step={1}
-              value={currentConfig.scale}
-              onChange={(e) => updateValue("scale", Number(e.target.value))}
-              className="config-slider"
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                className="config-pm-btn"
+                onClick={() => updateValue("scale", Math.max(50, currentConfig.scale - 1))}
+                style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                −
+              </button>
+              <input
+                type="range"
+                min={50}
+                max={150}
+                step={1}
+                value={currentConfig.scale}
+                onChange={(e) => updateValue("scale", Number(e.target.value))}
+                className="config-slider"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="config-pm-btn"
+                onClick={() => updateValue("scale", Math.min(150, currentConfig.scale + 1))}
+                style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                +
+              </button>
+            </div>
             <div className="config-slider-labels">
               <span>50%</span>
               <span>100%</span>
@@ -169,15 +186,32 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             <p className="config-slider-desc">
               ค่าลบ = ขยับขึ้นบน • ค่าบวก = ขยับลงล่าง (-100 ถึง 100)
             </p>
-            <input
-              type="range"
-              min={-100}
-              max={100}
-              step={1}
-              value={currentConfig.vertical}
-              onChange={(e) => updateValue("vertical", Number(e.target.value))}
-              className="config-slider"
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                className="config-pm-btn"
+                onClick={() => updateValue("vertical", Math.max(-100, currentConfig.vertical - 1))}
+                style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                −
+              </button>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                step={1}
+                value={currentConfig.vertical}
+                onChange={(e) => updateValue("vertical", Number(e.target.value))}
+                className="config-slider"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="config-pm-btn"
+                onClick={() => updateValue("vertical", Math.min(100, currentConfig.vertical + 1))}
+                style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                +
+              </button>
+            </div>
             <div className="config-slider-labels">
               <span>-100 (↑)</span>
               <span>0</span>
@@ -194,15 +228,32 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             <p className="config-slider-desc">
               ค่าลบ = ขยับไปซ้าย • ค่าบวก = ขยับไปขวา (-100 ถึง 100)
             </p>
-            <input
-              type="range"
-              min={-100}
-              max={100}
-              step={1}
-              value={currentConfig.horizontal}
-              onChange={(e) => updateValue("horizontal", Number(e.target.value))}
-              className="config-slider"
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                className="config-pm-btn"
+                onClick={() => updateValue("horizontal", Math.max(-100, currentConfig.horizontal - 1))}
+                style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                −
+              </button>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                step={1}
+                value={currentConfig.horizontal}
+                onChange={(e) => updateValue("horizontal", Number(e.target.value))}
+                className="config-slider"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="config-pm-btn"
+                onClick={() => updateValue("horizontal", Math.min(100, currentConfig.horizontal + 1))}
+                style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+              >
+                +
+              </button>
+            </div>
             <div className="config-slider-labels">
               <span>-100 (←)</span>
               <span>0</span>

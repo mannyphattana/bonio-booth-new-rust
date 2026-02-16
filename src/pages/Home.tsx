@@ -37,8 +37,6 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
       {/* Touch anywhere to start overlay */}
       <div
         style={{
-          position: "absolute",
-          bottom: 80,
           textAlign: "center",
           animation: "pulse 2s ease-in-out infinite",
         }}
@@ -81,6 +79,62 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
       >
         {machineData.machineName}
       </div>
+
+      {/* Footer section with Terms & Help buttons */}
+      <footer
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          width: "100%",
+          display: "flex",
+          justifyContent: "space-around",
+          alignItems: "center",
+          flex: "0 0 30%",
+          height: "30%",
+          cursor: "default",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => navigate("/terms-and-services")}
+          style={{
+            background: theme.textButtonColor || "rgba(255,255,255,0.15)",
+            border: "none",
+            color: theme.textPrimaryColor || theme.fontColor,
+            cursor: "pointer",
+            boxShadow: "none",
+            padding: "0.5rem 2rem",
+            fontSize: "x-large",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "0.5rem" }}>
+            <p style={{ margin: 0 }}>ข้อตกลงการให้บริการ</p>
+            <p style={{ margin: 0, fontSize: "1.2rem" }}>Terms & Conditions</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate("/get-help")}
+          style={{
+            background: theme.textButtonColor || "rgba(255,255,255,0.15)",
+            border: "none",
+            color: theme.textPrimaryColor || theme.fontColor,
+            cursor: "pointer",
+            boxShadow: "none",
+            padding: "0.5rem 2rem",
+            fontSize: "x-large",
+            borderRadius: 8,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "0.5rem" }}>
+            <p style={{ margin: 0 }}>ขอความช่วยเหลือ</p>
+            <p style={{ margin: 0, fontSize: "1.2rem" }}>Need Help?</p>
+          </div>
+        </button>
+      </footer>
 
       {/* Context Menu */}
       <ContextMenu

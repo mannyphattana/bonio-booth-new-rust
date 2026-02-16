@@ -21,6 +21,7 @@ export default function PaymentQR({ theme }: Props) {
   const [paymentTransactionId, setPaymentTransactionId] = useState<string>("");
   const [timeLeft, setTimeLeft] = useState(300);
   const [error, setError] = useState("");
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useIdleTimeout();
@@ -144,6 +145,17 @@ export default function PaymentQR({ theme }: Props) {
     navigate("/payment-selection", { state });
   };
 
+  const handleCancelClick = () => {
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancel = () => {
+    setIsCancelModalOpen(false);
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+    navigate("/payment-selection", { state });
+  };
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -166,92 +178,128 @@ export default function PaymentQR({ theme }: Props) {
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          justifyContent: "center",
           gap: 24,
-          padding: 24,
+          padding: "0 40px",
+          flex: 1,
         }}
       >
-        <h1 style={{ color: theme.fontColor, fontSize: 24 }}>
-          สแกน QR Code เพื่อชำระเงิน
-        </h1>
-        <p style={{ color: theme.fontColor, opacity: 0.8, fontSize: 16 }}>
-          SCAN QR CODE TO PAY
-        </p>
-
-        {/* Price display */}
-        <div
-          style={{
-            background: "rgba(0,0,0,0.4)",
-            padding: "12px 32px",
-            borderRadius: 12,
-            fontSize: 28,
-            fontWeight: 700,
-            color: theme.fontColor,
-          }}
-        >
-          {state.totalPrice || 0} ฿
+        {/* Title */}
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <h1 style={{ color: theme.fontColor, fontSize: "3rem", fontWeight: 600, margin: "0 0 8px 0" }}>
+            สแกนจ่ายได้เลย!
+          </h1>
+          <p style={{ color: theme.fontColor, fontSize: "1.2rem", fontWeight: 500, margin: 0, letterSpacing: 0.5, textTransform: "uppercase", opacity: 0.8 }}>
+            SCAN TO PAY!
+          </p>
         </div>
 
         {/* QR Code Display */}
-        <div
-          style={{
-            width: 280,
-            height: 280,
-            borderRadius: 16,
-            background: "#fff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-            filter: status === "TIMEOUT" ? "blur(8px)" : "none",
-          }}
-        >
-          {status === "CREATING" ? (
-            <div style={{ color: "#333", fontSize: 16 }}>
-              กำลังสร้าง QR Code...
+        <div style={{ marginBottom: 20 }}>
+          {status === "CREATING" && (
+            <div style={{ position: "relative", width: 280, height: 280, display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <div className="payment-spinner-ring" style={{ position: "absolute", width: "100%", height: "100%", border: "4px solid transparent", borderTopColor: theme.primaryColor, borderRadius: "50%", animationDelay: "0s" }} />
+              <div className="payment-spinner-ring" style={{ position: "absolute", width: "80%", height: "80%", border: "4px solid transparent", borderTopColor: theme.primaryColor, borderRadius: "50%", animationDelay: "-0.4s", animationDuration: "1s" }} />
+              <div className="payment-spinner-ring" style={{ position: "absolute", width: "60%", height: "60%", border: "4px solid transparent", borderTopColor: theme.primaryColor, borderRadius: "50%", animationDelay: "-0.8s", animationDuration: "0.8s" }} />
             </div>
-          ) : qrCodeUrl ? (
-            <img
-              src={qrCodeUrl}
-              alt="QR Code"
-              style={{ width: "90%", height: "90%", objectFit: "contain" }}
-            />
-          ) : (
-            <div style={{ color: "#333", fontSize: 16 }}>QR Code</div>
+          )}
+
+          {error && status === "ERROR" && (
+            <div style={{ textAlign: "center", padding: 20, color: theme.textButtonColor, background: theme.primaryColor, borderRadius: 8, border: "2px solid white", width: 280, height: 280, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <p style={{ margin: "0 0 15px 0", fontSize: "1.1rem", fontWeight: 500 }}>{error}</p>
+              <button onClick={() => { setError(""); setStatus("CREATING"); }} style={{ padding: "10px 20px", color: theme.textButtonColor, background: theme.primaryColor, border: "none", borderRadius: 5, cursor: "pointer", fontSize: "1.5rem", fontWeight: 500 }}>
+                Retry
+              </button>
+            </div>
+          )}
+
+          {status === "SUCCESS" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, width: 240, height: 240, padding: 20 }}>
+              <svg width="120" height="120" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" fill="#2ecc71" />
+                <path d="M8 12l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <p style={{ color: "#2ecc71", fontSize: 20, fontWeight: 600 }}>ชำระเงินสำเร็จ!</p>
+            </div>
+          )}
+
+          {status !== "CREATING" && status !== "ERROR" && status !== "SUCCESS" && qrCodeUrl && (
+            <div
+              style={{
+                padding: 20,
+                background: "white",
+                borderRadius: 8,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                filter: status === "TIMEOUT" ? "blur(8px)" : "none",
+                transition: "filter 0.5s ease-in-out",
+              }}
+            >
+              <img
+                src={qrCodeUrl}
+                alt="QR Code"
+                style={{ width: 240, height: 240, display: "block", borderRadius: 4 }}
+              />
+            </div>
           )}
         </div>
 
-        {/* Timer */}
-        {status === "PENDING" && (
-          <div
-            style={{
-              fontSize: 20,
-              color: timeLeft < 60 ? "#e94560" : "#fff",
-              fontWeight: 600,
-            }}
-          >
-            ⏱ {formatTime(timeLeft)}
+        {/* Price Display */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 24px", borderRadius: 12 }}>
+          <span style={{ fontSize: "3rem", fontWeight: 600, color: theme.fontColor }}>{state.totalPrice || 0}</span>
+          <span style={{ fontSize: "3rem", marginLeft: 10, color: theme.fontColor }}>THB</span>
+        </div>
+
+        {/* Timer circle */}
+        {status !== "SUCCESS" && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 16 }}>
+            <div
+              style={{
+                width: 100,
+                height: 100,
+                border: `3px solid ${theme.primaryColor}`,
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "white",
+                marginBottom: 16,
+              }}
+            >
+              <span style={{ fontSize: "1.5rem", fontWeight: 600, color: theme.primaryColor }}>
+                {status === "TIMEOUT" ? "Timeout" : formatTime(timeLeft)}
+              </span>
+            </div>
+            <p style={{ fontSize: "1.5rem", fontWeight: 500, color: theme.fontColor, margin: 0, textAlign: "center" }}>
+              กรุณาชำระเงินภายในเวลาที่กำหนด
+            </p>
+            <p style={{ fontSize: "1.2rem", fontWeight: 500, color: theme.fontColor, margin: 0, opacity: 0.8, textAlign: "center" }}>
+              Please complete your payment within the time limit.
+            </p>
           </div>
         )}
 
-        {/* Status messages */}
-        {status === "SUCCESS" && (
-          <div
+        {/* Cancel button */}
+        {status !== "SUCCESS" && (
+          <button
+            onClick={handleCancelClick}
             style={{
-              background: "rgba(46,204,113,0.2)",
-              border: "2px solid #2ecc71",
-              padding: "16px 32px",
-              borderRadius: 12,
-              color: "#2ecc71",
-              fontSize: 20,
-              fontWeight: 700,
+              color: "red",
+              backgroundColor: "white",
+              border: "2px solid red",
+              fontSize: "1.5rem",
+              marginTop: 24,
+              padding: "12px 40px",
+              borderRadius: 8,
+              cursor: "pointer",
+              boxShadow: "none",
             }}
           >
-            ✅ ชำระเงินสำเร็จ!
-          </div>
+            Cancel Payment
+          </button>
         )}
 
         {status === "TIMEOUT" && (
-          <div style={{ textAlign: "center" }}>
+          <div style={{ textAlign: "center", marginTop: 16 }}>
             <p style={{ color: "#e94560", fontSize: 18, marginBottom: 12 }}>
               หมดเวลาการชำระเงิน
             </p>
@@ -267,11 +315,88 @@ export default function PaymentQR({ theme }: Props) {
             </button>
           </div>
         )}
-
-        {error && status === "ERROR" && (
-          <p style={{ color: "#e94560", fontSize: 16 }}>{error}</p>
-        )}
       </div>
+
+      {/* Cancel Confirmation Modal */}
+      {isCancelModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setIsCancelModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "white",
+              borderRadius: 20,
+              padding: 40,
+              maxWidth: 500,
+              width: "90%",
+              textAlign: "center",
+              boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+            }}
+          >
+            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600, color: "#333" }}>
+              ต้องการยกเลิกการชำระเงิน?
+            </p>
+            <p style={{ margin: "8px 0 24px", fontSize: "1rem", color: "#666" }}>
+              Are you sure you want to cancel the payment?
+            </p>
+            <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>
+              <button
+                onClick={() => setIsCancelModalOpen(false)}
+                style={{
+                  padding: "14px 40px",
+                  borderRadius: 12,
+                  fontSize: "1.2rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  background: "#f3f4f6",
+                  color: "#4b5563",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmCancel}
+                style={{
+                  padding: "14px 40px",
+                  borderRadius: 12,
+                  fontSize: "1.2rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  background: "#e74c3c",
+                  color: "#fff",
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .payment-spinner-ring {
+          animation: paymentSpin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+        }
+        @keyframes paymentSpin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

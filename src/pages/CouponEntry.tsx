@@ -153,56 +153,62 @@ export default function CouponEntry({ theme }: Props) {
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 20,
-          padding: 24,
+          justifyContent: "center",
+          gap: "10%",
+          padding: 20,
           width: "100%",
-          maxWidth: 600,
+          flex: 1,
+          overflow: "hidden",
         }}
       >
-        <h1 style={{ color: theme.fontColor, fontSize: 24 }}>
-          ใส่โค้ดคูปอง
-        </h1>
-        <p style={{ color: theme.fontColor, opacity: 0.8 }}>ENTER COUPON CODE</p>
-
-        {/* Code display */}
-        <div
-          style={{
-            width: "100%",
-            padding: "20px 24px",
-            borderRadius: 16,
-            background: "rgba(0,0,0,0.4)",
-            border: error
-              ? "2px solid #e94560"
-              : "2px solid rgba(255,255,255,0.2)",
-            textAlign: "center",
-            fontSize: 32,
-            fontWeight: 700,
-            letterSpacing: 4,
-            color: "#fff",
-            minHeight: 70,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          {code || (
-            <span style={{ color: "#555", fontSize: 20, letterSpacing: 1 }}>
-              COUPON CODE
-            </span>
-          )}
+        {/* Title */}
+        <div style={{ textAlign: "center", marginTop: 20 }}>
+          <h1 style={{ color: theme.fontColor, fontSize: "3rem", fontWeight: 700, margin: "0 0 8px 0", lineHeight: 1.2 }}>
+            ใช้คูปองส่วนลด
+          </h1>
+          <p style={{ color: theme.fontColor, fontSize: "1.5rem", fontWeight: 500, margin: 0, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            USE DISCOUNT COUPON
+          </p>
         </div>
 
-        {error && (
-          <p style={{ color: "#e94560", fontSize: 14 }}>{error}</p>
-        )}
+        {/* Code display */}
+        <div style={{ width: "90%", display: "flex", justifyContent: "center", margin: "20px 0" }}>
+          <div
+            style={{
+              width: "90%",
+              minHeight: 80,
+              padding: 20,
+              background: "#f5f5f5",
+              borderRadius: 16,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.5rem",
+              fontWeight: 700,
+              color: "#2c2c2c",
+              letterSpacing: 2,
+              border: error ? "2px solid #e74c3c" : "2px solid #e8e8e8",
+              wordBreak: "break-all",
+              textAlign: "center",
+            }}
+          >
+            {code || (
+              <span style={{ color: "#999", fontWeight: 400 }}>
+                Enter coupon code
+              </span>
+            )}
+          </div>
+        </div>
 
-        {/* On-screen keyboard */}
+        {/* QWERTY Keyboard */}
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: 8,
+            gap: 12,
             width: "100%",
+            maxWidth: 900,
+            margin: "20px 0",
           }}
         >
           {KEYBOARD_ROWS.map((row, rowIdx) => (
@@ -211,101 +217,194 @@ export default function CouponEntry({ theme }: Props) {
               style={{
                 display: "flex",
                 justifyContent: "center",
-                gap: 6,
+                gap: 8,
+                flexWrap: "wrap",
               }}
             >
-              {row.map((key) => (
-                <button
-                  key={key}
-                  onClick={() => handleKeyPress(key)}
-                  style={{
-                    width: 48,
-                    height: 52,
-                    borderRadius: 8,
-                    background: "rgba(255,255,255,0.15)",
-                    color: "#fff",
-                    fontSize: 18,
-                    fontWeight: 600,
-                    border: "1px solid rgba(255,255,255,0.1)",
-                  }}
-                >
-                  {key}
-                </button>
-              ))}
+              {rowIdx === 3
+                ? // Row 4 (ZXCVBNM): add invisible spacers for centering like old app
+                  ["", ...row, ""].map((key, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => key && handleKeyPress(key)}
+                      style={{
+                        minWidth: 30,
+                        height: 70,
+                        borderRadius: 12,
+                        border: "2px solid #e8e8e8",
+                        background: "#ffffff",
+                        color: "#2c2c2c",
+                        fontSize: 20,
+                        fontWeight: 600,
+                        cursor: key ? "pointer" : "default",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 12px",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                        flex: 1,
+                        margin: "0 4px",
+                        visibility: key ? "visible" : "hidden",
+                      }}
+                    >
+                      {key}
+                    </button>
+                  ))
+                : row.map((key) => (
+                    <button
+                      key={key}
+                      onClick={() => handleKeyPress(key)}
+                      style={{
+                        minWidth: 30,
+                        height: 70,
+                        borderRadius: 12,
+                        border: "2px solid #e8e8e8",
+                        background: "#ffffff",
+                        color: "#2c2c2c",
+                        fontSize: 20,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 12px",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                        flex: 1,
+                        margin: "0 4px",
+                      }}
+                    >
+                      {key}
+                    </button>
+                  ))}
             </div>
           ))}
 
-          {/* Bottom row: Clear, Space, Backspace */}
+          {/* Bottom row: Delete + Confirm (both wide) */}
           <div
             style={{
               display: "flex",
               justifyContent: "center",
               gap: 8,
-              marginTop: 4,
+              flexWrap: "wrap",
             }}
           >
             <button
-              onClick={handleClear}
-              style={{
-                padding: "12px 24px",
-                borderRadius: 8,
-                background: "rgba(233,69,96,0.3)",
-                color: "#e94560",
-                fontSize: 14,
-                fontWeight: 600,
-                border: "1px solid rgba(233,69,96,0.3)",
-              }}
-            >
-              CLEAR
-            </button>
-            <button
-              onClick={() => handleKeyPress("-")}
-              style={{
-                padding: "12px 48px",
-                borderRadius: 8,
-                background: "rgba(255,255,255,0.1)",
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
-            >
-              —
-            </button>
-            <button
               onClick={handleBackspace}
               style={{
-                padding: "12px 24px",
-                borderRadius: 8,
-                background: "rgba(255,255,255,0.15)",
-                color: "#fff",
-                fontSize: 14,
+                flex: 2,
+                minWidth: 120,
+                height: 70,
+                borderRadius: 12,
+                border: "2px solid #e8e8e8",
+                background: "#ffffff",
+                color: "#2c2c2c",
+                fontSize: 20,
                 fontWeight: 600,
-                border: "1px solid rgba(255,255,255,0.1)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0 12px",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                margin: "0 4px",
               }}
             >
-              ⌫ DELETE
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={loading || !code.trim()}
+              style={{
+                flex: 2,
+                minWidth: 120,
+                height: 70,
+                borderRadius: 12,
+                border: "2px solid #e8e8e8",
+                background: loading || !code.trim() ? "#cccccc" : "#ffffff",
+                color: loading || !code.trim() ? "#999" : "#2c2c2c",
+                fontSize: 20,
+                fontWeight: 600,
+                cursor: loading || !code.trim() ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0 12px",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                margin: "0 4px",
+                opacity: loading || !code.trim() ? 0.5 : 1,
+              }}
+            >
+              {loading ? "Validating..." : "Confirm"}
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Submit button */}
-        <button
-          className="primary-button"
-          onClick={handleSubmit}
-          disabled={loading || !code.trim()}
+      {/* Error Modal */}
+      {error && (
+        <div
+          onClick={() => setError("")}
           style={{
-            background:
-              loading || !code.trim() ? "#444" : theme.primaryColor,
-            color: theme.textButtonColor,
-            width: "100%",
-            marginTop: 8,
-            fontSize: 20,
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
           }}
         >
-          {loading ? "กำลังตรวจสอบ..." : "ยืนยัน / CONFIRM"}
-        </button>
-      </div>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "white",
+              borderRadius: 20,
+              padding: 40,
+              maxWidth: 500,
+              width: "90%",
+              boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+              textAlign: "center",
+            }}
+          >
+            <p style={{ fontSize: "1.5rem", color: "red", marginInline: "auto", lineHeight: 1.5 }}>
+              {error}
+            </p>
+            <button
+              onClick={() => setError("")}
+              style={{
+                padding: "12px 40px",
+                fontSize: 20,
+                fontWeight: 600,
+                color: "white",
+                background: "linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)",
+                border: "none",
+                borderRadius: 50,
+                cursor: "pointer",
+                boxShadow: "0 4px 12px rgba(231,76,60,0.3)",
+                marginTop: 16,
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

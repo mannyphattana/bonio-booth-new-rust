@@ -171,14 +171,12 @@ export default function Maintenance({ onResolved, onOpenConfig, lineUrl, backgro
               </span>
             </div>
             <div style={styles.deviceDetail}>{deviceStatus.cameraName}</div>
-            {!deviceStatus.cameraOk && !checking && (
-              <button
-                style={styles.configButton}
-                onClick={() => onOpenConfig("camera")}
-              >
-                ตั้งค่ากล้องใหม่
-              </button>
-            )}
+            <button
+              style={styles.configButton}
+              onClick={() => onOpenConfig("camera")}
+            >
+              ตั้งค่ากล้องใหม่
+            </button>
           </div>
 
           {/* Printer status */}
@@ -201,14 +199,12 @@ export default function Maintenance({ onResolved, onOpenConfig, lineUrl, backgro
               </span>
             </div>
             <div style={styles.deviceDetail}>{deviceStatus.printerName}</div>
-            {!deviceStatus.printerOk && !checking && (
-              <button
-                style={styles.configButton}
-                onClick={() => onOpenConfig("printer")}
-              >
-                ตั้งค่าเครื่องปริ้นใหม่
-              </button>
-            )}
+            <button
+              style={styles.configButton}
+              onClick={() => onOpenConfig("printer")}
+            >
+              ตั้งค่าเครื่องปริ้นใหม่
+            </button>
           </div>
         </div>
 
