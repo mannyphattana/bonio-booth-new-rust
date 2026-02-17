@@ -243,6 +243,77 @@ export function useCanon() {
     return { frames, timestamps };
   }, []);
 
+  // ===== EDSDK Movie Recording (real camera video) =====
+
+  /**
+   * Start real movie recording on the camera via EDSDK.
+   * The camera records to its SD card at 1080p 30fps.
+   * Live view polling is paused during recording (EDSDK is single-threaded).
+   */
+  const startMovieRecording = useCallback(async (): Promise<boolean> => {
+    try {
+      stopLiveViewPolling();
+      console.log("[useCanon] Starting movie recording...");
+      await invoke("canon_start_movie_record");
+      // Resume live view polling so preview remains visible during recording
+      if (!isCleanedUpRef.current) {
+        startLiveViewPolling();
+      }
+      console.log("[useCanon] Movie recording started");
+      return true;
+    } catch (err: any) {
+      console.error("[useCanon] startMovieRecording error:", err);
+      // Try to resume live view even on error
+      if (!isCleanedUpRef.current) {
+        startLiveViewPolling();
+      }
+      return false;
+    }
+  }, [stopLiveViewPolling, startLiveViewPolling]);
+
+  /**
+   * Stop movie recording, wait for the camera to finalize and download the file.
+   * Returns the local path to the downloaded MP4/MOV file on success, or "" on failure.
+   * This is a blocking call — the camera needs to write and transfer the movie file.
+   */
+  const stopMovieRecording = useCallback(async (): Promise<string> => {
+    try {
+      stopLiveViewPolling();
+      console.log("[useCanon] Stopping movie recording...");
+      const moviePath: string = await invoke("canon_stop_movie_record");
+      console.log("[useCanon] Movie file downloaded:", moviePath);
+      // Restart live view + polling
+      try {
+        await invoke("canon_start_live_view");
+      } catch { /* ignore */ }
+      if (!isCleanedUpRef.current) {
+        startLiveViewPolling();
+      }
+      return moviePath;
+    } catch (err: any) {
+      console.error("[useCanon] stopMovieRecording error:", err);
+      // Try to recover
+      try {
+        await invoke("canon_start_live_view");
+      } catch { /* ignore */ }
+      if (!isCleanedUpRef.current) {
+        startLiveViewPolling();
+      }
+      return "";
+    }
+  }, [stopLiveViewPolling, startLiveViewPolling]);
+
+  /**
+   * Check if camera is currently recording a movie
+   */
+  const isMovieRecording = useCallback(async (): Promise<boolean> => {
+    try {
+      return await invoke<boolean>("canon_is_movie_recording");
+    } catch {
+      return false;
+    }
+  }, []);
+
   // Full cleanup
   const cleanup = useCallback(async () => {
     isCleanedUpRef.current = true;
@@ -286,6 +357,9 @@ export function useCanon() {
     getLatestFrame,
     startFrameRecording,
     stopFrameRecording,
+    startMovieRecording,
+    stopMovieRecording,
+    isMovieRecording,
     cleanup,
   };
 }

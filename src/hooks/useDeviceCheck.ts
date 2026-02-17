@@ -90,7 +90,11 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
       try {
         const printers: any[] = await invoke("get_printers");
         availablePrinterNames = printers.map((p: any) => p.name);
-        printerConnected = printers.some((p: any) => p.name === savedPrinter);
+        // Check both name AND is_online — Get-Printer returns installed printers
+        // even when physically unplugged, but WorkOffline flag changes to true
+        printerConnected = printers.some(
+          (p: any) => p.name === savedPrinter && p.is_online,
+        );
       } catch {
         printerConnected = false;
       }

@@ -114,7 +114,8 @@ pub async fn check_ffmpeg_available() -> Result<bool, String> {
     }
 }
 
-/// Save a video blob (base64-encoded) to a temp file
+/// Save a video blob (base64-encoded) to a temp file, then trim to exactly 3 seconds
+/// to ensure all slots have identical video duration for clean looping.
 #[tauri::command]
 pub async fn save_temp_video(
     video_data_base64: String,
@@ -123,6 +124,7 @@ pub async fn save_temp_video(
     let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
+    let raw_path = temp_dir.join(format!("raw_{}", &filename));
     let file_path = temp_dir.join(&filename);
 
     let clean = if video_data_base64.contains(",") {
@@ -135,7 +137,32 @@ pub async fn save_temp_video(
         .decode(clean)
         .map_err(|e| format!("Decode error: {}", e))?;
 
-    fs::write(&file_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
+    fs::write(&raw_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
+
+    // Trim to exactly 3 seconds using FFmpeg to guarantee consistent duration
+    let ffmpeg = get_ffmpeg_path();
+    let trim_status = hidden_command(&ffmpeg)
+        .args(&[
+            "-y",
+            "-i", &raw_path.to_string_lossy(),
+            "-t", "3",
+            "-c", "copy",
+            &file_path.to_string_lossy(),
+        ])
+        .output();
+
+    match trim_status {
+        Ok(output) if output.status.success() => {
+            // Trimmed successfully — remove raw file
+            let _ = fs::remove_file(&raw_path);
+            println!("[save_temp_video] trimmed to 3s: {}", file_path.display());
+        }
+        _ => {
+            // FFmpeg trim failed — fall back to raw file
+            println!("[save_temp_video] trim failed, using raw file");
+            let _ = fs::rename(&raw_path, &file_path);
+        }
+    }
 
     Ok(file_path.to_string_lossy().to_string())
 }
@@ -280,13 +307,13 @@ pub async fn process_frame_video(
     let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
-    // Step 1: Loop to 9 seconds
+    // Step 1: Loop to 9 seconds (infinite loop + trim to handle videos that aren't exactly 3s)
     let ffmpeg = get_ffmpeg_path();
     let looped_path = temp_dir.join("looped_temp.mp4");
     let loop_status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
-            "-stream_loop", "2",
+            "-stream_loop", "-1",
             "-i", &video_path,
             "-t", "9",
             "-c:v", "libx264",
@@ -409,10 +436,12 @@ pub async fn compose_frame_video(
     // Build FFmpeg arguments
     let mut final_args: Vec<String> = vec!["-y".to_string()];
 
-    // Add video inputs with -stream_loop 2 (raw 3s → 9s)
+    // Add video inputs with -stream_loop -1 (infinite loop).
+    // Each video's filter chain includes trim=duration=9 to guarantee exactly 9s,
+    // regardless of whether the raw recording was 2.5s or 3.5s.
     for i in 0..num_videos {
         final_args.extend(vec![
-            "-stream_loop".to_string(), "2".to_string(),
+            "-stream_loop".to_string(), "-1".to_string(),
             "-i".to_string(), video_paths[i].clone(),
         ]);
     }
@@ -427,15 +456,16 @@ pub async fn compose_frame_video(
         let sw = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).round() as i64;
         let sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).round() as i64;
 
-        // Chain: scale to cover → crop to exact slot → optional LUT → format → reset pts
+        // Chain: trim to exactly 9s → reset pts → scale to cover → crop to exact slot → optional LUT → format
+        // trim=duration=9 ensures all slots have identical duration (input may vary due to frame-based recording)
         let mut chain = format!(
-            "[{}:v]scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}",
+            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}",
             i, sw, sh, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));
         }
-        chain.push_str(&format!(",format=yuv420p,setpts=PTS-STARTPTS[v{}]", i));
+        chain.push_str(&format!(",format=yuv420p[v{}]", i));
         filter_parts.push(chain);
     }
 

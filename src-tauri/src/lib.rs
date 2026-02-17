@@ -239,6 +239,9 @@ pub fn run() {
             canon::canon_set_property,
             canon::canon_get_battery_level,
             canon::canon_get_available_shots,
+            canon::canon_start_movie_record,
+            canon::canon_stop_movie_record,
+            canon::canon_is_movie_recording,
             // API commands
             api::verify_machine,
             api::init_machine,

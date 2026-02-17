@@ -186,7 +186,8 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             <p className="config-slider-desc">
               ค่าลบ = ขยับขึ้นบน • ค่าบวก = ขยับลงล่าง (-100 ถึง 100)
             </p>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "8px 0" }}>
+              <span style={{ fontSize: 11, opacity: 0.5 }}>-100 (↑)</span>
               <button
                 className="config-pm-btn"
                 onClick={() => updateValue("vertical", Math.max(-100, currentConfig.vertical - 1))}
@@ -194,16 +195,22 @@ export default function PaperPositionModal({ open, onClose }: Props) {
               >
                 −
               </button>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={currentConfig.vertical}
-                onChange={(e) => updateValue("vertical", Number(e.target.value))}
-                className="config-slider"
-                style={{ flex: 1 }}
-              />
+              <div style={{ height: 160, width: 36, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={currentConfig.vertical}
+                  onChange={(e) => updateValue("vertical", Number(e.target.value))}
+                  className="config-slider"
+                  style={{
+                    width: 160,
+                    transform: "rotate(-270deg)",
+                    transformOrigin: "center center",
+                  }}
+                />
+              </div>
               <button
                 className="config-pm-btn"
                 onClick={() => updateValue("vertical", Math.min(100, currentConfig.vertical + 1))}
@@ -211,11 +218,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
               >
                 +
               </button>
-            </div>
-            <div className="config-slider-labels">
-              <span>-100 (↑)</span>
-              <span>0</span>
-              <span>+100 (↓)</span>
+              <span style={{ fontSize: 11, opacity: 0.5 }}>+100 (↓)</span>
             </div>
           </div>
 

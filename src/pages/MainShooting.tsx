@@ -330,9 +330,19 @@ export default function MainShooting({ theme, machineData }: Props) {
 
   const startRecording = useCallback(() => {
     if (cameraTypeRef.current === "canon") {
-      // Canon: accumulate live view frames for video
-      canonCamera.startFrameRecording();
-      setIsRecording(true);
+      // Canon: use EDSDK movie recording (real 1080p 30fps video from camera)
+      canonCamera.startMovieRecording().then((ok) => {
+        if (ok) {
+          setIsRecording(true);
+          console.log("[Canon] Movie recording started via EDSDK");
+        } else {
+          // Fallback: accumulate live view frames
+          console.warn("[Canon] Movie recording failed, falling back to frame capture");
+          canonCamera.startFrameRecording();
+          setIsRecording(true);
+          (window as any).__canonMovieFallback = true;
+        }
+      });
       return;
     }
 
@@ -380,7 +390,7 @@ export default function MainShooting({ theme, machineData }: Props) {
 
       if (recording.frames.length > 0) {
         // Create video from recorded JPEG frames using canvas + MediaRecorder
-        return createVideoFromFrames(recording.frames, 30).then((result) => result);
+        return createVideoFromFrames(recording.frames).then((result) => result);
       }
       return Promise.resolve({ url: "", blob: null });
     }
@@ -448,12 +458,17 @@ export default function MainShooting({ theme, machineData }: Props) {
   }, []);
 
   // Create video from JPEG frames (used for Canon frame recording)
+  // Dynamically calculates fps so the output is always exactly `targetDurationSec` (default 3s).
+  // e.g. 60 frames → 20fps × 3s, 45 frames → 15fps × 3s, 20 frames → 6.67fps × 3s
+  // This guarantees every slot has identical video duration for clean looping.
   const createVideoFromFrames = useCallback(
-    async (frames: string[], fps: number): Promise<{ url: string; blob: Blob | null }> => {
+    async (frames: string[], targetDurationSec: number = 3): Promise<{ url: string; blob: Blob | null }> => {
       if (frames.length === 0) return { url: "", blob: null };
 
-      // Cap fps at 30 to avoid excessive encoding overhead
-      const cappedFps = Math.min(fps, 30);
+      // Calculate fps dynamically: frames / target duration
+      // Clamp between 5 (minimum smooth) and 30 (maximum practical)
+      const dynamicFps = Math.max(5, Math.min(30, frames.length / targetDurationSec));
+      console.log(`[createVideoFromFrames] ${frames.length} frames / ${targetDurationSec}s = ${dynamicFps.toFixed(2)}fps`);
 
       return new Promise((resolve) => {
         const offCanvas = document.createElement("canvas");
@@ -467,7 +482,7 @@ export default function MainShooting({ theme, machineData }: Props) {
           return;
         }
 
-        const stream = offCanvas.captureStream(cappedFps);
+        const stream = offCanvas.captureStream(dynamicFps);
         const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
           ? "video/webm;codecs=vp9"
           : "video/webm";
@@ -500,7 +515,7 @@ export default function MainShooting({ theme, machineData }: Props) {
           };
           img.src = frames[frameIdx];
           frameIdx++;
-        }, 1000 / cappedFps);
+        }, 1000 / dynamicFps);
       });
     },
     []
@@ -615,15 +630,26 @@ export default function MainShooting({ theme, machineData }: Props) {
 
       // --- Countdown reached 0 → capture immediately ---
 
-      // 1. Stop recording (get frames data)
+      // 1. Stop recording
       let recordingResult: { url: string; blob: Blob | null } = { url: "", blob: null };
+      let canonMoviePath = "";
+
       if (cameraTypeRef.current === "canon") {
-        // Canon: just stop frame recording, get raw frames
-        const recording = canonCamera.stopFrameRecording();
-        isRecordingRef.current = false;
-        setIsRecording(false);
-        // Store frames for background processing
-        (window as any).__lastCanonFrames = recording.frames;
+        if ((window as any).__canonMovieFallback) {
+          // Fallback: stop frame recording, get raw frames
+          const recording = canonCamera.stopFrameRecording();
+          isRecordingRef.current = false;
+          setIsRecording(false);
+          (window as any).__lastCanonFrames = recording.frames;
+          (window as any).__canonMovieFallback = false;
+        } else {
+          // Real movie recording: stop and download from camera
+          // Note: stopMovieRecording is blocking — camera writes file then transfers
+          isRecordingRef.current = false;
+          setIsRecording(false);
+          canonMoviePath = await canonCamera.stopMovieRecording();
+          console.log(`[Canon] Movie file: ${canonMoviePath}`);
+        }
       } else {
         // Webcam: stop MediaRecorder and wait for blob
         recordingResult = await waitForVideo();
@@ -638,42 +664,45 @@ export default function MainShooting({ theme, machineData }: Props) {
       await new Promise((r) => setTimeout(r, 300));
       setShowFlash(false);
 
-      // 4. Save video — Canon: process in BACKGROUND (non-blocking)
+      // 4. Save video
       let videoUrl = "";
       let videoPath = "";
 
       if (cameraTypeRef.current === "canon") {
-        const frames = (window as any).__lastCanonFrames as string[] || [];
-        if (frames.length > 0) {
-          const captureIndex = i;
-          console.log(`[Canon] Creating video in background from ${frames.length} frames...`);
-
-          // Non-blocking: process video in background, update state when ready
-          createVideoFromFrames(frames, 30)
-            .then(async (result) => {
-              console.log(`[Canon] Background video ready for capture ${captureIndex + 1}`);
-              // Save to temp file
-              if (result.blob) {
-                const path = await saveVideoToTemp(result.blob, captureIndex);
-                // Update the capture in state with video data
-                setCaptures((prev) => {
-                  const updated = [...prev];
-                  if (updated[captureIndex]) {
-                    updated[captureIndex] = {
-                      ...updated[captureIndex],
-                      video: result.url,
-                      videoPath: path,
-                    };
-                  }
-                  return updated;
-                });
-              }
-            })
-            .catch((err) => {
-              console.error(`[Canon] Background video processing failed:`, err);
-            });
+        if (canonMoviePath) {
+          // Real EDSDK movie: file already on disk from camera
+          videoPath = canonMoviePath;
+          console.log(`[Canon] Using EDSDK movie file: ${videoPath}`);
+        } else {
+          // Fallback: create video from JPEG frames in background
+          const frames = (window as any).__lastCanonFrames as string[] || [];
+          if (frames.length > 0) {
+            const captureIndex = i;
+            console.log(`[Canon] Fallback: creating video from ${frames.length} frames...`);
+            createVideoFromFrames(frames)
+              .then(async (result) => {
+                console.log(`[Canon] Background video ready for capture ${captureIndex + 1}`);
+                if (result.blob) {
+                  const path = await saveVideoToTemp(result.blob, captureIndex);
+                  setCaptures((prev) => {
+                    const updated = [...prev];
+                    if (updated[captureIndex]) {
+                      updated[captureIndex] = {
+                        ...updated[captureIndex],
+                        video: result.url,
+                        videoPath: path,
+                      };
+                    }
+                    return updated;
+                  });
+                }
+              })
+              .catch((err) => {
+                console.error(`[Canon] Background video processing failed:`, err);
+              });
+          }
+          (window as any).__lastCanonFrames = null;
         }
-        (window as any).__lastCanonFrames = null;
       } else {
         // Webcam: video is already ready
         videoUrl = recordingResult.url;

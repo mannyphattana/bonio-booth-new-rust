@@ -59,12 +59,12 @@ export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClos
 
   const handleCloseApp = async () => {
     try {
-      // Destroy SSE before closing
-      if (onBeforeClose) onBeforeClose();
-      // exit_app sends app-closed notification to backend then exits
+      // exit_app handles everything: notify backend → destroy SSE → exit
+      // Do NOT call onBeforeClose/destroySSE here — it causes a race condition
+      // where SSE disconnect triggers markOffline lock before notifyGoingOffline arrives
       await invoke("exit_app");
     } catch {
-      // fallback: force process exit
+      // fallback: force process exit via window close (CloseRequested handler will handle cleanup)
       window.close();
     }
   };

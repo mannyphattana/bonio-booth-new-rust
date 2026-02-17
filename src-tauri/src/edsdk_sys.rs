@@ -97,6 +97,8 @@ pub const kEdsPropID_Evf_Mode: EdsPropertyID = 0x00000501;
 pub const kEdsCameraCommand_TakePicture: EdsCameraCommand = 0x00000000;
 pub const kEdsCameraCommand_ExtendShutDownTimer: EdsCameraCommand = 0x00000001;
 pub const kEdsCameraCommand_PressShutterButton: EdsCameraCommand = 0x00000004;
+pub const kEdsCameraCommand_MovieSelectSwON: EdsCameraCommand = 0x00000107;
+pub const kEdsCameraCommand_MovieSelectSwOFF: EdsCameraCommand = 0x00000108;
 
 // =============================================================================
 // Constants - Events
@@ -104,6 +106,7 @@ pub const kEdsCameraCommand_PressShutterButton: EdsCameraCommand = 0x00000004;
 
 // Object events
 pub const kEdsObjectEvent_All: EdsObjectEventID = 0x00000200;
+pub const kEdsObjectEvent_DirItemCreated: EdsObjectEventID = 0x00000204;
 pub const kEdsObjectEvent_DirItemRequestTransfer: EdsObjectEventID = 0x00000208;
 
 // State events
@@ -114,13 +117,38 @@ pub const kEdsStateEvent_Shutdown: EdsStateEventID = 0x00000301;
 // Constants - Save To
 // =============================================================================
 
+pub const kEdsSaveTo_Camera: EdsSaveTo = 1;
 pub const kEdsSaveTo_Host: EdsSaveTo = 2;
+pub const kEdsSaveTo_Both: EdsSaveTo = 3;
 
 // =============================================================================
 // Constants - EVF Output Device
 // =============================================================================
 
 pub const kEdsEvfOutputDevice_PC: EdsEvfOutputDevice = 2;
+
+// =============================================================================
+// Constants - Movie Recording (kEdsPropID_Record)
+// =============================================================================
+
+pub const kEdsPropID_Record: EdsPropertyID = 0x00000510;
+/// Start recording: set kEdsPropID_Record to this value
+pub const kEdsRecord_Begin: EdsUInt32 = 4;
+/// Stop recording: set kEdsPropID_Record to this value
+pub const kEdsRecord_End: EdsUInt32 = 0;
+
+// =============================================================================
+// Constants - File Access / Create Disposition
+// =============================================================================
+
+pub const kEdsAccess_Read: EdsAccess = 0;
+pub const kEdsAccess_Write: EdsAccess = 1;
+pub const kEdsAccess_ReadWrite: EdsAccess = 2;
+
+pub const kEdsFileCreateDisposition_CreateNew: EdsFileCreateDisposition = 0;
+pub const kEdsFileCreateDisposition_CreateAlways: EdsFileCreateDisposition = 1;
+pub const kEdsFileCreateDisposition_OpenExisting: EdsFileCreateDisposition = 2;
+pub const kEdsFileCreateDisposition_OpenAlways: EdsFileCreateDisposition = 3;
 
 // =============================================================================
 // Constants - Shutter Button
@@ -363,9 +391,11 @@ pub mod dynamic {
     edsdk_fn!(EdsDownload, EdsError, inDirItemRef: EdsDirectoryItemRef, inReadSize: EdsUInt64, outStream: EdsStreamRef);
     edsdk_fn!(EdsDownloadComplete, EdsError, inDirItemRef: EdsDirectoryItemRef);
     edsdk_fn!(EdsDownloadCancel, EdsError, inDirItemRef: EdsDirectoryItemRef);
+    edsdk_fn!(EdsDeleteDirectoryItem, EdsError, inDirItemRef: EdsDirectoryItemRef);
 
     // Stream functions
     edsdk_fn!(EdsCreateMemoryStream, EdsError, inBufferSize: EdsUInt64, outStream: *mut EdsStreamRef);
+    edsdk_fn!(EdsCreateFileStream, EdsError, inFileName: *const EdsChar, inCreateDisposition: EdsFileCreateDisposition, inDesiredAccess: EdsAccess, outStream: *mut EdsStreamRef);
     edsdk_fn!(EdsGetPointer, EdsError, inStream: EdsStreamRef, outPointer: *mut *mut c_void);
     edsdk_fn!(EdsGetLength, EdsError, inStream: EdsStreamRef, outLength: *mut EdsUInt64);
 
