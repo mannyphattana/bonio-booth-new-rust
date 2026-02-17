@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -37,10 +38,10 @@ export default function CouponEntry({ theme }: Props) {
     setError("");
   };
 
-  const handleClear = () => {
-    setCode("");
-    setError("");
-  };
+  // const handleClear = () => {
+  //   setCode("");
+  //   setError("");
+  // };
 
   const handleSubmit = async () => {
     if (!code.trim()) {
@@ -68,7 +69,10 @@ export default function CouponEntry({ theme }: Props) {
         checkResult.data?.couponCode?._id ||
         "";
 
-      console.log("🎟️ [CouponEntry] Coupon check passed, couponCodeId:", couponCodeId);
+      console.log(
+        "🎟️ [CouponEntry] Coupon check passed, couponCodeId:",
+        couponCodeId,
+      );
 
       // 2. Create payment transaction with couponCodeId (matches reference flow)
       // This gives us a transactionId even for free/discounted transactions
@@ -92,14 +96,16 @@ export default function CouponEntry({ theme }: Props) {
         payData.data?.transactionId ||
         payData.transaction_id ||
         "";
-      const referenceId =
-        payData.reference_id ||
-        payData.referenceId ||
-        "";
+      const referenceId = payData.reference_id || payData.referenceId || "";
       const isFree =
         payData.netAmount === 0 || payData.qr_code === null || !payData.qr_code;
 
-      console.log("🎟️ [CouponEntry] transactionId:", transactionId, "isFree:", isFree);
+      console.log(
+        "🎟️ [CouponEntry] transactionId:",
+        transactionId,
+        "isFree:",
+        isFree,
+      );
 
       if (isFree) {
         // Free coupon — skip payment QR, go directly to frame selection
@@ -144,9 +150,7 @@ export default function CouponEntry({ theme }: Props) {
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
     >
-      <button className="back-button" onClick={handleBack}>
-        ←
-      </button>
+      <BackButton onBackClick={handleBack} />
 
       <div
         style={{
@@ -163,16 +167,40 @@ export default function CouponEntry({ theme }: Props) {
       >
         {/* Title */}
         <div style={{ textAlign: "center", marginTop: 20 }}>
-          <h1 style={{ color: theme.fontColor, fontSize: "3rem", fontWeight: 700, margin: "0 0 8px 0", lineHeight: 1.2 }}>
+          <h1
+            style={{
+              color: theme.fontColor,
+              fontSize: "3rem",
+              fontWeight: 700,
+              margin: "0 0 8px 0",
+              lineHeight: 1.2,
+            }}
+          >
             ใช้คูปองส่วนลด
           </h1>
-          <p style={{ color: theme.fontColor, fontSize: "1.5rem", fontWeight: 500, margin: 0, letterSpacing: 0.5, textTransform: "uppercase" }}>
+          <p
+            style={{
+              color: theme.fontColor,
+              fontSize: "1.5rem",
+              fontWeight: 500,
+              margin: 0,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+            }}
+          >
             USE DISCOUNT COUPON
           </p>
         </div>
 
         {/* Code display */}
-        <div style={{ width: "90%", display: "flex", justifyContent: "center", margin: "20px 0" }}>
+        <div
+          style={{
+            width: "90%",
+            display: "flex",
+            justifyContent: "center",
+            margin: "20px 0",
+          }}
+        >
           <div
             style={{
               width: "90%",
@@ -382,7 +410,14 @@ export default function CouponEntry({ theme }: Props) {
               textAlign: "center",
             }}
           >
-            <p style={{ fontSize: "1.5rem", color: "red", marginInline: "auto", lineHeight: 1.5 }}>
+            <p
+              style={{
+                fontSize: "1.5rem",
+                color: "red",
+                marginInline: "auto",
+                lineHeight: 1.5,
+              }}
+            >
               {error}
             </p>
             <button

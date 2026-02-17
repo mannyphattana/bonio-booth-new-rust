@@ -1,4 +1,11 @@
-import { useRef, useState, useEffect, useCallback, type ReactNode, type CSSProperties } from "react";
+import {
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+  type ReactNode,
+  type CSSProperties,
+} from "react";
 
 interface Props {
   children: ReactNode;
@@ -36,7 +43,9 @@ export default function HorizontalScroll({
     if (!el) return;
     const threshold = 2;
     setCanScrollLeft(el.scrollLeft > threshold);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - threshold);
+    setCanScrollRight(
+      el.scrollLeft + el.clientWidth < el.scrollWidth - threshold,
+    );
   }, []);
 
   useEffect(() => {
@@ -81,8 +90,14 @@ export default function HorizontalScroll({
         e.stopPropagation();
         e.preventDefault();
       };
-      document.addEventListener("click", handler, { capture: true, once: true });
-      setTimeout(() => document.removeEventListener("click", handler, { capture: true }), 100);
+      document.addEventListener("click", handler, {
+        capture: true,
+        once: true,
+      });
+      setTimeout(
+        () => document.removeEventListener("click", handler, { capture: true }),
+        100,
+      );
     }
   }, []);
 

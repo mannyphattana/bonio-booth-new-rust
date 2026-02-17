@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -110,7 +111,9 @@ export default function SlotSelection({ theme }: Props) {
 
       if (selectedPhotos.includes(photoIndex)) {
         // Deselect: remove from selectedPhotos, rebuild assignments
-        const newSelectedPhotos = selectedPhotos.filter((p) => p !== photoIndex);
+        const newSelectedPhotos = selectedPhotos.filter(
+          (p) => p !== photoIndex,
+        );
         setSelectedPhotos(newSelectedPhotos);
 
         const newAssignments: { [slotIndex: number]: number } = {};
@@ -128,7 +131,7 @@ export default function SlotSelection({ theme }: Props) {
         setPhotoAssignments(newAssignments);
       }
     },
-    [selectedFrame, selectedPhotos, photoAssignments, slots.length]
+    [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
   const handleNext = () => {
@@ -159,14 +162,11 @@ export default function SlotSelection({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "120px 0px",
+        padding: "160px 0px",
         overflow: "hidden",
       }}
     >
-
-      <button className="back-button" onClick={handleBack}>
-        ←
-      </button>
+      <BackButton onBackClick={handleBack} />
 
       <h1
         style={{
@@ -258,7 +258,8 @@ export default function SlotSelection({ theme }: Props) {
                   borderRadius: `${scaledRadius}px`,
                   overflow: "hidden",
                   zIndex: zIndex < 0 ? -1 : 1,
-                  transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                  transform:
+                    rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
                 }}
               >
                 {hasPhoto ? (
@@ -285,7 +286,9 @@ export default function SlotSelection({ theme }: Props) {
                       borderRadius: `${scaledRadius}px`,
                     }}
                   >
-                    <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 10 }}>
+                    <span
+                      style={{ color: "rgba(255,255,255,0.4)", fontSize: 10 }}
+                    >
                       {slotIdx + 1}
                     </span>
                   </div>

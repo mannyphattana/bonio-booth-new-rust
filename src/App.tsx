@@ -13,6 +13,8 @@ import ApplyFilter from "./pages/ApplyFilter";
 import PhotoResult from "./pages/PhotoResult";
 import MachineVerify from "./pages/MachineVerify";
 import Maintenance from "./pages/Maintenance";
+import TermsAndServices from "./pages/TermsAndServices";
+import GetHelp from "./pages/GetHelp";
 import CameraConfigModal from "./components/CameraConfigModal";
 import PrinterConfigModal from "./components/PrinterConfigModal";
 import ShutdownOverlay from "./components/ShutdownOverlay";
@@ -79,7 +81,9 @@ function App() {
   const [themeData, setThemeData] = useState<ThemeData | null>(null);
   const [isVerified, setIsVerified] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
-  const [maintenanceConfig, setMaintenanceConfig] = useState<"camera" | "printer" | null>(null);
+  const [maintenanceConfig, setMaintenanceConfig] = useState<
+    "camera" | "printer" | null
+  >(null);
   const [lineUrl, setLineUrl] = useState<string>("");
 
   // Restore camera type from localStorage to Rust AppState on startup
@@ -87,7 +91,9 @@ function App() {
   useEffect(() => {
     const savedCameraType = localStorage.getItem("cameraType");
     if (savedCameraType) {
-      invoke("set_camera_type", { cameraType: savedCameraType }).catch(() => {});
+      invoke("set_camera_type", { cameraType: savedCameraType }).catch(
+        () => {},
+      );
     }
   }, []);
 
@@ -139,9 +145,10 @@ function App() {
   });
 
   // Shutdown countdown — listens to Rust shutdown manager events
-  const { state: shutdownState, notifyActivity: notifyShutdownActivity } = useShutdown({
-    enabled: isVerified,
-  });
+  const { state: shutdownState, notifyActivity: notifyShutdownActivity } =
+    useShutdown({
+      enabled: isVerified,
+    });
 
   // Device monitoring - centralized, runs when verified
   const handleMaintenanceNeeded = useCallback(() => {
@@ -215,16 +222,80 @@ function App() {
       )}
 
       <Routes>
-        <Route path="/" element={<Home theme={themeData!} machineData={machineData!} onFormatReset={handleFormatReset} onBeforeClose={destroySSE} />} />
-        <Route path="/payment-selection" element={<PaymentSelection theme={themeData!} machineData={machineData!} />} />
-        <Route path="/coupon-entry" element={<CouponEntry theme={themeData!} machineData={machineData!} />} />
-        <Route path="/payment-qr" element={<PaymentQR theme={themeData!} machineData={machineData!} />} />
-        <Route path="/frame-selection" element={<FrameSelection theme={themeData!} machineData={machineData!} />} />
-        <Route path="/prepare-shooting" element={<PrepareShooting theme={themeData!} machineData={machineData!} />} />
-        <Route path="/main-shooting" element={<MainShooting theme={themeData!} machineData={machineData!} />} />
-        <Route path="/slot-selection" element={<SlotSelection theme={themeData!} machineData={machineData!} />} />
-        <Route path="/apply-filter" element={<ApplyFilter theme={themeData!} machineData={machineData!} />} />
-        <Route path="/photo-result" element={<PhotoResult theme={themeData!} machineData={machineData!} />} />
+        <Route
+          path="/"
+          element={
+            <Home
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
+          }
+        />
+        <Route
+          path="/terms-and-services"
+          element={<TermsAndServices theme={themeData!} />}
+        />
+        <Route
+          path="/get-help"
+          element={
+            <GetHelp theme={themeData!} lineUrl={lineUrl || ""} /> // Pass lineUrl from state
+          }
+        />
+
+        <Route
+          path="/payment-selection"
+          element={
+            <PaymentSelection theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/coupon-entry"
+          element={
+            <CouponEntry theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/payment-qr"
+          element={<PaymentQR theme={themeData!} machineData={machineData!} />}
+        />
+        <Route
+          path="/frame-selection"
+          element={
+            <FrameSelection theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/prepare-shooting"
+          element={
+            <PrepareShooting theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/main-shooting"
+          element={
+            <MainShooting theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/slot-selection"
+          element={
+            <SlotSelection theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/apply-filter"
+          element={
+            <ApplyFilter theme={themeData!} machineData={machineData!} />
+          }
+        />
+        <Route
+          path="/photo-result"
+          element={
+            <PhotoResult theme={themeData!} machineData={machineData!} />
+          }
+        />
       </Routes>
     </Router>
   );

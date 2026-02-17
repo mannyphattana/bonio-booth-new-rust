@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -90,7 +91,8 @@ export default function PaymentQR({ theme }: Props) {
               state: {
                 ...state,
                 paymentMethod: "qrcode",
-                transactionId: statusTransactionId || paymentTransactionId || referenceId,
+                transactionId:
+                  statusTransactionId || paymentTransactionId || referenceId,
                 referenceId,
               },
             });
@@ -169,9 +171,7 @@ export default function PaymentQR({ theme }: Props) {
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
     >
-      <button className="back-button" onClick={handleBack}>
-        ←
-      </button>
+      <BackButton onBackClick={handleBack} />
 
       <div
         style={{
@@ -186,10 +186,27 @@ export default function PaymentQR({ theme }: Props) {
       >
         {/* Title */}
         <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <h1 style={{ color: theme.fontColor, fontSize: "3rem", fontWeight: 600, margin: "0 0 8px 0" }}>
+          <h1
+            style={{
+              color: theme.fontColor,
+              fontSize: "3rem",
+              fontWeight: 600,
+              margin: "0 0 8px 0",
+            }}
+          >
             สแกนจ่ายได้เลย!
           </h1>
-          <p style={{ color: theme.fontColor, fontSize: "1.2rem", fontWeight: 500, margin: 0, letterSpacing: 0.5, textTransform: "uppercase", opacity: 0.8 }}>
+          <p
+            style={{
+              color: theme.fontColor,
+              fontSize: "1.2rem",
+              fontWeight: 500,
+              margin: 0,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+              opacity: 0.8,
+            }}
+          >
             SCAN TO PAY!
           </p>
         </div>
@@ -197,61 +214,197 @@ export default function PaymentQR({ theme }: Props) {
         {/* QR Code Display */}
         <div style={{ marginBottom: 20 }}>
           {status === "CREATING" && (
-            <div style={{ position: "relative", width: 280, height: 280, display: "flex", justifyContent: "center", alignItems: "center" }}>
-              <div className="payment-spinner-ring" style={{ position: "absolute", width: "100%", height: "100%", border: "4px solid transparent", borderTopColor: theme.primaryColor, borderRadius: "50%", animationDelay: "0s" }} />
-              <div className="payment-spinner-ring" style={{ position: "absolute", width: "80%", height: "80%", border: "4px solid transparent", borderTopColor: theme.primaryColor, borderRadius: "50%", animationDelay: "-0.4s", animationDuration: "1s" }} />
-              <div className="payment-spinner-ring" style={{ position: "absolute", width: "60%", height: "60%", border: "4px solid transparent", borderTopColor: theme.primaryColor, borderRadius: "50%", animationDelay: "-0.8s", animationDuration: "0.8s" }} />
+            <div
+              style={{
+                position: "relative",
+                width: 280,
+                height: 280,
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <div
+                className="payment-spinner-ring"
+                style={{
+                  position: "absolute",
+                  width: "100%",
+                  height: "100%",
+                  border: "4px solid transparent",
+                  borderTopColor: theme.primaryColor,
+                  borderRadius: "50%",
+                  animationDelay: "0s",
+                }}
+              />
+              <div
+                className="payment-spinner-ring"
+                style={{
+                  position: "absolute",
+                  width: "80%",
+                  height: "80%",
+                  border: "4px solid transparent",
+                  borderTopColor: theme.primaryColor,
+                  borderRadius: "50%",
+                  animationDelay: "-0.4s",
+                  animationDuration: "1s",
+                }}
+              />
+              <div
+                className="payment-spinner-ring"
+                style={{
+                  position: "absolute",
+                  width: "60%",
+                  height: "60%",
+                  border: "4px solid transparent",
+                  borderTopColor: theme.primaryColor,
+                  borderRadius: "50%",
+                  animationDelay: "-0.8s",
+                  animationDuration: "0.8s",
+                }}
+              />
             </div>
           )}
 
           {error && status === "ERROR" && (
-            <div style={{ textAlign: "center", padding: 20, color: theme.textButtonColor, background: theme.primaryColor, borderRadius: 8, border: "2px solid white", width: 280, height: 280, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <p style={{ margin: "0 0 15px 0", fontSize: "1.1rem", fontWeight: 500 }}>{error}</p>
-              <button onClick={() => { setError(""); setStatus("CREATING"); }} style={{ padding: "10px 20px", color: theme.textButtonColor, background: theme.primaryColor, border: "none", borderRadius: 5, cursor: "pointer", fontSize: "1.5rem", fontWeight: 500 }}>
+            <div
+              style={{
+                textAlign: "center",
+                padding: 20,
+                color: theme.textButtonColor,
+                background: theme.primaryColor,
+                borderRadius: 8,
+                border: "2px solid white",
+                width: 280,
+                height: 280,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <p
+                style={{
+                  margin: "0 0 15px 0",
+                  fontSize: "1.1rem",
+                  fontWeight: 500,
+                }}
+              >
+                {error}
+              </p>
+              <button
+                onClick={() => {
+                  setError("");
+                  setStatus("CREATING");
+                }}
+                style={{
+                  padding: "10px 20px",
+                  color: theme.textButtonColor,
+                  background: theme.primaryColor,
+                  border: "none",
+                  borderRadius: 5,
+                  cursor: "pointer",
+                  fontSize: "1.5rem",
+                  fontWeight: 500,
+                }}
+              >
                 Retry
               </button>
             </div>
           )}
 
           {status === "SUCCESS" && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, width: 240, height: 240, padding: 20 }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 16,
+                width: 240,
+                height: 240,
+                padding: 20,
+              }}
+            >
               <svg width="120" height="120" viewBox="0 0 24 24" fill="none">
                 <circle cx="12" cy="12" r="10" fill="#2ecc71" />
-                <path d="M8 12l3 3 5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M8 12l3 3 5-5"
+                  stroke="white"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
-              <p style={{ color: "#2ecc71", fontSize: 20, fontWeight: 600 }}>ชำระเงินสำเร็จ!</p>
+              <p style={{ color: "#2ecc71", fontSize: 20, fontWeight: 600 }}>
+                ชำระเงินสำเร็จ!
+              </p>
             </div>
           )}
 
-          {status !== "CREATING" && status !== "ERROR" && status !== "SUCCESS" && qrCodeUrl && (
-            <div
-              style={{
-                padding: 20,
-                background: "white",
-                borderRadius: 8,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                filter: status === "TIMEOUT" ? "blur(8px)" : "none",
-                transition: "filter 0.5s ease-in-out",
-              }}
-            >
-              <img
-                src={qrCodeUrl}
-                alt="QR Code"
-                style={{ width: 240, height: 240, display: "block", borderRadius: 4 }}
-              />
-            </div>
-          )}
+          {status !== "CREATING" &&
+            status !== "ERROR" &&
+            status !== "SUCCESS" &&
+            qrCodeUrl && (
+              <div
+                style={{
+                  padding: 20,
+                  background: "white",
+                  borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                  filter: status === "TIMEOUT" ? "blur(8px)" : "none",
+                  transition: "filter 0.5s ease-in-out",
+                }}
+              >
+                <img
+                  src={qrCodeUrl}
+                  alt="QR Code"
+                  style={{
+                    width: 240,
+                    height: 240,
+                    display: "block",
+                    borderRadius: 4,
+                  }}
+                />
+              </div>
+            )}
         </div>
 
         {/* Price Display */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 24px", borderRadius: 12 }}>
-          <span style={{ fontSize: "3rem", fontWeight: 600, color: theme.fontColor }}>{state.totalPrice || 0}</span>
-          <span style={{ fontSize: "3rem", marginLeft: 10, color: theme.fontColor }}>THB</span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 24px",
+            borderRadius: 12,
+          }}
+        >
+          <span
+            style={{
+              fontSize: "3rem",
+              fontWeight: 600,
+              color: theme.fontColor,
+            }}
+          >
+            {state.totalPrice || 0}
+          </span>
+          <span
+            style={{ fontSize: "3rem", marginLeft: 10, color: theme.fontColor }}
+          >
+            THB
+          </span>
         </div>
 
         {/* Timer circle */}
         {status !== "SUCCESS" && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              marginTop: 16,
+            }}
+          >
             <div
               style={{
                 width: 100,
@@ -265,14 +418,37 @@ export default function PaymentQR({ theme }: Props) {
                 marginBottom: 16,
               }}
             >
-              <span style={{ fontSize: "1.5rem", fontWeight: 600, color: theme.primaryColor }}>
+              <span
+                style={{
+                  fontSize: "1.5rem",
+                  fontWeight: 600,
+                  color: theme.primaryColor,
+                }}
+              >
                 {status === "TIMEOUT" ? "Timeout" : formatTime(timeLeft)}
               </span>
             </div>
-            <p style={{ fontSize: "1.5rem", fontWeight: 500, color: theme.fontColor, margin: 0, textAlign: "center" }}>
+            <p
+              style={{
+                fontSize: "1.5rem",
+                fontWeight: 500,
+                color: theme.fontColor,
+                margin: 0,
+                textAlign: "center",
+              }}
+            >
               กรุณาชำระเงินภายในเวลาที่กำหนด
             </p>
-            <p style={{ fontSize: "1.2rem", fontWeight: 500, color: theme.fontColor, margin: 0, opacity: 0.8, textAlign: "center" }}>
+            <p
+              style={{
+                fontSize: "1.2rem",
+                fontWeight: 500,
+                color: theme.fontColor,
+                margin: 0,
+                opacity: 0.8,
+                textAlign: "center",
+              }}
+            >
               Please complete your payment within the time limit.
             </p>
           </div>
@@ -346,10 +522,19 @@ export default function PaymentQR({ theme }: Props) {
               boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
             }}
           >
-            <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600, color: "#333" }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "1.5rem",
+                fontWeight: 600,
+                color: "#333",
+              }}
+            >
               ต้องการยกเลิกการชำระเงิน?
             </p>
-            <p style={{ margin: "8px 0 24px", fontSize: "1rem", color: "#666" }}>
+            <p
+              style={{ margin: "8px 0 24px", fontSize: "1rem", color: "#666" }}
+            >
               Are you sure you want to cancel the payment?
             </p>
             <div style={{ display: "flex", gap: 16, justifyContent: "center" }}>

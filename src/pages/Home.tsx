@@ -10,7 +10,12 @@ interface Props {
   onBeforeClose?: () => void;
 }
 
-export default function Home({ theme, machineData, onFormatReset, onBeforeClose }: Props) {
+export default function Home({
+  theme,
+  machineData,
+  onFormatReset,
+  onBeforeClose,
+}: Props) {
   const navigate = useNavigate();
   const [showContextMenu, setShowContextMenu] = useState(false);
 
@@ -34,36 +39,6 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
       onClick={handleStart}
       onContextMenu={handleContextMenu}
     >
-      {/* Touch anywhere to start overlay */}
-      <div
-        style={{
-          textAlign: "center",
-          animation: "pulse 2s ease-in-out infinite",
-        }}
-      >
-        <p
-          style={{
-            fontSize: 28,
-            fontWeight: 700,
-            color: theme.fontColor,
-            textShadow: "0 2px 8px rgba(0,0,0,0.5)",
-          }}
-        >
-          แตะเพื่อเริ่มต้น
-        </p>
-        <p
-          style={{
-            fontSize: 18,
-            color: theme.fontColor,
-            opacity: 0.8,
-            marginTop: 8,
-            textShadow: "0 2px 8px rgba(0,0,0,0.5)",
-          }}
-        >
-          TAP ANYWHERE TO START
-        </p>
-      </div>
-
       {/* Machine info badge */}
       <div
         style={{
@@ -102,7 +77,7 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
           style={{
             background: theme.textButtonColor || "rgba(255,255,255,0.15)",
             border: "none",
-            color: theme.textPrimaryColor || theme.fontColor,
+            color: theme?.primaryColor || theme.fontColor,
             cursor: "pointer",
             boxShadow: "none",
             padding: "0.5rem 2rem",
@@ -110,7 +85,15 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
             borderRadius: 8,
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "0.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+          >
             <p style={{ margin: 0 }}>ข้อตกลงการให้บริการ</p>
             <p style={{ margin: 0, fontSize: "1.2rem" }}>Terms & Conditions</p>
           </div>
@@ -121,7 +104,7 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
           style={{
             background: theme.textButtonColor || "rgba(255,255,255,0.15)",
             border: "none",
-            color: theme.textPrimaryColor || theme.fontColor,
+            color: theme?.primaryColor || theme.fontColor,
             cursor: "pointer",
             boxShadow: "none",
             padding: "0.5rem 2rem",
@@ -129,7 +112,15 @@ export default function Home({ theme, machineData, onFormatReset, onBeforeClose 
             borderRadius: 8,
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "0.5rem" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+          >
             <p style={{ margin: 0 }}>ขอความช่วยเหลือ</p>
             <p style={{ margin: 0, fontSize: "1.2rem" }}>Need Help?</p>
           </div>

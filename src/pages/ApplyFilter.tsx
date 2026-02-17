@@ -5,6 +5,7 @@ import type { ThemeData, MachineData, Capture } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { FILTERS, type FilterConfig } from "../config/filters";
 import HorizontalScroll from "../components/HorizontalScroll";
+import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -16,13 +17,16 @@ export default function ApplyFilter({ theme }: Props) {
   const location = useLocation();
   const state = (location.state as any) || {};
 
-
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const firstPhoto = frameCaptures[0]?.photo || "";
 
-  const [selectedFilter, setSelectedFilter] = useState<FilterConfig>(FILTERS[0]);
+  const [selectedFilter, setSelectedFilter] = useState<FilterConfig>(
+    FILTERS[0],
+  );
   const [previewImage, setPreviewImage] = useState(firstPhoto);
-  const [filterPreviews, setFilterPreviews] = useState<Record<string, string>>({});
+  const [filterPreviews, setFilterPreviews] = useState<Record<string, string>>(
+    {},
+  );
   const [loading, setLoading] = useState(false);
   const [applyingAll, setApplyingAll] = useState(false);
   const [applyProgress, setApplyProgress] = useState("");
@@ -137,7 +141,9 @@ export default function ApplyFilter({ theme }: Props) {
         // Video LUT filter is applied in compose_frame_video (single FFmpeg pass)
         setApplyProgress("กำลังใส่ฟิลเตอร์รูปภาพ...");
         const photoPromises = frameCaptures.map(async (cap, idx) => {
-          setApplyProgress(`กำลังใส่ฟิลเตอร์รูป ${idx + 1}/${frameCaptures.length}...`);
+          setApplyProgress(
+            `กำลังใส่ฟิลเตอร์รูป ${idx + 1}/${frameCaptures.length}...`,
+          );
           const filteredPhoto: string = await invoke("apply_lut_filter", {
             imageDataBase64: cap.photo,
             lutFilePath: lutPath,
@@ -184,10 +190,7 @@ export default function ApplyFilter({ theme }: Props) {
         padding: "120px 0",
       }}
     >
-
-      <button className="back-button" onClick={handleBack}>
-        ←
-      </button>
+      <BackButton onBackClick={handleBack} />
 
       <h1
         style={{
@@ -199,7 +202,14 @@ export default function ApplyFilter({ theme }: Props) {
       >
         เลือก Filter
       </h1>
-      <p style={{ color: theme.fontColor, opacity: 0.8, fontSize: 14, marginBottom: 12 }}>
+      <p
+        style={{
+          color: theme.fontColor,
+          opacity: 0.8,
+          fontSize: 14,
+          marginBottom: 12,
+        }}
+      >
         SELECT FILTER
       </p>
 

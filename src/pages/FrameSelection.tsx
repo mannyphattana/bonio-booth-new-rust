@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import HorizontalScroll from "../components/HorizontalScroll";
+import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -68,9 +69,7 @@ export default function FrameSelection({ theme }: Props) {
         padding: "120px 0",
       }}
     >
-      <button className="back-button" onClick={handleBack}>
-        ←
-      </button>
+      <BackButton onBackClick={handleBack} />
 
       <h1
         style={{

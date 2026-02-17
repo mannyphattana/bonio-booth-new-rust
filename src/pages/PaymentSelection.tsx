@@ -1,6 +1,7 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -16,9 +17,10 @@ export default function PaymentSelection({ theme, machineData }: Props) {
   const selectedQuantity = state.quantity || 1;
 
   // Calculate max quantity from available prices
-  const maxQuantity = machineData.prices.length > 0
-    ? Math.max(...machineData.prices.map((p) => p.quantity))
-    : 10;
+  const maxQuantity =
+    machineData.prices.length > 0
+      ? Math.max(...machineData.prices.map((p) => p.quantity))
+      : 10;
 
   // Get current price for selected quantity
   const currentPrice =
@@ -64,9 +66,7 @@ export default function PaymentSelection({ theme, machineData }: Props) {
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
     >
-      <button className="back-button" onClick={handleBack}>
-        ←
-      </button>
+      <BackButton onBackClick={handleBack} />
 
       <div
         style={{
@@ -81,16 +81,39 @@ export default function PaymentSelection({ theme, machineData }: Props) {
       >
         {/* Title */}
         <div style={{ textAlign: "center" }}>
-          <h1 style={{ color: theme.fontColor, fontSize: "3rem", fontWeight: 700, margin: "0 0 8px 0" }}>
+          <h1
+            style={{
+              color: theme.fontColor,
+              fontSize: "3rem",
+              fontWeight: 700,
+              margin: "0 0 8px 0",
+            }}
+          >
             เลือกจำนวนการพิมพ์
           </h1>
-          <p style={{ color: theme.fontColor, fontSize: "1.5rem", fontWeight: 500, margin: 0, letterSpacing: 0.5, textTransform: "uppercase" }}>
+          <p
+            style={{
+              color: theme.fontColor,
+              fontSize: "1.5rem",
+              fontWeight: 500,
+              margin: 0,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+            }}
+          >
             SELECT NUMBER OF PRINT
           </p>
         </div>
 
         {/* Quantity selector with +/- buttons */}
-        <div style={{ display: "flex", alignItems: "center", gap: 30, margin: "20px 0" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 30,
+            margin: "20px 0",
+          }}
+        >
           <button
             onClick={handleDecrease}
             disabled={selectedQuantity <= 1}
@@ -111,7 +134,12 @@ export default function PaymentSelection({ theme, machineData }: Props) {
             }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path d="M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path
+                d="M5 12H19"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
 
@@ -145,7 +173,8 @@ export default function PaymentSelection({ theme, machineData }: Props) {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: selectedQuantity >= maxQuantity ? "not-allowed" : "pointer",
+              cursor:
+                selectedQuantity >= maxQuantity ? "not-allowed" : "pointer",
               opacity: selectedQuantity >= maxQuantity ? 0.4 : 1,
               boxShadow: "none",
               padding: 0,
@@ -153,19 +182,55 @@ export default function PaymentSelection({ theme, machineData }: Props) {
             }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path
+                d="M12 5V19M5 12H19"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>
 
         {/* Price Display */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "20px 0" }}>
-          <span style={{ fontSize: "3rem", fontWeight: 600, color: theme.fontColor }}>{currentPrice}</span>
-          <span style={{ fontSize: "1.2rem", fontWeight: 500, color: theme.fontColor }}>THB</span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 8,
+            margin: "20px 0",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "3rem",
+              fontWeight: 600,
+              color: theme.fontColor,
+            }}
+          >
+            {currentPrice}
+          </span>
+          <span
+            style={{
+              fontSize: "1.2rem",
+              fontWeight: 500,
+              color: theme.fontColor,
+            }}
+          >
+            THB
+          </span>
         </div>
 
         {/* Action Buttons - side by side */}
-        <div style={{ display: "flex", gap: 20, width: "100%", maxWidth: 600, marginTop: 20 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 20,
+            width: "100%",
+            maxWidth: 600,
+            marginTop: 20,
+          }}
+        >
           {/* Coupon button - outlined */}
           <button
             onClick={handleCoupon}
@@ -187,8 +252,21 @@ export default function PaymentSelection({ theme, machineData }: Props) {
             }}
           >
             <div style={{ fontSize: 60, lineHeight: 1 }}>🎫</div>
-            <span style={{ fontSize: "1.5rem", fontWeight: 600, lineHeight: 1.2 }}>ใช้</span>
-            <span style={{ fontSize: "1.5rem", fontWeight: 500, lineHeight: 1.2, opacity: 0.95 }}>Discount Coupon</span>
+            <span
+              style={{ fontSize: "1.5rem", fontWeight: 600, lineHeight: 1.2 }}
+            >
+              ใช้
+            </span>
+            <span
+              style={{
+                fontSize: "1.5rem",
+                fontWeight: 500,
+                lineHeight: 1.2,
+                opacity: 0.95,
+              }}
+            >
+              Discount Coupon
+            </span>
           </button>
 
           {/* QR Payment button - filled */}
@@ -212,8 +290,21 @@ export default function PaymentSelection({ theme, machineData }: Props) {
             }}
           >
             <div style={{ fontSize: 60, lineHeight: 1 }}>💳</div>
-            <span style={{ fontSize: "1.5rem", fontWeight: 600, lineHeight: 1.2 }}>ชำระเงินผ่าน</span>
-            <span style={{ fontSize: "1.5rem", fontWeight: 500, lineHeight: 1.2, opacity: 0.95 }}>QR Payment</span>
+            <span
+              style={{ fontSize: "1.5rem", fontWeight: 600, lineHeight: 1.2 }}
+            >
+              ชำระเงินผ่าน
+            </span>
+            <span
+              style={{
+                fontSize: "1.5rem",
+                fontWeight: 500,
+                lineHeight: 1.2,
+                opacity: 0.95,
+              }}
+            >
+              QR Payment
+            </span>
           </button>
         </div>
       </div>
