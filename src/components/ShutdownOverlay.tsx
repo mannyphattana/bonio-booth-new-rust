@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { ShutdownState } from "../hooks/useShutdown";
 
 interface Props {
@@ -6,11 +7,28 @@ interface Props {
 }
 
 /**
- * Shutdown countdown overlay — shown when dashboard triggers a shutdown.
- * Displays remaining time and allows user to tap to reset the countdown.
+ * Shutdown countdown overlay — shown when dashboard triggers a shutdown
+ * or when the machine is outside operating hours (timer auto-shutdown).
+ *
+ * Behavior:
+ * - Timer shutdown: tapping cancels the countdown entirely (let customer use the machine)
+ * - Manual shutdown: tapping resets the countdown (buys more time but still shutting down)
  */
 export default function ShutdownOverlay({ state, onActivity }: Props) {
   if (!state.isScheduled || state.isPaused) return null;
+
+  const isTimer = state.reason === "timer";
+
+  const handleClick = () => {
+    if (isTimer) {
+      // Timer-based: cancel entirely so the customer can use the machine
+      // The periodic poll will re-check and restart if still outside operating hours
+      invoke("cancel_timer_shutdown").catch(console.error);
+    } else {
+      // Manual/dashboard: just reset the countdown
+      onActivity?.();
+    }
+  };
 
   const minutes = Math.floor(state.remainingSeconds / 60);
   const seconds = state.remainingSeconds % 60;
@@ -36,7 +54,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
         justifyContent: "center",
         cursor: "pointer",
       }}
-      onClick={onActivity}
+      onClick={handleClick}
     >
       {/* Warning icon */}
       <div style={{ fontSize: 64, marginBottom: 24 }}>⚠️</div>
@@ -50,7 +68,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
           marginBottom: 16,
         }}
       >
-        กำลังจะปิดเครื่อง
+        {isTimer ? "ขออภัย เนื่องจากอยู่นอกเวลาทำการ" : "กำลังจะปิดเครื่อง"}
       </h1>
 
       {/* Countdown */}
@@ -91,20 +109,23 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
 
       {/* Reason */}
       <p style={{ color: "#aaa", fontSize: 18, marginBottom: 8 }}>
-        {state.reason === "timer"
-          ? "ปิดเครื่องตามเวลาที่ตั้งไว้"
+        {isTimer
+          ? "เครื่องจะปิดตัวลงอีก " + timeStr + " นาที"
           : "ปิดเครื่องจาก Dashboard"}
       </p>
 
-      {/* Tap to cancel hint */}
+      {/* Tap hint */}
       <p
         style={{
-          color: "#888",
-          fontSize: 16,
+          color: isTimer ? "#4CAF50" : "#888",
+          fontSize: isTimer ? 22 : 16,
+          fontWeight: isTimer ? 600 : 400,
           animation: "pulse 2s ease-in-out infinite",
         }}
       >
-        แตะหน้าจอเพื่อรีเซ็ตเวลา
+        {isTimer
+          ? "แตะหน้าจอเพื่อเริ่มใช้งาน"
+          : "แตะหน้าจอเพื่อรีเซ็ตเวลา"}
       </p>
 
       <style>{`

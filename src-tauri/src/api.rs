@@ -471,14 +471,18 @@ pub async fn confirm_upload(
 
 // ============ Heartbeat & Status ============
 
+/// Notify backend that this machine is going offline (shutdown/exit)
+/// This should be called BEFORE disconnecting SSE to ensure immediate Telegram notification.
 #[tauri::command]
-pub async fn update_heartbeat(
+pub async fn notify_going_offline(
     state: tauri::State<'_, AppState>,
 ) -> Result<ApiResponse, String> {
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = format!("{}/api/machines-public/status", API_BASE_URL);
+    let url = format!("{}/api/machines-public/notify-going-offline", API_BASE_URL);
+
+    log::info!("[API] Notifying backend: going offline (machineId={})", machine_id);
 
     let res = client
         .post(&url)
@@ -492,11 +496,45 @@ pub async fn update_heartbeat(
     let status = res.status();
     let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
+    log::info!("[API] notify-going-offline response: status={}, body={}", status, body);
+
     Ok(ApiResponse {
         success: status.is_success(),
         data: Some(body),
         error: if !status.is_success() { Some(format!("Status: {}", status)) } else { None },
     })
+}
+
+/// Internal helper (non-command) for calling notify-going-offline from Rust shutdown flow.
+/// Has an 8-second timeout to avoid blocking shutdown if backend is unreachable.
+pub async fn notify_going_offline_internal(machine_id: &str, machine_port: &str) {
+    let client = Client::new();
+    let url = format!("{}/api/machines-public/notify-going-offline", API_BASE_URL);
+
+    log::info!("[API] notify_going_offline_internal: machineId={}", machine_id);
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        client
+            .post(&url)
+            .header("X-Machine-Port", machine_port)
+            .query(&[("machineId", machine_id)])
+            .header("Content-Length", "0")
+            .send(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(res)) => {
+            log::info!("[API] notify-going-offline response: {}", res.status());
+        }
+        Ok(Err(e)) => {
+            log::error!("[API] notify-going-offline request failed: {}", e);
+        }
+        Err(_) => {
+            log::warn!("[API] notify-going-offline timed out (8s)");
+        }
+    }
 }
 
 #[tauri::command]

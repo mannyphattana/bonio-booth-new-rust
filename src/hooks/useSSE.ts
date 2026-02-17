@@ -14,6 +14,7 @@ interface UseSSEOptions {
   onShutdown?: (countdownMinutes: number) => void;
   onShutdownCancel?: () => void;
   onMaintenanceMode?: (enabled: boolean) => void;
+  onConfigUpdated?: (configType: string, data?: any) => void;
   onConnectionChange?: (connected: boolean) => void;
 }
 
@@ -34,6 +35,7 @@ export function useSSE(options: UseSSEOptions) {
     onShutdown,
     onShutdownCancel,
     onMaintenanceMode,
+    onConfigUpdated,
     onConnectionChange,
   } = options;
 
@@ -95,6 +97,15 @@ export function useSSE(options: UseSSEOptions) {
           case "maintenance-off":
             if (onMaintenanceMode) onMaintenanceMode(false);
             break;
+          case "config-updated":
+            if (onConfigUpdated) {
+              const data = sseEvent.data as Record<string, unknown>;
+              onConfigUpdated(
+                (data?.configType as string) || "unknown",
+                data?.data,
+              );
+            }
+            break;
           // close-app is handled directly in Rust backend (calls app.exit)
         }
       });
@@ -123,7 +134,7 @@ export function useSSE(options: UseSSEOptions) {
       }
       unlistenersRef.current = [];
     };
-  }, [machineId, enabled, connect, onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConnectionChange]);
+  }, [machineId, enabled, connect, onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConfigUpdated, onConnectionChange]);
 
   return { destroy };
 }

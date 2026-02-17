@@ -22,6 +22,7 @@ import { useSSE } from "./hooks/useSSE";
 import { useShutdown } from "./hooks/useShutdown";
 import { useDeviceCheck } from "./hooks/useDeviceCheck";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
+import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import "./App.css";
 
 export interface ThemeData {
@@ -142,6 +143,14 @@ function App() {
     onMaintenanceMode: (enabled) => {
       setShowMaintenance(enabled);
     },
+    onConfigUpdated: (configType) => {
+      console.log("[App] Config updated via SSE:", configType);
+      // Re-fetch machine & theme data from backend
+      const savedMachineId = localStorage.getItem("machineId");
+      if (savedMachineId) {
+        initMachine(savedMachineId);
+      }
+    },
   });
 
   // Shutdown countdown — listens to Rust shutdown manager events
@@ -163,6 +172,19 @@ function App() {
 
   // Auto-update check every 5 minutes
   useAutoUpdate({ enabled: isVerified });
+
+  // Timer Auto-Shutdown — polls backend every 30s to check operating hours
+  // When outside operating hours, starts a 2-minute shutdown countdown
+  useTimerShutdown({
+    enabled: isVerified,
+    onMachineDataRefreshed: useCallback((data: any) => {
+      if (data.machine) {
+        setMachineData(data.machine);
+        if (data.theme) setThemeData(data.theme);
+        if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+      }
+    }, []),
+  });
 
   const handleMaintenanceResolved = useCallback(() => {
     setShowMaintenance(false);

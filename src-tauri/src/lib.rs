@@ -12,7 +12,7 @@ use api::AppState;
 use shutdown::ShutdownManager;
 use sse::SseClient;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Manager, RunEvent, WindowEvent};
 
 /// Connect SSE from the Rust backend. The backend maintains the persistent
 /// HTTP connection. When disconnected (app close/crash), the server detects it
@@ -39,14 +39,34 @@ fn destroy_sse(sse_client: tauri::State<'_, Mutex<SseClient>>) {
 }
 
 #[tauri::command]
-fn exit_app(app: tauri::AppHandle, sse_client: tauri::State<'_, Mutex<SseClient>>) {
-    // Destroy SSE - the backend will detect the drop and send Telegram notification
+fn exit_app(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    sse_client: tauri::State<'_, Mutex<SseClient>>,
+) {
+    // Step 1: Notify backend before exit (synchronous block_on for immediate notification)
+    {
+        let machine_id = state.machine_id.lock().unwrap().clone();
+        let machine_port = state.machine_port.lock().unwrap().clone();
+        if !machine_id.is_empty() {
+            log::info!("[exit_app] Notifying backend: going offline...");
+            // Use block_on since we're in a sync context
+            let _ = std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    api::notify_going_offline_internal(&machine_id, &machine_port).await;
+                });
+            })
+            .join();
+        }
+    }
+    // Step 2: Destroy SSE connection
     {
         let client = sse_client.lock().unwrap();
         client.destroy();
     }
-    // Small delay to ensure TCP FIN is sent
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    // Step 3: Small delay to ensure TCP FIN is sent
+    std::thread::sleep(std::time::Duration::from_millis(500));
     app.exit(0);
 }
 
@@ -197,6 +217,8 @@ pub fn run() {
             shutdown::start_transaction,
             shutdown::end_transaction,
             shutdown::execute_shutdown_now,
+            shutdown::ensure_shutdown_countdown,
+            shutdown::cancel_timer_shutdown,
             // Canon EDSDK
             canon::canon_initialize,
             canon::canon_terminate,
@@ -231,7 +253,7 @@ pub fn run() {
             api::create_presign_upload,
             api::upload_to_presigned_url,
             api::confirm_upload,
-            api::update_heartbeat,
+            api::notify_going_offline,
             api::get_machine_status,
             api::send_device_alert,
             api::send_device_status_report,
@@ -273,6 +295,50 @@ pub fn run() {
             video::compose_frame_video,
             video::cleanup_temp,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            match event {
+                RunEvent::WindowEvent {
+                    event: WindowEvent::CloseRequested { api, .. },
+                    ..
+                } => {
+                    // Prevent default close — we'll handle cleanup first
+                    api.prevent_close();
+
+                    let app_handle = app.clone();
+                    log::info!("[App] Window close requested, notifying backend before exit...");
+
+                    // Run async cleanup in a separate thread
+                    std::thread::spawn(move || {
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async {
+                            // Step 1: Notify backend (going offline) — 8s timeout
+                            if let Some(state) = app_handle.try_state::<AppState>() {
+                                let machine_id = state.machine_id.lock().unwrap().clone();
+                                let machine_port = state.machine_port.lock().unwrap().clone();
+                                if !machine_id.is_empty() {
+                                    api::notify_going_offline_internal(&machine_id, &machine_port)
+                                        .await;
+                                }
+                            }
+
+                            // Step 2: Destroy SSE connection
+                            if let Some(sse_client) =
+                                app_handle.try_state::<Mutex<SseClient>>()
+                            {
+                                sse_client.lock().unwrap().destroy();
+                            }
+
+                            // Step 3: Small delay for TCP FIN
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        });
+
+                        // Step 4: Exit
+                        app_handle.exit(0);
+                    });
+                }
+                _ => {}
+            }
+        });
 }

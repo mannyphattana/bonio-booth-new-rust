@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Shutdown reason
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -115,6 +115,41 @@ impl ShutdownManager {
         info!("[ShutdownManager] Countdown started: {}s", total_seconds);
     }
 
+    /// Ensure countdown is running — only starts if not already scheduled.
+    /// Used by timer auto-shutdown to avoid resetting an active countdown on every poll.
+    pub fn ensure_countdown(&self, minutes: Option<u32>, reason: ShutdownReason) {
+        let state = self.state.lock().unwrap();
+        if state.is_scheduled {
+            // Countdown already active, don't restart
+            info!(
+                "[ShutdownManager] ensure_countdown: already scheduled ({}s remaining), skipping",
+                state.remaining_seconds
+            );
+            return;
+        }
+        drop(state);
+        self.start_countdown(minutes, reason);
+    }
+
+    /// Cancel shutdown only if the reason matches the given reason.
+    /// Returns true if cancelled, false if no shutdown was active or reason didn't match.
+    pub fn cancel_if_reason(&self, reason: &ShutdownReason) -> bool {
+        let state = self.state.lock().unwrap();
+        if !state.is_scheduled {
+            return false;
+        }
+        if state.reason.as_ref() != Some(reason) {
+            info!(
+                "[ShutdownManager] cancel_if_reason: reason mismatch ({:?} vs {:?}), skipping",
+                state.reason, reason
+            );
+            return false;
+        }
+        drop(state);
+        self.cancel_shutdown();
+        true
+    }
+
     /// Cancel shutdown
     pub fn cancel_shutdown(&self) {
         info!("[ShutdownManager] Cancelling shutdown");
@@ -201,6 +236,7 @@ impl ShutdownManager {
     }
 
     /// Check if shutdown is scheduled
+    #[allow(dead_code)]
     pub fn is_shutdown_scheduled(&self) -> bool {
         self.state.lock().unwrap().is_scheduled
     }
@@ -316,10 +352,32 @@ impl ShutdownManager {
 async fn execute_os_shutdown(app_handle: Arc<Mutex<Option<AppHandle>>>) {
     error!("[ShutdownManager] ========== EXECUTING OS SHUTDOWN ==========");
 
-    // Notify backend (going offline) via API
-    // Note: The SSE connection drop handles most of this automatically
+    // Extract AppHandle from mutex synchronously (can't hold MutexGuard across .await)
+    let app_opt = app_handle.lock().unwrap().clone();
 
-    // Wait a bit for cleanup
+    // Step 1: Notify backend (going offline) via API — immediate Telegram notification
+    //         Timeout 8 seconds to avoid blocking if backend is unreachable
+    if let Some(ref app) = app_opt {
+        if let Some(state) = app.try_state::<crate::api::AppState>() {
+            let machine_id = state.machine_id.lock().unwrap().clone();
+            let machine_port = state.machine_port.lock().unwrap().clone();
+            if !machine_id.is_empty() {
+                info!("[ShutdownManager] Notifying backend: going offline...");
+                crate::api::notify_going_offline_internal(&machine_id, &machine_port).await;
+            }
+        }
+    }
+
+    // Step 2: Destroy SSE connection
+    if let Some(ref app) = app_opt {
+        if let Some(sse_client) = app.try_state::<std::sync::Mutex<crate::sse::SseClient>>() {
+            let client = sse_client.lock().unwrap();
+            client.destroy();
+            info!("[ShutdownManager] SSE connection destroyed");
+        }
+    }
+
+    // Step 3: Wait for TCP FIN to reach backend
     info!(
         "[ShutdownManager] Waiting {}s before shutdown...",
         POST_DESTROY_DELAY_SECONDS
@@ -344,7 +402,7 @@ async fn execute_os_shutdown(app_handle: Arc<Mutex<Option<AppHandle>>>) {
             Err(e) => {
                 error!("[ShutdownManager] Shutdown failed: {}", e);
                 // Reset state on failure
-                if let Some(app) = app_handle.lock().unwrap().as_ref() {
+                if let Some(ref app) = app_opt {
                     let _ = app.emit("shutdown-countdown", &ShutdownState::default());
                 }
             }
@@ -367,7 +425,7 @@ async fn execute_os_shutdown(app_handle: Arc<Mutex<Option<AppHandle>>>) {
             }
             Err(e) => {
                 error!("[ShutdownManager] Shutdown failed: {}", e);
-                if let Some(app) = app_handle.lock().unwrap().as_ref() {
+                if let Some(ref app) = app_opt {
                     let _ = app.emit("shutdown-countdown", &ShutdownState::default());
                 }
             }
@@ -429,4 +487,25 @@ pub fn end_transaction(shutdown_mgr: tauri::State<'_, Arc<ShutdownManager>>) {
 #[tauri::command]
 pub fn execute_shutdown_now(shutdown_mgr: tauri::State<'_, Arc<ShutdownManager>>) {
     shutdown_mgr.execute_immediate_shutdown();
+}
+
+/// Ensure countdown is running (idempotent — won't restart if already counting down)
+/// Used by the timer auto-shutdown poll from the frontend.
+#[tauri::command]
+pub fn ensure_shutdown_countdown(
+    shutdown_mgr: tauri::State<'_, Arc<ShutdownManager>>,
+    minutes: Option<u32>,
+    reason: Option<String>,
+) {
+    let reason = match reason.as_deref() {
+        Some("timer") => ShutdownReason::Timer,
+        _ => ShutdownReason::Manual,
+    };
+    shutdown_mgr.ensure_countdown(minutes, reason);
+}
+
+/// Cancel timer-based shutdown only (won't cancel manual/dashboard shutdowns)
+#[tauri::command]
+pub fn cancel_timer_shutdown(shutdown_mgr: tauri::State<'_, Arc<ShutdownManager>>) {
+    shutdown_mgr.cancel_if_reason(&ShutdownReason::Timer);
 }

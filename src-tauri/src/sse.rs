@@ -334,8 +334,31 @@ fn process_sse_event(app: &AppHandle, event_type: &str, data: &str) {
             }
         }
         "close-app" => {
-            info!("[SSE] Close-app event received, exiting...");
+            info!("[SSE] Close-app event received, notifying backend and exiting...");
+            // Notify backend before exit
+            if let Some(state) = app.try_state::<crate::api::AppState>() {
+                let machine_id = state.machine_id.lock().unwrap().clone();
+                let machine_port = state.machine_port.lock().unwrap().clone();
+                if !machine_id.is_empty() {
+                    let app_clone = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::api::notify_going_offline_internal(&machine_id, &machine_port).await;
+                        // Destroy SSE
+                        if let Some(sse_client) = app_clone.try_state::<std::sync::Mutex<crate::sse::SseClient>>() {
+                            sse_client.lock().unwrap().destroy();
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        app_clone.exit(0);
+                    });
+                    return; // Don't exit synchronously, the async task will do it
+                }
+            }
             app.exit(0);
+        }
+        "config-updated" => {
+            info!("[SSE] Config updated event received: {:?}", parsed);
+            // Already emitted to frontend above via sse-event
+            // Frontend useSSE.ts will handle the onConfigUpdated callback
         }
         _ => {}
     }
