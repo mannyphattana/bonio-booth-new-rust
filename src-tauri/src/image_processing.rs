@@ -189,14 +189,14 @@ pub async fn apply_lut_filter(
         );
     }
 
-    // Encode back to PNG base64
+    // Encode back to JPEG base64 (much smaller than PNG: ~10 MB → ~1-2 MB)
     let mut buf = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 92);
     DynamicImage::ImageRgba8(output)
         .write_with_encoder(encoder)
         .map_err(|e| format!("Encode error: {}", e))?;
 
-    let result = format!("data:image/png;base64,{}", STANDARD.encode(&buf));
+    let result = format!("data:image/jpeg;base64,{}", STANDARD.encode(&buf));
     Ok(result)
 }
 
@@ -350,14 +350,14 @@ pub async fn compose_frame(
         }
     }
 
-    // Encode result
+    // Encode result as JPEG (much smaller than PNG while retaining print quality)
     let mut buf = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 95);
     DynamicImage::ImageRgba8(canvas)
         .write_with_encoder(encoder)
         .map_err(|e| format!("Encode error: {}", e))?;
 
-    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&buf)))
+    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&buf)))
 }
 
 fn draw_photo_in_slot(

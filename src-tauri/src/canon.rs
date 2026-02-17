@@ -16,6 +16,12 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+/// Max pixel dimension (width or height) for captured photos.
+/// 3000px is enough for 600 DPI 4×6 prints while vastly reducing file size.
+const CAPTURE_MAX_DIMENSION: u32 = 3000;
+/// JPEG quality for re-encoded captures (1–100).
+const CAPTURE_JPEG_QUALITY: u8 = 92;
+
 #[cfg(target_os = "windows")]
 use crate::edsdk_sys::dynamic::*;
 #[cfg(target_os = "windows")]
@@ -175,6 +181,45 @@ fn resolve_dll_path(app: &tauri::AppHandle) -> String {
 }
 
 use tauri::Manager;
+
+// =============================================================================
+// Image Resize Helper
+// =============================================================================
+
+/// Resize a captured JPEG to fit within `max_dim` pixels (longest side) and
+/// re-encode as JPEG at the given quality.  If the image is already small
+/// enough it is still re-encoded to optimise compression.
+#[cfg(target_os = "windows")]
+fn resize_captured_jpeg(raw_bytes: &[u8], max_dim: u32, quality: u8) -> Result<Vec<u8>, String> {
+    use image::GenericImageView;
+
+    let img = image::load_from_memory(raw_bytes)
+        .map_err(|e| format!("Image load error: {}", e))?;
+
+    let (w, h) = img.dimensions();
+
+    let resized = if w > max_dim || h > max_dim {
+        img.resize(max_dim, max_dim, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    let mut buf = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+    resized
+        .write_with_encoder(encoder)
+        .map_err(|e| format!("JPEG encode error: {}", e))?;
+
+    info!(
+        "[Canon] Resized capture: {}x{} -> {}x{}, {:.1} MB -> {:.1} MB",
+        w, h,
+        resized.width(), resized.height(),
+        raw_bytes.len() as f64 / 1_048_576.0,
+        buf.len() as f64 / 1_048_576.0,
+    );
+
+    Ok(buf)
+}
 
 // =============================================================================
 // Event Handlers (Windows only)
@@ -820,8 +865,22 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
         match image_data {
             Some(data) => {
                 use base64::Engine;
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                info!("[Canon] Capture success: {} bytes ({:.1} MB)", data.len(), data.len() as f64 / 1024.0 / 1024.0);
+
+                // Resize to max CAPTURE_MAX_DIMENSION px and re-encode as
+                // JPEG to dramatically reduce payload size (~27 MB → ~1-2 MB).
+                let processed = resize_captured_jpeg(
+                    &data, CAPTURE_MAX_DIMENSION, CAPTURE_JPEG_QUALITY,
+                ).unwrap_or_else(|e| {
+                    warn!("[Canon] Resize failed ({}), using original", e);
+                    data.clone()
+                });
+
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&processed);
+                info!(
+                    "[Canon] Capture success: original {:.1} MB -> resized {:.1} MB",
+                    data.len() as f64 / 1_048_576.0,
+                    processed.len() as f64 / 1_048_576.0,
+                );
                 Ok(CaptureResult {
                     success: true,
                     error: None,
