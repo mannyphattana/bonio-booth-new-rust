@@ -190,10 +190,15 @@ pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
 
             // Printer is online only if:
             // 1. Not marked as WorkOffline
-            // 2. Status is Normal (0)
+            // 2. Status is Normal (0), Printing (1024), Processing (128), or Busy (10)
+            //    (Win32_Printer.PrinterState values: 0=Idle, 1=Paused, 2=Error, 3=Deleting, 4=PaperJam, 5=PaperOut)
+            //    Common active states: 1024 (Printing), 128 (Processing)
             // 3. For USB printers: PnP device must be physically present
+            //
+            // We treat 0 (Normal) and specific active states as "Online".
+            // We treat Error(2), PaperJam(4), PaperOut(5) as "Offline/Error".
             let is_online = !work_offline
-                && status_num == 0
+                && (status_num == 0 || status_num == 1024 || status_num == 128 || status_num == 10)
                 && (!is_usb || pnp_connected);
 
             PrinterInfo {

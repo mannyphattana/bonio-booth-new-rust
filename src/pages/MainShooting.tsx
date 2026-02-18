@@ -149,6 +149,7 @@ export default function MainShooting({ theme, machineData }: Props) {
   const [cameraReady, setCameraReady] = useState(false);
   const [videoDimensions, setVideoDimensions] = useState({ width: 1920, height: 1080 });
   const [containerDimensions, setContainerDimensions] = useState({ width: 800, height: 600 });
+  const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
   useIdleTimeout();
 
   // Track container dimensions for CropOverlay
@@ -829,19 +830,47 @@ export default function MainShooting({ theme, machineData }: Props) {
     }
   }, [cameraReady, cameraError]);
 
-  // Navigate when done
+  // Wait for videos or timeout
+  useEffect(() => {
+    if (phase === "done") {
+      const timer = setTimeout(() => {
+        console.warn("[MainShooting] Video wait timeout reached (10s)");
+        setVideosReadyTimeout(true);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [phase]);
+
+  // Navigate when done AND videos ready (or timed out)
   useEffect(() => {
     if (phase === "done" && captures.length >= totalCaptures) {
-      setTimeout(() => {
-        navigate("/slot-selection", {
-          state: {
-            ...state,
-            captures,
-          },
-        });
-      }, 1500);
+      // Check if we need to wait for videos
+      const isCanonMovie =
+        cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback;
+      
+      const allVideosReady = captures.every(
+        (c) => c.videoPath && c.videoPath.length > 0
+      );
+
+      // If waiting for videos, show a persistent "Processing..." overlay
+      // (This is implicitly handled by not navigating away yet)
+
+      if (!isCanonMovie || allVideosReady || videosReadyTimeout) {
+        // Proceed to next page
+        const delay = setTimeout(() => {
+          navigate("/slot-selection", {
+            state: {
+              ...state,
+              captures,
+            },
+          });
+        }, 500);
+        return () => clearTimeout(delay);
+      } else {
+        console.log(`[MainShooting] Waiting for videos... (${captures.filter(c => c.videoPath).length}/${totalCaptures})`);
+      }
     }
-  }, [phase, captures, totalCaptures]);
+  }, [phase, captures, totalCaptures, videosReadyTimeout, navigate, state]);
 
   // Camera disconnect check
   useEffect(() => {

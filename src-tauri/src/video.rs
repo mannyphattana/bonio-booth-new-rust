@@ -502,10 +502,12 @@ pub async fn compose_frame_video(
         let sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).round() as i64;
 
         // Chain: trim to exactly 9s → reset pts → scale to cover → crop to exact slot → optional LUT → format
-        // trim=duration=9 ensures all slots have identical duration (input may vary due to frame-based recording)
+        // trim=duration=9 ensures all slots have identical duration
+        // scaling: add 2 extra pixels (+2) to width/height to ensure it covers the slot fully
+        // this prevents single-pixel white gaps due to rounding errors
         let mut chain = format!(
             "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}",
-            i, sw, sh, sw, sh
+            i, sw+2, sh+2, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));
