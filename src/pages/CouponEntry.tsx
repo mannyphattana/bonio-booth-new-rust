@@ -161,17 +161,8 @@ export default function CouponEntry({ theme }: Props) {
       />
 
       <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "10%",
-          padding: 20,
-          width: "100%",
-          flex: 1,
-          overflow: "hidden",
-        }}
+        className="page-content"
+        style={{ gap: "10%", padding: 20, width: "100%", overflow: "hidden" }}
       >
         {/* Title */}
         <div style={{ textAlign: "center", marginTop: 20 }}>

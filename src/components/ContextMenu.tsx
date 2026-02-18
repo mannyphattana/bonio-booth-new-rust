@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import CameraConfigModal from "./CameraConfigModal";
 import PrinterConfigModal from "./PrinterConfigModal";
@@ -11,7 +12,13 @@ interface Props {
   onBeforeClose?: () => void;
 }
 
-export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClose: _onBeforeClose }: Props) {
+export default function ContextMenu({
+  open,
+  onClose,
+  onFormatReset,
+  // onBeforeClose,
+}: Props) {
+  const navigate = useNavigate();
   const [activeModal, setActiveModal] = useState<
     "camera" | "printer" | "paper" | null
   >(null);
@@ -74,28 +81,19 @@ export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClos
   // If a sub-modal is active, show it instead
   if (activeModal === "camera") {
     return (
-      <CameraConfigModal
-        open={true}
-        onClose={() => setActiveModal(null)}
-      />
+      <CameraConfigModal open={true} onClose={() => setActiveModal(null)} />
     );
   }
 
   if (activeModal === "printer") {
     return (
-      <PrinterConfigModal
-        open={true}
-        onClose={() => setActiveModal(null)}
-      />
+      <PrinterConfigModal open={true} onClose={() => setActiveModal(null)} />
     );
   }
 
   if (activeModal === "paper") {
     return (
-      <PaperPositionModal
-        open={true}
-        onClose={() => setActiveModal(null)}
-      />
+      <PaperPositionModal open={true} onClose={() => setActiveModal(null)} />
     );
   }
 
@@ -157,7 +155,27 @@ export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClos
 
         <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
 
-        {/* 4. Format Reset */}
+        {/* 4. Request Image (พิมพ์ย้อนหลัง) */}
+        <button
+          className="context-menu-item context-menu-config-item"
+          onClick={() => {
+            onClose();
+            navigate("/request-image");
+          }}
+        >
+          <span style={{ fontSize: 24 }}>🖼️</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>พิมพ์ย้อนหลัง</div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+              Request Image Print
+            </div>
+          </div>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+        </button>
+
+        <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
+
+        {/* 5. Format Reset */}
         {!showResetConfirm ? (
           <button
             className="context-menu-item"

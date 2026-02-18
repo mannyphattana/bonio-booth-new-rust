@@ -43,17 +43,6 @@ export default function GetHelp({ theme, lineUrl }: Props) {
     backgroundPosition: "center",
   };
 
-  const contentStyle: React.CSSProperties = {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    overflowY: "auto",
-    padding: "20px",
-    textAlign: "center",
-  };
-
   const illustrationStyle: React.CSSProperties = {
     margin: "20px 0 30px 0",
     display: "flex",
@@ -126,7 +115,10 @@ export default function GetHelp({ theme, lineUrl }: Props) {
         />
       )}
 
-      <div style={contentStyle}>
+      <div
+        className="page-content"
+        style={{ overflowY: "auto", padding: "20px", textAlign: "center" }}
+      >
         <div style={illustrationStyle}>
           <img src={getHelpImage} alt="Get Help" width="100%" height="auto" />
         </div>

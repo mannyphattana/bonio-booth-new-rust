@@ -69,6 +69,15 @@ button:active {
   overflow: hidden;
 }
 
+.page-content {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
 .back-button {
   position: absolute;
   top: 20px;
@@ -617,6 +626,7 @@ button:active {
   color: #51cf66;
   background: rgba(81, 207, 102, 0.1);
 }
+
 /* ===================== */
 /* MIGRATED GLOBAL STYLES */
 /* ===================== */
@@ -625,7 +635,8 @@ button:active {
 .title-thai {
   font-size: 3rem;
   font-weight: 700;
-  color: #fff; /* Default, override with theme prop/style */
+  color: #fff;
+  /* Default, override with theme prop/style */
   margin: 0 0 8px 0;
   line-height: 1.2;
 }
@@ -633,7 +644,8 @@ button:active {
 .title-english {
   font-size: 1.5rem;
   font-weight: 500;
-  color: #fff; /* Default */
+  color: #fff;
+  /* Default */
   margin: 0;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -730,7 +742,8 @@ button:active {
   gap: 8px;
   min-height: 140px;
   box-shadow: none;
-  background: transparent; /* Default */
+  background: transparent;
+  /* Default */
 }
 
 .option-button:hover {
@@ -775,8 +788,13 @@ button:active {
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Alert Modal */
@@ -806,7 +824,7 @@ button:active {
   max-width: 600px;
   text-align: center;
   z-index: 2;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
   animation: modalFadeIn 0.25s ease;
 }
 
@@ -842,8 +860,15 @@ button:active {
 }
 
 @keyframes modalFadeIn {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* Icon Mask Utility */

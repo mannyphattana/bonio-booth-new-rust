@@ -164,17 +164,7 @@ export default function PaymentQR({ theme }: Props) {
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 24,
-          padding: "0 40px",
-          flex: 1,
-        }}
-      >
+      <div className="page-content" style={{ gap: 24, padding: "0 40px" }}>
         {/* Title */}
         <div style={{ textAlign: "center", marginBottom: 20 }}>
           <h1
