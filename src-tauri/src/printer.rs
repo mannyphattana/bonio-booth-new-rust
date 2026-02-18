@@ -94,23 +94,58 @@ pub async fn list_dslr_cameras() -> Result<Vec<DslrCameraInfo>, String> {
 
 #[tauri::command]
 pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
+    // Use Win32_Printer (WMI/CIM) instead of Get-Printer cmdlet.
+    // Win32_Printer reflects physical USB disconnect much faster than Get-Printer.
+    // WorkOffline from Get-Printer often stays false even after USB unplug.
+    //
+    // We also cross-check with Get-PnpDevice for USB printers —
+    // if the USB device is physically gone, mark the printer as offline
+    // regardless of what WMI reports.
+    let ps_cmd = r#"
+        $printers = Get-CimInstance Win32_Printer | Select-Object Name,
+            @{N='PrinterStatus';E={$_.PrinterState}},
+            WorkOffline
+        # Get list of currently connected USB printer PnP devices
+        $usbPrinters = @()
+        try {
+            $pnp = Get-PnpDevice -Class Printer -Status OK -ErrorAction SilentlyContinue
+            foreach ($d in $pnp) { $usbPrinters += $d.FriendlyName }
+        } catch {}
+        # Build result: mark USB printers as offline if PnP device is gone
+        $result = @()
+        foreach ($p in $printers) {
+            $portInfo = Get-PrinterPort -Name (Get-Printer -Name $p.Name -ErrorAction SilentlyContinue).PortName -ErrorAction SilentlyContinue
+            $isUsb = $false
+            if ($portInfo -and $portInfo.Description -like '*USB*') { $isUsb = $true }
+            # For USB printers: cross-check with PnP device list
+            $pnpConnected = $true
+            if ($isUsb) {
+                $pnpConnected = $usbPrinters -contains $p.Name
+            }
+            $result += [PSCustomObject]@{
+                Name = $p.Name
+                PrinterStatus = $p.PrinterStatus
+                WorkOffline = $p.WorkOffline
+                PnpConnected = $pnpConnected
+                IsUsb = $isUsb
+            }
+        }
+        if ($result.Count -eq 0) { "[]" } else { $result | ConvertTo-Json }
+    "#;
+
     let output = hidden_command("powershell")
-        .args(&[
-            "-NoProfile",
-            "-Command",
-            "Get-Printer | Select-Object Name, PrinterStatus, WorkOffline | ConvertTo-Json",
-        ])
+        .args(&["-NoProfile", "-Command", ps_cmd])
         .output()
         .map_err(|e| format!("Failed to get printers: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
-    if stdout.trim().is_empty() {
+    if stdout.trim().is_empty() || stdout.trim() == "[]" {
         return Ok(vec![]);
     }
 
     let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("Parse error: {}", e))?;
+        serde_json::from_str(&stdout.trim()).map_err(|e| format!("Parse error: {}", e))?;
 
     let printers_array = if parsed.is_array() {
         parsed.as_array().unwrap().clone()
@@ -134,6 +169,14 @@ pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
                 .get("WorkOffline")
                 .and_then(|w| w.as_bool())
                 .unwrap_or(false);
+            let pnp_connected = p
+                .get("PnpConnected")
+                .and_then(|w| w.as_bool())
+                .unwrap_or(true);
+            let is_usb = p
+                .get("IsUsb")
+                .and_then(|w| w.as_bool())
+                .unwrap_or(false);
 
             let status = match status_num {
                 0 => "Normal".to_string(),
@@ -145,9 +188,17 @@ pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
                 _ => format!("Unknown({})", status_num),
             };
 
+            // Printer is online only if:
+            // 1. Not marked as WorkOffline
+            // 2. Status is Normal (0)
+            // 3. For USB printers: PnP device must be physically present
+            let is_online = !work_offline
+                && status_num == 0
+                && (!is_usb || pnp_connected);
+
             PrinterInfo {
                 name,
-                is_online: !work_offline && status_num == 0,
+                is_online,
                 status,
             }
         })
@@ -158,8 +209,29 @@ pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
 
 #[tauri::command]
 pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, String> {
+    // Use same detection logic as get_printers: WMI + PnP cross-check
     let ps_cmd = format!(
-        "Get-Printer -Name '{}' | Select-Object Name, PrinterStatus, WorkOffline | ConvertTo-Json",
+        r#"
+        $p = Get-CimInstance Win32_Printer -Filter "Name='{}'" | Select-Object Name, @{{N='PrinterStatus';E={{$_.PrinterState}}}}, WorkOffline
+        if (-not $p) {{ Write-Output ''; exit }}
+        $portInfo = Get-PrinterPort -Name (Get-Printer -Name '{}' -ErrorAction SilentlyContinue).PortName -ErrorAction SilentlyContinue
+        $isUsb = $false
+        if ($portInfo -and $portInfo.Description -like '*USB*') {{ $isUsb = $true }}
+        $pnpConnected = $true
+        if ($isUsb) {{
+            $pnp = @()
+            try {{ $pnp = Get-PnpDevice -Class Printer -Status OK -ErrorAction SilentlyContinue | ForEach-Object {{ $_.FriendlyName }} }} catch {{}}
+            $pnpConnected = $pnp -contains $p.Name
+        }}
+        [PSCustomObject]@{{
+            Name = $p.Name
+            PrinterStatus = $p.PrinterStatus
+            WorkOffline = $p.WorkOffline
+            PnpConnected = $pnpConnected
+            IsUsb = $isUsb
+        }} | ConvertTo-Json
+        "#,
+        printer_name.replace('\'', "''"),
         printer_name.replace('\'', "''")
     );
 
@@ -175,7 +247,7 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
     }
 
     let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).map_err(|e| format!("Parse error: {}", e))?;
+        serde_json::from_str(&stdout.trim()).map_err(|e| format!("Parse error: {}", e))?;
 
     let name = parsed
         .get("Name")
@@ -190,6 +262,14 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
         .get("WorkOffline")
         .and_then(|w| w.as_bool())
         .unwrap_or(false);
+    let pnp_connected = parsed
+        .get("PnpConnected")
+        .and_then(|w| w.as_bool())
+        .unwrap_or(true);
+    let is_usb = parsed
+        .get("IsUsb")
+        .and_then(|w| w.as_bool())
+        .unwrap_or(false);
 
     let status = match status_num {
         0 => "Normal".to_string(),
@@ -200,7 +280,7 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
 
     Ok(PrinterInfo {
         name,
-        is_online: !work_offline && status_num == 0,
+        is_online: !work_offline && status_num == 0 && (!is_usb || pnp_connected),
         status,
     })
 }

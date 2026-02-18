@@ -140,7 +140,7 @@ export default function MainShooting({ theme, machineData }: Props) {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [, setCurrentCapture] = useState(0);
   const [countdown, setCountdown] = useState(-1);
-  const [phase, setPhase] = useState<"ready" | "countdown" | "flash" | "preview" | "done">("ready");
+  const [phase, setPhase] = useState<"ready" | "countdown" | "flash" | "preview" | "done" | "preparing">("ready");
   const [isRecording, setIsRecording] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
   const [showGetReady, setShowGetReady] = useState(false);
@@ -599,26 +599,54 @@ export default function MainShooting({ theme, machineData }: Props) {
     for (let i = 0; i < totalCaptures; i++) {
       console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
 
-      // --- Countdown with video recording ---
+      // --- Canon: start recording BEFORE countdown ---
+      if (cameraTypeRef.current === "canon") {
+        console.log(`[Canon] Starting recording before countdown for capture ${i + 1}`);
+        setPhase("preparing"); // show "Processing..." overlay
+        
+        // Start recording
+        const ok = await canonCamera.startMovieRecording();
+        
+        // Wait 1.5s to ensure camera completely switches to video mode and settles
+        // This prevents the "freeze" or mode-switch OSD from appearing at the start of countdown
+        await new Promise((r) => setTimeout(r, 1500));
+
+        if (ok) {
+          isRecordingRef.current = true;
+          setIsRecording(true);
+        } else {
+          console.warn("[Canon] Movie recording failed, falling back to frame capture");
+          canonCamera.startFrameRecording();
+          isRecordingRef.current = true;
+          setIsRecording(true);
+          (window as any).__canonMovieFallback = true;
+        }
+      }
+
+      // --- Countdown ---
       setPhase("countdown");
-      const recordStartAt = Math.min(cameraCountdown, 3);
 
       await new Promise<void>((resolve) => {
         let currentCount = cameraCountdown;
         setCountdown(currentCount);
 
-        // Start recording immediately if countdown <= 3
-        if (cameraCountdown <= 3) {
-          startRecording();
+        // Webcam: start recording at appropriate time (Canon already recording)
+        if (cameraTypeRef.current !== "canon") {
+          if (cameraCountdown <= 3) {
+            startRecording();
+          }
         }
 
         const timer = setInterval(() => {
           currentCount--;
           setCountdown(currentCount);
 
-          // Start recording at 3 seconds remaining (for countdown > 3)
-          if (currentCount === recordStartAt && cameraCountdown > 3 && !isRecordingRef.current) {
-            startRecording();
+          // Webcam only: start recording at 3 seconds remaining
+          if (cameraTypeRef.current !== "canon") {
+            const recordStartAt = Math.min(cameraCountdown, 3);
+            if (currentCount === recordStartAt && cameraCountdown > 3 && !isRecordingRef.current) {
+              startRecording();
+            }
           }
 
           if (currentCount <= 0) {
@@ -632,7 +660,6 @@ export default function MainShooting({ theme, machineData }: Props) {
 
       // 1. Stop recording
       let recordingResult: { url: string; blob: Blob | null } = { url: "", blob: null };
-      let canonMoviePath = "";
 
       if (cameraTypeRef.current === "canon") {
         if ((window as any).__canonMovieFallback) {
@@ -643,20 +670,26 @@ export default function MainShooting({ theme, machineData }: Props) {
           (window as any).__lastCanonFrames = recording.frames;
           (window as any).__canonMovieFallback = false;
         } else {
-          // Real movie recording: stop and download from camera
-          // Note: stopMovieRecording is blocking — camera writes file then transfers
+          // Mark as not recording in UI — actual recording stop happens
+          // inside takePhotoDuringRecording (after shutter fires).
           isRecordingRef.current = false;
           setIsRecording(false);
-          canonMoviePath = await canonCamera.stopMovieRecording();
-          console.log(`[Canon] Movie file: ${canonMoviePath}`);
         }
       } else {
         // Webcam: stop MediaRecorder and wait for blob
         recordingResult = await waitForVideo();
       }
 
-      // 2. Take photo IMMEDIATELY (no blocking video processing first!)
-      const photoData = await takePhoto();
+      // 2. Take photo IMMEDIATELY
+      //    Canon: photo-during-recording (PressShutterButton while movie is active,
+      //    then stops recording internally — zero mode-switch delay)
+      //    Fallback: normal takePhoto
+      let photoData: string;
+      if (cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback) {
+        photoData = await canonCamera.takePhotoDuringRecording();
+      } else {
+        photoData = await takePhoto();
+      }
 
       // 3. Flash effect
       setShowFlash(true);
@@ -664,62 +697,115 @@ export default function MainShooting({ theme, machineData }: Props) {
       await new Promise((r) => setTimeout(r, 300));
       setShowFlash(false);
 
-      // 4. Save video
-      let videoUrl = "";
-      let videoPath = "";
+      // 4. Add photo to grid IMMEDIATELY — don't wait for video download
+      //    Video path will be patched in asynchronously below.
+      const captureIndex = i;
 
-      if (cameraTypeRef.current === "canon") {
-        if (canonMoviePath) {
-          // Real EDSDK movie: file already on disk from camera
-          videoPath = canonMoviePath;
-          console.log(`[Canon] Using EDSDK movie file: ${videoPath}`);
-        } else {
-          // Fallback: create video from JPEG frames in background
-          const frames = (window as any).__lastCanonFrames as string[] || [];
-          if (frames.length > 0) {
-            const captureIndex = i;
-            console.log(`[Canon] Fallback: creating video from ${frames.length} frames...`);
-            createVideoFromFrames(frames)
-              .then(async (result) => {
-                console.log(`[Canon] Background video ready for capture ${captureIndex + 1}`);
-                if (result.blob) {
-                  const path = await saveVideoToTemp(result.blob, captureIndex);
-                  setCaptures((prev) => {
-                    const updated = [...prev];
-                    if (updated[captureIndex]) {
-                      updated[captureIndex] = {
-                        ...updated[captureIndex],
-                        video: result.url,
-                        videoPath: path,
-                      };
-                    }
-                    return updated;
-                  });
+      if (cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback) {
+        // Canon real movie: show photo now, download + trim video in background
+        const newCapture: Capture = {
+          photo: photoData,
+          video: "",
+          videoPath: "",
+        };
+        setCaptures((prev) => [...prev, newCapture]);
+        setCurrentCapture(i + 1);
+        setPhase("preview");
+
+        // Background: finalize movie download → trim → patch capture
+        (async () => {
+          try {
+            let moviePath = await canonCamera.finalizeMovieDownload();
+            console.log(`[Canon] Movie file: ${moviePath}`);
+
+            // Trim to keep only the last 3 seconds if countdown > 3
+            if (moviePath && cameraCountdown > 3) {
+              try {
+                const trimmedPath: string = await invoke("trim_video_keep_last", {
+                  inputPath: moviePath,
+                  keepSeconds: 3,
+                  outputFilename: `trimmed_capture_${captureIndex}.mp4`,
+                });
+                console.log(`[Canon] Trimmed to last 3s: ${trimmedPath}`);
+                moviePath = trimmedPath;
+              } catch (err) {
+                console.warn(`[Canon] Trim failed, using full video:`, err);
+              }
+            }
+
+            if (moviePath) {
+              setCaptures((prev) => {
+                const updated = [...prev];
+                if (updated[captureIndex]) {
+                  updated[captureIndex] = {
+                    ...updated[captureIndex],
+                    videoPath: moviePath,
+                  };
                 }
-              })
-              .catch((err) => {
-                console.error(`[Canon] Background video processing failed:`, err);
+                return updated;
               });
+              console.log(`[Canon] Video path patched for capture ${captureIndex + 1}`);
+            }
+          } catch (err) {
+            console.error(`[Canon] Background movie finalize failed:`, err);
           }
-          (window as any).__lastCanonFrames = null;
+        })();
+      } else if (cameraTypeRef.current === "canon") {
+        // Canon fallback (frame recording)
+        const frames = (window as any).__lastCanonFrames as string[] || [];
+        let videoUrl = "";
+        let videoPath = "";
+
+        if (frames.length > 0) {
+          console.log(`[Canon] Fallback: creating video from ${frames.length} frames...`);
+          createVideoFromFrames(frames)
+            .then(async (result) => {
+              console.log(`[Canon] Background video ready for capture ${captureIndex + 1}`);
+              if (result.blob) {
+                const path = await saveVideoToTemp(result.blob, captureIndex);
+                setCaptures((prev) => {
+                  const updated = [...prev];
+                  if (updated[captureIndex]) {
+                    updated[captureIndex] = {
+                      ...updated[captureIndex],
+                      video: result.url,
+                      videoPath: path,
+                    };
+                  }
+                  return updated;
+                });
+              }
+            })
+            .catch((err) => {
+              console.error(`[Canon] Background video processing failed:`, err);
+            });
         }
+        (window as any).__lastCanonFrames = null;
+
+        const newCapture: Capture = {
+          photo: photoData,
+          video: videoUrl,
+          videoPath: videoPath,
+        };
+        setCaptures((prev) => [...prev, newCapture]);
+        setCurrentCapture(i + 1);
+        setPhase("preview");
       } else {
         // Webcam: video is already ready
-        videoUrl = recordingResult.url;
+        let videoUrl = recordingResult.url;
+        let videoPath = "";
         if (recordingResult.blob) {
           videoPath = await saveVideoToTemp(recordingResult.blob, i);
         }
+        const newCapture: Capture = {
+          photo: photoData,
+          video: videoUrl,
+          videoPath: videoPath,
+        };
+        setCaptures((prev) => [...prev, newCapture]);
+        setCurrentCapture(i + 1);
+        setPhase("preview");
       }
-
-      // 5. Add capture to state
-      const newCapture: Capture = {
-        photo: photoData,
-        video: videoUrl,
-        videoPath: videoPath,
-      };
-      setCaptures((prev) => [...prev, newCapture]);
-      setCurrentCapture(i + 1);
-      setPhase("preview");
 
       console.log(`[Capture] Capture ${i + 1}/${totalCaptures} completed`);
 
@@ -977,6 +1063,27 @@ export default function MainShooting({ theme, machineData }: Props) {
               >
                 {countdown}
               </div>
+            </div>
+          )}
+          
+          {/* Preparing / Processing overlay */}
+          {phase === "preparing" && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.7)",
+                zIndex: 40,
+                color: "white",
+              }}
+            >
+              <div className="loading-spinner" style={{ marginBottom: 20 }}></div>
+              <div style={{ fontSize: 24, fontWeight: 600 }}>กำลังประมวลผล...</div>
+              <div style={{ fontSize: 16, marginTop: 8, opacity: 0.8 }}>Starting Video Mode</div>
             </div>
           )}
 

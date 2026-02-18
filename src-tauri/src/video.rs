@@ -167,6 +167,51 @@ pub async fn save_temp_video(
     Ok(file_path.to_string_lossy().to_string())
 }
 
+/// Trim a video to keep only the last N seconds.
+/// Uses FFmpeg `-sseof` to seek from the end.
+/// If the video is shorter than `keep_seconds`, the whole video is kept.
+/// Returns the path to the trimmed output file.
+#[tauri::command]
+pub async fn trim_video_keep_last(
+    input_path: String,
+    keep_seconds: f64,
+    output_filename: String,
+) -> Result<String, String> {
+    let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
+
+    let output_path = temp_dir.join(&output_filename);
+    let ffmpeg = get_ffmpeg_path();
+
+    // Use -sseof to seek from the end of the file
+    // e.g. -sseof -3 starts 3 seconds before the end
+    let sseof_value = format!("-{}", keep_seconds);
+
+    let status = hidden_command(&ffmpeg)
+        .args(&[
+            "-y",
+            "-sseof", &sseof_value,
+            "-i", &input_path,
+            "-t", &format!("{}", keep_seconds),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-an",
+            "-movflags", "+faststart",
+            &output_path.to_string_lossy(),
+        ])
+        .output()
+        .map_err(|e| format!("FFmpeg trim error: {}", e))?;
+
+    if !status.status.success() {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        return Err(format!("FFmpeg trim failed: {}", stderr));
+    }
+
+    println!("[trim_video_keep_last] kept last {}s: {} → {}", keep_seconds, input_path, output_path.display());
+    Ok(output_path.to_string_lossy().to_string())
+}
+
 /// Loop a 3-second video to create a 9-second video using ffmpeg
 /// NOTE: Kept for standalone use. For framed video output, use compose_frame_video instead.
 #[tauri::command]
@@ -470,8 +515,11 @@ pub async fn compose_frame_video(
     }
 
     // Frame image scaled to output size (with alpha)
+    // Use explicit color range (in_range=pc for full-range PNG, out_range=tv for limited-range video)
+    // and BT.709 color matrix to prevent color shift during RGB→YUV conversion.
+    // Without these, #cf3337 in the PNG would appear as ~#dd4135 in the video.
     filter_parts.push(format!(
-        "[{}:v]scale={}:{},format=yuva420p[frame_img]",
+        "[{}:v]scale={}:{}:in_range=pc:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuva420p[frame_img]",
         num_videos, out_w, out_h
     ));
 

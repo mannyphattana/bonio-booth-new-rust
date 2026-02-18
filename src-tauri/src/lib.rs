@@ -241,6 +241,9 @@ pub fn run() {
             canon::canon_get_available_shots,
             canon::canon_start_movie_record,
             canon::canon_stop_movie_record,
+            canon::canon_stop_movie_record_fast,
+            canon::canon_take_photo_during_recording,
+            canon::canon_finalize_movie_download,
             canon::canon_is_movie_recording,
             // API commands
             api::verify_machine,
@@ -291,6 +294,7 @@ pub fn run() {
             video::check_ffmpeg_available,
             video::ensure_ffmpeg,
             video::save_temp_video,
+            video::trim_video_keep_last,
             video::create_looped_video,
             video::apply_lut_to_video,
             video::convert_video_to_mp4,

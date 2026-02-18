@@ -1605,8 +1605,51 @@ pub fn canon_start_movie_record() -> Result<bool, String> {
             // Brief stabilization
             std::thread::sleep(std::time::Duration::from_millis(200));
 
+            // CRITICAL: Disable AF and Drive modes that cause freezes during capture
+            // 2a. Disable Movie Servo AF (prevents focus hunting/locking during shutter press)
+            let servo_af: EdsUInt32 = 0; // 0 = OFF
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_MovieServoAf,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &servo_af as *const _ as *const c_void,
+            );
+
+            // 2b. Set AF Mode to One-Shot if possible (prevents continuous AF)
+            let af_mode: EdsUInt32 = 0; // One-Shot usually 0 or 3 depending on cam
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_AFMode,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &af_mode as *const _ as *const c_void,
+            );
+
+            // 2c. Disable Mirror Lockup (prevent double-press requirement)
+            let mlu: EdsUInt32 = 0; // Disable
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_MirrorLockUpState,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &mlu as *const _ as *const c_void,
+            );
+
+             // 2d. Force JPEG Large (no RAW buffer overhead)
+            let quality: EdsUInt32 = 0x0010ff0f; // EdsImageQuality_LJ (Large Fine JPEG)
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_ImageQuality,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &quality as *const _ as *const c_void,
+            );
+
+
             // 3. Ensure live view is outputting to PC (required for movie recording)
             let evf_output: EdsUInt32 = kEdsEvfOutputDevice_PC;
+
             let _ = EdsSetPropertyData(
                 camera_ref,
                 kEdsPropID_Evf_OutputDevice,
@@ -1750,6 +1793,475 @@ pub fn canon_stop_movie_record() -> Result<String, String> {
                 return Ok(path.clone());
             }
         }
+
+        Err("Movie download timeout — no file received from camera".to_string())
+    }
+}
+
+/// Fast movie stop — stops recording and switches to photo mode immediately.
+///
+/// Unlike `canon_stop_movie_record`, this does NOT wait for the movie file
+/// download from the SD card.  It returns as soon as the camera is ready
+/// for a still capture (~200 ms instead of 1-2 s).
+///
+/// Call `canon_finalize_movie_download` later to pump events, download the
+/// movie file, and retrieve its local path.
+///
+/// Flow:
+/// 1. Set kEdsPropID_Record = 0 (stop recording)
+/// 2. Switch to photo mode (MovieSelectSwOFF)
+/// 3. Restore SaveTo = Host + capacity
+/// 4. Return immediately — IS_MOVIE_RECORDING stays true so the event
+///    handler still catches the DirItemCreated download event later.
+#[tauri::command]
+pub fn canon_stop_movie_record_fast() -> Result<bool, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Canon EDSDK is only supported on Windows".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if !IS_MOVIE_RECORDING.load(Ordering::SeqCst) {
+            return Err("Not currently recording".to_string());
+        }
+
+        let manager = CAMERA_MANAGER
+            .get()
+            .ok_or("Camera manager not initialized")?;
+
+        let camera_ref = {
+            let manager = manager.lock().map_err(|e| e.to_string())?;
+            manager.camera_ref.ok_or("No camera connected")?
+        };
+
+        // Reset movie data so the event handler writes fresh download info
+        let movie_data = MOVIE_DATA.get_or_init(|| Arc::new(Mutex::new(MovieData::default())));
+        if let Ok(mut md) = movie_data.lock() {
+            md.movie_path = None;
+            md.download_complete = false;
+            md.download_error = None;
+        }
+
+        unsafe {
+            // 1. Stop recording
+            let record_stop: EdsUInt32 = kEdsRecord_End;
+            let error = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_Record,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &record_stop as *const _ as *const c_void,
+            );
+            if error != EDS_ERR_OK {
+                warn!("[Canon] Stop recording property set failed: {}", error_to_string(error));
+            }
+
+            // 2. Switch back to photo mode
+            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_MovieSelectSwOFF, 0);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            // 3. Stop live view (so takePicture doesn't need a separate invoke)
+            let evf_output: EdsUInt32 = 0;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_Evf_OutputDevice,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &evf_output as *const _ as *const c_void,
+            );
+
+            // 4. Restore SaveTo = Host (required for still capture)
+            let save_to: EdsUInt32 = kEdsSaveTo_Host;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_SaveTo,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &save_to as *const _ as *const c_void,
+            );
+
+            let capacity = EdsCapacity {
+                numberOfFreeClusters: 0x7FFFFFFF,
+                bytesPerSector: 512,
+                reset: 1,
+            };
+            let _ = EdsSetCapacity(camera_ref, capacity);
+        }
+
+        info!("[Canon] Movie recording stopped (fast), LV off — ready for photo, movie download pending");
+        Ok(true)
+    }
+}
+
+/// Take a photo WHILE the camera is still recording video.
+///
+/// Uses `PressShutterButton` to snap a still image during movie recording,
+/// then immediately stops the recording.  The photo is returned synchronously;
+/// the movie file download happens later via `canon_finalize_movie_download`.
+///
+/// Flow:
+/// 1. Set SaveTo = Both (photo→host, movie→SD card)
+/// 2. Set host capacity so the camera can send the photo to host
+/// 3. Init CAPTURE_DATA for receiving the photo
+/// 4. Reset MOVIE_DATA for the upcoming movie download
+/// 5. PressShutterButton Completely_NonAF → camera takes a still
+/// 6. Pump EdsGetEvent until DirItemRequestTransfer (photo) arrives
+/// 7. Set kEdsPropID_Record = 0 (stop recording)
+/// 8. Return the photo — movie DirItemCreated will fire later
+///
+/// If PressShutterButton fails (camera/firmware doesn't support photo-in-movie),
+/// falls back to stop-then-shoot: stop recording fast → TakePicture.
+#[tauri::command]
+pub fn canon_take_photo_during_recording() -> Result<CaptureResult, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Canon EDSDK is only supported on Windows".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if !IS_MOVIE_RECORDING.load(Ordering::SeqCst) {
+            // Not recording — fall back to normal photo capture
+            info!("[Canon] Not recording, delegating to normal take_picture");
+            return canon_take_picture();
+        }
+
+        if !SDK_INITIALIZED.load(Ordering::SeqCst) {
+            return Ok(CaptureResult {
+                success: false,
+                error: Some("SDK not initialized".to_string()),
+                image_data: None,
+            });
+        }
+
+        // Prevent concurrent captures
+        if IS_CAPTURING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            return Ok(CaptureResult {
+                success: false,
+                error: Some("Capture already in progress".to_string()),
+                image_data: None,
+            });
+        }
+
+        struct CaptureGuard;
+        impl Drop for CaptureGuard {
+            fn drop(&mut self) {
+                IS_CAPTURING.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = CaptureGuard;
+
+        let manager = CAMERA_MANAGER
+            .get()
+            .ok_or("Camera manager not initialized")?;
+
+        let camera_ref = {
+            let manager = manager.lock().map_err(|e| e.to_string())?;
+            manager.camera_ref.ok_or("No camera connected")?
+        };
+
+        // 1. Set SaveTo = Both so photo goes to host while movie stays on SD
+        unsafe {
+            let save_to: EdsUInt32 = kEdsSaveTo_Both;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_SaveTo,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &save_to as *const _ as *const c_void,
+            );
+
+            // 2. Set host capacity
+            let capacity = EdsCapacity {
+                numberOfFreeClusters: 0x7FFFFFFF,
+                bytesPerSector: 512,
+                reset: 1,
+            };
+            let _ = EdsSetCapacity(camera_ref, capacity);
+        }
+
+        // 3. Init capture data for the photo
+        let capture_data =
+            CAPTURE_DATA.get_or_init(|| Arc::new(Mutex::new(CaptureData::default())));
+        if let Ok(mut cd) = capture_data.lock() {
+            cd.image_data = None;
+            cd.capture_complete = false;
+            cd.capture_error = None;
+        }
+
+        // 4. Reset movie data for the upcoming movie download event
+        let movie_data = MOVIE_DATA.get_or_init(|| Arc::new(Mutex::new(MovieData::default())));
+        if let Ok(mut md) = movie_data.lock() {
+            md.movie_path = None;
+            md.download_complete = false;
+            md.download_error = None;
+        }
+
+        // 5. Press shutter button to take a photo while recording
+        info!("[Canon] Taking photo during recording via PressShutterButton...");
+        let shutter_error = unsafe {
+            EdsSendCommand(
+                camera_ref,
+                kEdsCameraCommand_PressShutterButton,
+                kEdsShutterButton_Completely_NonAF as i32,
+            )
+        };
+
+        if shutter_error != EDS_ERR_OK {
+            warn!("[Canon] PressShutterButton during recording failed: {} — falling back to stop-then-shoot",
+                error_to_string(shutter_error));
+
+            // Release the shutter button
+            unsafe {
+                let _ = EdsSendCommand(
+                    camera_ref,
+                    kEdsCameraCommand_PressShutterButton,
+                    kEdsShutterButton_OFF as i32,
+                );
+            }
+
+            // FALLBACK: stop recording fast then take a normal photo
+            drop(_guard);
+            IS_CAPTURING.store(false, Ordering::SeqCst);
+
+            // Stop recording + switch to photo mode
+            let _ = canon_stop_movie_record_fast();
+
+            // Normal photo capture
+            return canon_take_picture();
+        }
+
+        // 6. Pump events until photo arrives (DirItemRequestTransfer)
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(15);
+        let mut event_count = 0;
+
+        while start.elapsed() < timeout {
+            unsafe {
+                let _ = EdsGetEvent();
+            }
+            event_count += 1;
+
+            if let Ok(cd) = capture_data.lock() {
+                if cd.capture_complete {
+                    info!("[Canon] Photo-during-recording received after {} events, {:.1}s",
+                        event_count, start.elapsed().as_secs_f32());
+                    break;
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        // Release the shutter button
+        unsafe {
+            let _ = EdsSendCommand(
+                camera_ref,
+                kEdsCameraCommand_PressShutterButton,
+                kEdsShutterButton_OFF as i32,
+            );
+        }
+
+        // 7. Stop recording AFTER photo is taken
+        info!("[Canon] Photo captured, now stopping recording...");
+        unsafe {
+            let record_stop: EdsUInt32 = kEdsRecord_End;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_Record,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &record_stop as *const _ as *const c_void,
+            );
+
+            // 7b. Switch back to photo mode so the camera is ready for
+            //     the next cycle.  Without this the camera stays in movie
+            //     mode and live-view restart fails / shows mode OSD.
+            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_MovieSelectSwOFF, 0);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            // Stop live view
+            let evf_output: EdsUInt32 = 0;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_Evf_OutputDevice,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &evf_output as *const _ as *const c_void,
+            );
+
+            // NOTE: Do NOT restore SaveTo = Host yet!
+            // Wait until the movie file is downloaded in canon_finalize_movie_download.
+            // Switching too early might cancel the pending DirItemCreated event for the movie file.
+        }
+        // IS_MOVIE_RECORDING stays true — movie download via finalizeMovieDownload later
+        info!("[Canon] Recording stopped, camera in photo mode (SaveTo kept for movie file integrity)");
+
+        // 8. Process photo result
+        let (image_data, error_msg) = if let Ok(mut cd) = capture_data.lock() {
+            let data = cd.image_data.take();
+            let err = cd.capture_error.take();
+            cd.capture_complete = false;
+            (data, err)
+        } else {
+            (None, Some("Failed to lock capture data".to_string()))
+        };
+
+        if let Some(err) = error_msg {
+            error!("[Canon] Photo-during-recording error: {}", err);
+            return Ok(CaptureResult {
+                success: false,
+                error: Some(err),
+                image_data: None,
+            });
+        }
+
+        match image_data {
+            Some(data) => {
+                use base64::Engine;
+
+                let processed = resize_captured_jpeg(
+                    &data, CAPTURE_MAX_DIMENSION, CAPTURE_JPEG_QUALITY,
+                ).unwrap_or_else(|e| {
+                    warn!("[Canon] Resize failed ({}), using original", e);
+                    data.clone()
+                });
+
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&processed);
+                info!(
+                    "[Canon] Photo-during-recording success: {:.1} MB -> {:.1} MB",
+                    data.len() as f64 / 1_048_576.0,
+                    processed.len() as f64 / 1_048_576.0,
+                );
+                Ok(CaptureResult {
+                    success: true,
+                    error: None,
+                    image_data: Some(b64),
+                })
+            }
+            None => {
+                warn!("[Canon] No photo received during recording — falling back to stop-then-shoot");
+                // Stop movie mode, take a normal photo
+                drop(_guard);
+                IS_CAPTURING.store(false, Ordering::SeqCst);
+
+                // Need to stop movie mode since recording was already stopped above
+                unsafe {
+                    let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_MovieSelectSwOFF, 0);
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+
+                    let evf_output: EdsUInt32 = 0;
+                    let _ = EdsSetPropertyData(
+                        camera_ref,
+                        kEdsPropID_Evf_OutputDevice,
+                        0,
+                        std::mem::size_of::<EdsUInt32>() as u32,
+                        &evf_output as *const _ as *const c_void,
+                    );
+
+                    // NOTE: Do NOT restore SaveTo = Host yet!
+                    // Wait until the movie file is downloaded in canon_finalize_movie_download.
+                    // If we restore it now, the movie file download (SaveTo=Camera) might fail or get confused.
+                }
+
+                canon_take_picture()
+            }
+        }
+    }
+}
+
+/// Wait for the movie file to finish downloading from the camera.
+///
+/// Call this AFTER `canon_stop_movie_record_fast` + `canon_take_picture`
+/// to pump EDSDK events until the movie DirItemCreated event is processed
+/// and the file has been downloaded to disk.
+///
+/// Sets IS_MOVIE_RECORDING = false when done.
+#[tauri::command]
+pub fn canon_finalize_movie_download() -> Result<String, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Canon EDSDK is only supported on Windows".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let movie_data = MOVIE_DATA.get_or_init(|| Arc::new(Mutex::new(MovieData::default())));
+
+        // Helper to check if download is complete
+        let check_download = || -> Option<Result<String, String>> {
+            if let Ok(md) = movie_data.lock() {
+                if md.download_complete {
+                    if let Some(ref err) = md.download_error {
+                        return Some(Err(format!("Movie download failed: {}", err)));
+                    }
+                    if let Some(ref path) = md.movie_path {
+                        info!("[Canon] Movie file ready: {}", path);
+                        return Some(Ok(path.clone()));
+                    }
+                    return Some(Err("Movie download completed but no file path".to_string()));
+                }
+            }
+            None
+        };
+
+        // Helper to restore SaveTo=Host
+        let restore_save_to_host = || {
+            if let Some(manager) = CAMERA_MANAGER.get() {
+                if let Ok(manager) = manager.lock() {
+                    if let Some(camera_ref) = manager.camera_ref {
+                        info!("[Canon] Finalize Movie: Restoring SaveTo=Host");
+                        unsafe {
+                            let save_to: EdsUInt32 = kEdsSaveTo_Host;
+                            let _ = EdsSetPropertyData(
+                                camera_ref,
+                                kEdsPropID_SaveTo,
+                                0,
+                                std::mem::size_of::<EdsUInt32>() as u32,
+                                &save_to as *const _ as *const c_void,
+                            );
+                            let capacity = EdsCapacity {
+                                numberOfFreeClusters: 0x7FFFFFFF,
+                                bytesPerSector: 512,
+                                reset: 1,
+                            };
+                            let _ = EdsSetCapacity(camera_ref, capacity);
+                        }
+                    }
+                }
+            }
+        };
+
+        // 1. Check if already downloaded
+        if let Some(result) = check_download() {
+            IS_MOVIE_RECORDING.store(false, Ordering::SeqCst);
+            restore_save_to_host();
+            return result;
+        }
+
+        info!("[Canon] Waiting for movie file download...");
+
+        // 2. Wait loop
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(30);
+
+        while start.elapsed() < timeout {
+            unsafe {
+                let _ = EdsGetEvent();
+            }
+
+            if let Some(result) = check_download() {
+                IS_MOVIE_RECORDING.store(false, Ordering::SeqCst);
+                restore_save_to_host();
+                return result;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        IS_MOVIE_RECORDING.store(false, Ordering::SeqCst);
+        restore_save_to_host();
 
         Err("Movie download timeout — no file received from camera".to_string())
     }

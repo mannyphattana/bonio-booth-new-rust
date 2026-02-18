@@ -224,7 +224,28 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     if (!enabled) return;
     checkDevices();
     const timer = setInterval(checkDevices, intervalMs);
-    return () => clearInterval(timer);
+
+    // Listen for USB device changes (immediate detection on hot-plug/unplug)
+    // This fires for webcams, printers, and other USB devices
+    const handleDeviceChange = () => {
+      console.log("[useDeviceCheck] USB device change detected, checking devices...");
+      // Small delay to let Windows settle after USB event
+      setTimeout(checkDevices, 1000);
+    };
+    try {
+      navigator.mediaDevices?.addEventListener("devicechange", handleDeviceChange);
+    } catch {
+      // mediaDevices not available — fall back to polling only
+    }
+
+    return () => {
+      clearInterval(timer);
+      try {
+        navigator.mediaDevices?.removeEventListener("devicechange", handleDeviceChange);
+      } catch {
+        // ignore
+      }
+    };
   }, [enabled, intervalMs, checkDevices]);
 }
 

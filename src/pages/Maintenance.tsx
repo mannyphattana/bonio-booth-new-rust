@@ -75,17 +75,24 @@ export default function Maintenance({ onResolved, onOpenConfig, lineUrl, backgro
       }
     }
 
-    // Check printer
+    // Check printer — must match useDeviceCheck logic:
+    // check both name exists AND is_online (WorkOffline=false, PrinterStatus=Normal)
     const savedPrinter = localStorage.getItem("selectedPrinter");
     if (savedPrinter) {
       try {
         const printers: any[] = await invoke("get_printers");
-        const found = printers.find((p: any) => p.name === savedPrinter);
+        const found = printers.find(
+          (p: any) => p.name === savedPrinter && p.is_online
+        );
         if (found) {
           printerOk = true;
           printerName = savedPrinter;
         } else {
-          printerName = `${savedPrinter} (not found)`;
+          // Printer exists but offline, or not found at all
+          const exists = printers.some((p: any) => p.name === savedPrinter);
+          printerName = exists
+            ? `${savedPrinter} (offline)`
+            : `${savedPrinter} (not found)`;
         }
       } catch {
         printerName = `${savedPrinter} (error)`;

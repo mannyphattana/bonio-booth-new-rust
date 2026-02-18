@@ -11,7 +11,7 @@ interface Props {
   onBeforeClose?: () => void;
 }
 
-export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClose }: Props) {
+export default function ContextMenu({ open, onClose, onFormatReset, onBeforeClose: _onBeforeClose }: Props) {
   const [activeModal, setActiveModal] = useState<
     "camera" | "printer" | "paper" | null
   >(null);

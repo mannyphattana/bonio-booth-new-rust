@@ -85,6 +85,8 @@ pub const kEdsPropID_AEMode: EdsPropertyID = 0x00000400;
 pub const kEdsPropID_DriveMode: EdsPropertyID = 0x00000401;
 pub const kEdsPropID_MeteringMode: EdsPropertyID = 0x00000403;
 pub const kEdsPropID_AFMode: EdsPropertyID = 0x00000404;
+pub const kEdsPropID_MirrorLockUpState: EdsPropertyID = 0x01000421;
+pub const kEdsPropID_MovieServoAf: EdsPropertyID = 0x0100043e;
 
 // EVF Properties
 pub const kEdsPropID_Evf_OutputDevice: EdsPropertyID = 0x00000500;
