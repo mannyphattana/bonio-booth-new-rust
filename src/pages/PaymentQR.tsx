@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-import BackButton from "../components/BackButton";
 
 interface Props {
   theme: ThemeData;
@@ -141,12 +140,6 @@ export default function PaymentQR({ theme }: Props) {
     };
   }, [status, referenceId, checkStatus]);
 
-  const handleBack = () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    if (timerRef.current) clearInterval(timerRef.current);
-    navigate("/payment-selection", { state });
-  };
-
   const handleCancelClick = () => {
     setIsCancelModalOpen(true);
   };
@@ -171,8 +164,6 @@ export default function PaymentQR({ theme }: Props) {
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
     >
-      <BackButton onBackClick={handleBack} />
-
       <div
         style={{
           display: "flex",
