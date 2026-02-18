@@ -5,6 +5,7 @@ import type { ThemeData, MachineData, FrameData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import HorizontalScroll from "../components/HorizontalScroll";
 import BackButton from "../components/BackButton";
+import Countdown from "../components/Countdown"; 
 
 interface Props {
   theme: ThemeData;
@@ -42,148 +43,137 @@ export default function FrameSelection({ theme }: Props) {
     setLoading(false);
   };
 
-  const handleSelectFrame = (frame: FrameData) => {
-    setSelectedFrame(frame);
-  };
-
   const handleNext = () => {
     if (!selectedFrame) return;
     navigate("/prepare-shooting", {
-      state: {
-        ...state,
-        selectedFrame,
-      },
+      state: { ...state, selectedFrame },
     });
-  };
-
-  const handleBack = () => {
-    navigate("/payment-selection", { state });
   };
 
   return (
     <div
-      className="page-container"
+      className="page-container page-space-between"
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
-        justifyContent: "flex-start",
-        padding: "120px 0",
+        // ล็อคไม่ให้หน้าจอเลื่อนเด็ดขาด
+        height: "100vh",
+        overflow: "hidden", 
+        paddingTop: "20px",
+        paddingBottom: "20px"
       }}
     >
-      <BackButton onBackClick={handleBack} />
-
-      <h1
-        style={{
-          color: theme.fontColor,
-          fontSize: 24,
-          marginTop: 60,
-          marginBottom: 8,
-        }}
-      >
-        เลือกกรอบรูป
-      </h1>
-      <p style={{ color: theme.fontColor, opacity: 0.8, marginBottom: 16 }}>
-        SELECT FRAME
-      </p>
+      {/* 1. ส่วนหัว (Header) - ฟิกความสูงไว้เลย */}
+      <div style={{ width: "100%", textAlign: "center", position: "relative", zIndex: 10, height: "140px", flexShrink: 0 }}>
+        <BackButton onBackClick={() => navigate("/payment-selection", { state })} />
+        <Countdown seconds={300} onTimeout={() => navigate("/")} />
+        
+        <h1 style={{ color: "#e94560", fontSize: "42px", fontWeight: "bold", margin: "40px 0 0 0", lineHeight: 1 }}>
+          เลือกกรอบรูป
+        </h1>
+        <p style={{ color: theme.fontColor, letterSpacing: "2px", opacity: 0.8, fontSize: "16px", marginTop: "5px" }}>
+          SELECT YOUR FRAME
+        </p>
+      </div>
 
       {loading ? (
-        <div style={{ color: "#aaa", fontSize: 18, marginTop: 40 }}>
-          กำลังโหลด...
-        </div>
+        <div style={{ color: "white", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>กำลังโหลด...</div>
       ) : (
         <>
-          {/* Scrollable frame thumbnails (top section) */}
-          <HorizontalScroll padding="0 48px" arrowColor={theme.fontColor}>
-            {frames.map((frame) => (
-              <button
-                key={frame._id}
-                onClick={() => handleSelectFrame(frame)}
-                style={{
-                  flexShrink: 0,
-                  height: 160,
-                  border:
-                    selectedFrame?._id === frame._id
-                      ? `3px solid ${theme.primaryColor}`
-                      : "",
-                  padding: 0,
-                }}
-              >
-                <img
-                  src={frame.previewUrl || frame.imageUrl}
-                  alt={frame.name}
+          {/* 2. ส่วนเลือกรูป (Carousel) - ฟิกความสูง */}
+          <div style={{ width: "100%", height: "140px", flexShrink: 0, marginTop: "10px" }}>
+            <HorizontalScroll padding="0 60px" arrowColor={theme.fontColor}>
+              {frames.map((frame) => (
+                <div
+                  key={frame._id}
+                  onClick={() => setSelectedFrame(frame)}
                   style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "contain",
+                    flexShrink: 0,
+                    width: "100px",
+                    height: "130px",
+                    margin: "0 8px",
+                    cursor: "pointer",
+                    border: selectedFrame?._id === frame._id ? `4px solid #e94560` : "2px solid rgba(255,255,255,0.3)",
+                    borderRadius: "10px",
+                    overflow: "hidden",
+                    transition: "all 0.2s"
                   }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              </button>
-            ))}
-          </HorizontalScroll>
+                >
+                  <img 
+                    src={frame.previewUrl || frame.imageUrl} 
+                    alt={frame.name}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                  />
+                </div>
+              ))}
+            </HorizontalScroll>
+          </div>
 
-          {/* Selected frame preview (center/bottom) */}
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              justifyContent: "center",
-              padding: "40px 24px",
-              width: "100%",
+          {/* 3. รูปพรีวิว (Preview) - ย่อขนาดลงอีก และห้ามดันจนล้น */}
+          <div 
+            style={{ 
+              flex: 1, 
+              width: "100%", 
+              display: "flex", 
+              justifyContent: "center", 
+              alignItems: "center",
+              minHeight: 0, // สำคัญมาก!
+              overflow: "hidden",
+              padding: "10px 0"
             }}
           >
-            {selectedFrame ? (
-              <div
-                style={{
-                  maxWidth: "40%",
-                  maxHeight: "40vh",
+            {selectedFrame && (
+              <img
+                src={selectedFrame.imageUrl}
+                alt="Selected"
+                style={{ 
+                  height: "auto",
+                  width: "auto",
+                  // ลดขนาดลงเหลือ 30% ของหน้าจอ (จากเดิมอาจจะ 45% หรือ 100%)
+                  maxHeight: "30vh", 
+                  maxWidth: "80%",
+                  objectFit: "contain",
+                  filter: "drop-shadow(0 10px 30px rgba(0,0,0,0.4))"
                 }}
-              >
-                <img
-                  src={selectedFrame.imageUrl}
-                  alt={selectedFrame.name}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "contain",
-                  }}
-                />
-              </div>
-            ) : (
-              <p style={{ color: "#aaa" }}>กรุณาเลือกกรอบรูป</p>
+              />
             )}
           </div>
 
-          {/* Frame name */}
-          {selectedFrame && (
-            <p
-              style={{
-                color: theme.fontColor,
-                fontSize: 16,
-                fontWeight: 600,
-                marginBottom: 8,
-              }}
-            >
-              {selectedFrame.name}
-              {selectedFrame.grid?.slots &&
-                ` (${selectedFrame.grid.slots.length} photos)`}
-            </p>
-          )}
-
-          {/* Next button */}
-          <button
-            className="primary-button"
-            onClick={handleNext}
-            disabled={!selectedFrame}
-            style={{
-              background: selectedFrame ? theme.primaryColor : "#444",
-              color: theme.textButtonColor,
-              marginBottom: 20,
+          {/* 4. ปุ่ม Next (Footer) - ฟิกอยู่ล่างสุด */}
+          <div 
+            style={{ 
+              width: "100%", 
+              height: "100px", 
+              display: "flex", 
+              justifyContent: "center", 
+              alignItems: "center",
+              flexShrink: 0,
+              position: "relative",
+              zIndex: 20
             }}
           >
-            ถัดไป / NEXT
-          </button>
+            <button
+              onClick={handleNext}
+              disabled={!selectedFrame}
+              style={{
+                background: "#e94560",
+                color: "white",
+                padding: "15px 100px",
+                borderRadius: "50px",
+                fontSize: "26px",
+                fontWeight: "bold",
+                boxShadow: "0 5px 20px rgba(233, 69, 96, 0.4)",
+                border: "none",
+                cursor: "pointer"
+              }}
+            >
+              Next
+            </button>
+             
+             {/* Logo Timelab */}
+             <div style={{ position: "absolute", bottom: "10px", right: "40px", opacity: 0.8 }}>
+                <span style={{ fontSize: "24px", fontWeight: "bold", color: "#fff" }}>timelab</span>
+             </div>
+          </div>
         </>
       )}
     </div>

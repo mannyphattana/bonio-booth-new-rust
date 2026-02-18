@@ -55,18 +55,29 @@ button:active {
   border-radius: 3px;
 }
 
+/* ========================================= */
+/* Main Container Definitions */
+/* ========================================= */
+
 .page-container {
   width: 100vw;
   height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: center; /* ค่าปกติสำหรับหน้า Home/Payment */
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   position: relative;
   overflow: hidden;
+}
+
+/* เพิ่มคลาสนี้: สำหรับหน้า FrameSelection หรือหน้าอื่นๆ ที่ต้องการจัดแบบ บน-กลาง-ล่าง */
+.page-container.page-space-between {
+  justify-content: space-between;
+  padding-top: 20px;
+  padding-bottom: 20px;
 }
 
 .back-button {
