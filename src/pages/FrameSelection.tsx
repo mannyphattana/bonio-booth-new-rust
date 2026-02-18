@@ -4,7 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import HorizontalScroll from "../components/HorizontalScroll";
-import BackButton from "../components/BackButton";
+
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -56,10 +58,6 @@ export default function FrameSelection({ theme }: Props) {
     });
   };
 
-  const handleBack = () => {
-    navigate("/payment-selection", { state });
-  };
-
   return (
     <div
       className="page-container"
@@ -69,7 +67,11 @@ export default function FrameSelection({ theme }: Props) {
         padding: "120px 0",
       }}
     >
-      <BackButton onBackClick={handleBack} />
+      <Countdown
+        seconds={COUNTDOWN.FRAME_SELECTION.DURATION}
+        onComplete={() => navigate("/")}
+        visible={COUNTDOWN.FRAME_SELECTION.VISIBLE}
+      />
 
       <h1
         style={{

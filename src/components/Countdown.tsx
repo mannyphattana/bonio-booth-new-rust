@@ -85,7 +85,7 @@ export default function Countdown({
   // Inline styles
   const containerStyle: React.CSSProperties = {
     position: "absolute",
-    top: "9rem",
+    top: "3rem",
     right: "3rem",
     zIndex: 1000,
     pointerEvents: "none",

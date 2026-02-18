@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { QRCodeSVG } from "qrcode.react";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -15,7 +17,6 @@ export default function PhotoResult({ theme }: Props) {
   const location = useLocation();
   const state = (location.state as any) || {};
 
-
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const selectedFrame = state.selectedFrame;
   const selectedFilter = state.selectedFilter;
@@ -23,7 +24,9 @@ export default function PhotoResult({ theme }: Props) {
   // Slot coordinates are in imageSize space (matching old project)
   // imageSize = frame pixel dimensions (e.g. "2400x3600")
   // grid.width/height = logical frame format (e.g. 1200x1800 = 2x3)
-  const [_imgW, _imgH] = (selectedFrame?.imageSize || "").split("x").map(Number);
+  const [_imgW, _imgH] = (selectedFrame?.imageSize || "")
+    .split("x")
+    .map(Number);
   const frameWidth = (_imgW > 0 ? _imgW : selectedFrame?.grid?.width) || 1200;
   const frameHeight = (_imgH > 0 ? _imgH : selectedFrame?.grid?.height) || 1800;
 
@@ -34,7 +37,7 @@ export default function PhotoResult({ theme }: Props) {
   const [uploadStatus, setUploadStatus] = useState<string>("processing");
   const [printStatus, setPrintStatus] = useState<string>("idle");
   const [error, setError] = useState("");
-  const [countdown, setCountdown] = useState(300);
+  // const [countdown, setCountdown] = useState(300); // Removed custom state
   const [, setStatusText] = useState("กำลังประมวลผล...");
 
   const hasStarted = useRef(false);
@@ -81,10 +84,7 @@ export default function PhotoResult({ theme }: Props) {
     if (hasCreatedPresign.current) return;
 
     const transactionId =
-      state.transactionId ||
-      state.referenceId ||
-      state.transaction_id ||
-      "";
+      state.transactionId || state.referenceId || state.transaction_id || "";
 
     console.log("📸 [PhotoResult] State keys:", Object.keys(state));
     console.log("📸 [PhotoResult] transactionId:", transactionId);
@@ -92,7 +92,9 @@ export default function PhotoResult({ theme }: Props) {
     console.log("📸 [PhotoResult] state.referenceId:", state.referenceId);
 
     if (!transactionId) {
-      console.error("❌ [PhotoResult] No transactionId found in state! Cannot create presign session.");
+      console.error(
+        "❌ [PhotoResult] No transactionId found in state! Cannot create presign session.",
+      );
       return;
     }
 
@@ -145,18 +147,24 @@ export default function PhotoResult({ theme }: Props) {
         if (presignResult.success && responseData.qrcodeStorageUrl) {
           console.log(
             "✅ [PhotoResult] Presign session created! QR Code URL:",
-            responseData.qrcodeStorageUrl
+            responseData.qrcodeStorageUrl,
           );
           // Set QR code URL immediately - shows QR before upload starts
           setQrCodeUrl(responseData.qrcodeStorageUrl);
           setSessionId(responseData.photoSession?.id || "");
           setUploadUrls(responseData.uploadUrls || []);
-          console.log("✅ [PhotoResult] Session ID:", responseData.photoSession?.id);
-          console.log("✅ [PhotoResult] Upload URLs count:", responseData.uploadUrls?.length || 0);
+          console.log(
+            "✅ [PhotoResult] Session ID:",
+            responseData.photoSession?.id,
+          );
+          console.log(
+            "✅ [PhotoResult] Upload URLs count:",
+            responseData.uploadUrls?.length || 0,
+          );
         } else {
           console.error(
             "❌ [PhotoResult] Failed to create presign session:",
-            responseData.error || responseData.message || presignResult.error
+            responseData.error || responseData.message || presignResult.error,
           );
           hasCreatedPresign.current = false; // Allow retry
         }
@@ -174,7 +182,9 @@ export default function PhotoResult({ theme }: Props) {
     async (composedImg: string) => {
       if (hasUploadedFiles.current) return;
       if (!sessionId || uploadUrls.length === 0) {
-        console.warn("⚠️ [PhotoResult] No sessionId/uploadUrls yet, waiting...");
+        console.warn(
+          "⚠️ [PhotoResult] No sessionId/uploadUrls yet, waiting...",
+        );
         return;
       }
       hasUploadedFiles.current = true;
@@ -192,10 +202,11 @@ export default function PhotoResult({ theme }: Props) {
           .sort((a: any, b: any) => a.order - b.order);
 
         console.log(
-          `📤 [PhotoResult] Upload targets: ${photoUrls.length} photo URLs, ${videoUrls.length} video URLs`
+          `📤 [PhotoResult] Upload targets: ${photoUrls.length} photo URLs, ${videoUrls.length} video URLs`,
         );
 
-        const uploadedFiles: { key: string; type: string; order: number }[] = [];
+        const uploadedFiles: { key: string; type: string; order: number }[] =
+          [];
         let photoIdx = 0;
 
         // Upload composed frame (order 1 = finalImage)
@@ -216,7 +227,9 @@ export default function PhotoResult({ theme }: Props) {
               type: "photo",
               order: photoUrls[photoIdx].order,
             });
-            console.log(`✅ [PhotoResult] Frame photo uploaded (order ${photoUrls[photoIdx].order})`);
+            console.log(
+              `✅ [PhotoResult] Frame photo uploaded (order ${photoUrls[photoIdx].order})`,
+            );
           } catch (err) {
             console.error("❌ [PhotoResult] Frame photo upload failed:", err);
           }
@@ -224,7 +237,11 @@ export default function PhotoResult({ theme }: Props) {
         }
 
         // Upload individual capture photos
-        for (let i = 0; i < frameCaptures.length && photoIdx < photoUrls.length; i++) {
+        for (
+          let i = 0;
+          i < frameCaptures.length && photoIdx < photoUrls.length;
+          i++
+        ) {
           setStatusText(`กำลังอัปโหลดรูป ${i + 1}/${frameCaptures.length}...`);
           const photoPath: string = await invoke("save_temp_image", {
             imageDataBase64: frameCaptures[i].photo,
@@ -241,9 +258,14 @@ export default function PhotoResult({ theme }: Props) {
               type: "photo",
               order: photoUrls[photoIdx].order,
             });
-            console.log(`✅ [PhotoResult] Photo ${i + 1} uploaded (order ${photoUrls[photoIdx].order})`);
+            console.log(
+              `✅ [PhotoResult] Photo ${i + 1} uploaded (order ${photoUrls[photoIdx].order})`,
+            );
           } catch (err) {
-            console.error(`❌ [PhotoResult] Photo ${i + 1} upload failed:`, err);
+            console.error(
+              `❌ [PhotoResult] Photo ${i + 1} upload failed:`,
+              err,
+            );
           }
           photoIdx++;
         }
@@ -259,29 +281,43 @@ export default function PhotoResult({ theme }: Props) {
             setStatusText("กำลังรวมวิดีโอ...");
             try {
               // Compose all capture videos into one framed video
-              console.log(`🎬 [PhotoResult] Composing framed video with ${videoPaths.length} captures...`);
+              console.log(
+                `🎬 [PhotoResult] Composing framed video with ${videoPaths.length} captures...`,
+              );
               // Resolve LUT path for video filter if a filter is selected
               let lutPath: string | null = null;
-              if (selectedFilter && selectedFilter.type === "lut" && selectedFilter.lutFile) {
+              if (
+                selectedFilter &&
+                selectedFilter.type === "lut" &&
+                selectedFilter.lutFile
+              ) {
                 try {
                   lutPath = await invoke<string>("resolve_lut_path", {
                     lutFile: selectedFilter.lutFile,
                   });
                 } catch (err) {
-                  console.warn("⚠️ [PhotoResult] Could not resolve LUT path for video:", err);
+                  console.warn(
+                    "⚠️ [PhotoResult] Could not resolve LUT path for video:",
+                    err,
+                  );
                 }
               }
 
-              const composedVideoPath: string = await invoke("compose_frame_video", {
-                frameImageUrl: selectedFrame?.imageUrl || "",
-                videoPaths,
-                slots: slots,
-                frameWidth: frameWidth,
-                frameHeight: frameHeight,
-                outputFilename: "framed-video.mp4",
-                lutPath: lutPath,
-              });
-              console.log(`✅ [PhotoResult] Framed video composed: ${composedVideoPath}`);
+              const composedVideoPath: string = await invoke(
+                "compose_frame_video",
+                {
+                  frameImageUrl: selectedFrame?.imageUrl || "",
+                  videoPaths,
+                  slots: slots,
+                  frameWidth: frameWidth,
+                  frameHeight: frameHeight,
+                  outputFilename: "framed-video.mp4",
+                  lutPath: lutPath,
+                },
+              );
+              console.log(
+                `✅ [PhotoResult] Framed video composed: ${composedVideoPath}`,
+              );
 
               setStatusText("กำลังอัปโหลดวิดีโอ...");
               await invoke("upload_to_presigned_url", {
@@ -294,16 +330,23 @@ export default function PhotoResult({ theme }: Props) {
                 type: "video",
                 order: videoUrls[0].order,
               });
-              console.log(`✅ [PhotoResult] Framed video uploaded (order ${videoUrls[0].order})`);
+              console.log(
+                `✅ [PhotoResult] Framed video uploaded (order ${videoUrls[0].order})`,
+              );
             } catch (err) {
-              console.error("❌ [PhotoResult] Video compose/upload failed:", err);
+              console.error(
+                "❌ [PhotoResult] Video compose/upload failed:",
+                err,
+              );
             }
           }
         }
 
         // Confirm upload
         if (uploadedFiles.length > 0) {
-          console.log(`📤 [PhotoResult] Confirming ${uploadedFiles.length} uploaded files...`);
+          console.log(
+            `📤 [PhotoResult] Confirming ${uploadedFiles.length} uploaded files...`,
+          );
           try {
             await invoke("confirm_upload", {
               sessionId,
@@ -323,7 +366,7 @@ export default function PhotoResult({ theme }: Props) {
         hasUploadedFiles.current = false; // Allow retry
       }
     },
-    [sessionId, uploadUrls, frameCaptures]
+    [sessionId, uploadUrls, frameCaptures],
   );
 
   // Print the composed frame
@@ -356,7 +399,9 @@ export default function PhotoResult({ theme }: Props) {
         let verticalOffset = 0;
         let horizontalOffset = 0;
         try {
-          const key = isLandscape ? "paperConfigLandscape" : "paperConfigPortrait";
+          const key = isLandscape
+            ? "paperConfigLandscape"
+            : "paperConfigPortrait";
           const saved = localStorage.getItem(key);
           if (saved) {
             const config = JSON.parse(saved);
@@ -364,7 +409,9 @@ export default function PhotoResult({ theme }: Props) {
             verticalOffset = config.vertical ?? 0;
             horizontalOffset = config.horizontal ?? 0;
           }
-        } catch { /* use defaults */ }
+        } catch {
+          /* use defaults */
+        }
 
         // Get selected printer (from config or auto-detect)
         let printerName = localStorage.getItem("selectedPrinter") || "";
@@ -376,7 +423,7 @@ export default function PhotoResult({ theme }: Props) {
             (p: any) =>
               p.name.toLowerCase().includes("qw-410") ||
               p.name.toLowerCase().includes("dnp") ||
-              p.is_online
+              p.is_online,
           );
           if (dnpPrinter) printerName = dnpPrinter.name;
         }
@@ -404,7 +451,7 @@ export default function PhotoResult({ theme }: Props) {
         setPrintStatus("error");
       }
     },
-    [frameWidth, frameHeight]
+    [frameWidth, frameHeight],
   );
 
   // Main effect - compose frame + print immediately
@@ -433,7 +480,8 @@ export default function PhotoResult({ theme }: Props) {
     uploadFiles(composedImage);
   }, [composedImage, sessionId, uploadUrls, uploadFiles]);
 
-  // Auto-return countdown
+  // Auto-return countdown handled by Countdown component
+  /*
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -448,6 +496,7 @@ export default function PhotoResult({ theme }: Props) {
 
     return () => clearInterval(timer);
   }, [navigate]);
+  */
 
   // Printer disconnect check
   useEffect(() => {
@@ -480,10 +529,11 @@ export default function PhotoResult({ theme }: Props) {
         padding: "120px 0",
       }}
     >
-
-      <div className="countdown-badge">
-        กลับหน้าหลักใน {countdown}s
-      </div>
+      <Countdown
+        seconds={COUNTDOWN.PHOTO_RESULT.DURATION}
+        onComplete={handleHome}
+        visible={COUNTDOWN.PHOTO_RESULT.VISIBLE}
+      />
 
       <h1
         style={{

@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import BackButton from "../components/BackButton";
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -151,6 +153,12 @@ export default function CouponEntry({ theme }: Props) {
       }}
     >
       <BackButton onBackClick={handleBack} />
+
+      <Countdown
+        seconds={COUNTDOWN.DISCOUNT_COUPON.DURATION}
+        onComplete={() => navigate("/")}
+        visible={COUNTDOWN.DISCOUNT_COUPON.VISIBLE}
+      />
 
       <div
         style={{

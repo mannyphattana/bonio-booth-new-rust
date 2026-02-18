@@ -2,7 +2,9 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-import BackButton from "../components/BackButton";
+
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -152,10 +154,6 @@ export default function SlotSelection({ theme }: Props) {
     });
   };
 
-  const handleBack = () => {
-    navigate("/frame-selection", { state });
-  };
-
   return (
     <div
       className="page-container"
@@ -166,7 +164,11 @@ export default function SlotSelection({ theme }: Props) {
         overflow: "hidden",
       }}
     >
-      <BackButton onBackClick={handleBack} />
+      <Countdown
+        seconds={COUNTDOWN.PHOTO_DECORATE.DURATION}
+        onComplete={() => navigate("/")}
+        visible={COUNTDOWN.PHOTO_DECORATE.VISIBLE}
+      />
 
       <h1
         style={{

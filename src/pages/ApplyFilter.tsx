@@ -5,7 +5,9 @@ import type { ThemeData, MachineData, Capture } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { FILTERS, type FilterConfig } from "../config/filters";
 import HorizontalScroll from "../components/HorizontalScroll";
-import BackButton from "../components/BackButton";
+
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -177,10 +179,6 @@ export default function ApplyFilter({ theme }: Props) {
     setApplyingAll(false);
   };
 
-  const handleBack = () => {
-    navigate("/slot-selection", { state });
-  };
-
   return (
     <div
       className="page-container"
@@ -190,7 +188,11 @@ export default function ApplyFilter({ theme }: Props) {
         padding: "120px 0",
       }}
     >
-      <BackButton onBackClick={handleBack} />
+      <Countdown
+        seconds={COUNTDOWN.PHOTO_FILTER.DURATION}
+        onComplete={() => navigate("/")}
+        visible={COUNTDOWN.PHOTO_FILTER.VISIBLE}
+      />
 
       <h1
         style={{
