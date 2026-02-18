@@ -15,6 +15,8 @@ import MachineVerify from "./pages/MachineVerify";
 import Maintenance from "./pages/Maintenance";
 import TermsAndServices from "./pages/TermsAndServices";
 import GetHelp from "./pages/GetHelp";
+import OutOfPaper from "./pages/OutOfPaper";
+import RequestImage from "./pages/RequestImage";
 import CameraConfigModal from "./components/CameraConfigModal";
 import PrinterConfigModal from "./components/PrinterConfigModal";
 import ShutdownOverlay from "./components/ShutdownOverlay";
@@ -317,6 +319,14 @@ function App() {
           element={
             <PhotoResult theme={themeData!} machineData={machineData!} />
           }
+        />
+        <Route
+          path="/out-of-paper"
+          element={<OutOfPaper theme={themeData!} lineUrl={lineUrl || ""} />}
+        />
+        <Route
+          path="/request-image"
+          element={<RequestImage theme={themeData!} />}
         />
       </Routes>
     </Router>
