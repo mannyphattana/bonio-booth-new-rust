@@ -15,7 +15,12 @@ interface Props {
   backgroundSecond?: string;
 }
 
-export default function Maintenance({ onResolved, onOpenConfig, lineUrl, backgroundSecond }: Props) {
+export default function Maintenance({
+  onResolved,
+  onOpenConfig,
+  lineUrl,
+  backgroundSecond,
+}: Props) {
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
     cameraOk: false,
     printerOk: false,
@@ -40,7 +45,7 @@ export default function Maintenance({ onResolved, onOpenConfig, lineUrl, backgro
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           const found = devices.find(
-            (d) => d.kind === "videoinput" && d.deviceId === savedId
+            (d) => d.kind === "videoinput" && d.deviceId === savedId,
           );
           if (found) {
             cameraOk = true;
@@ -118,14 +123,18 @@ export default function Maintenance({ onResolved, onOpenConfig, lineUrl, backgro
   }, [checkDevices]);
 
   return (
-    <div style={{
-      ...styles.container,
-      ...(backgroundSecond ? {
-        backgroundImage: `url(${backgroundSecond})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      } : {}),
-    }}>
+    <div
+      style={{
+        ...styles.container,
+        ...(backgroundSecond
+          ? {
+              backgroundImage: `url(${backgroundSecond})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }
+          : {}),
+      }}
+    >
       <div style={styles.content}>
         {/* Warning icon */}
         <div style={styles.iconWrapper}>

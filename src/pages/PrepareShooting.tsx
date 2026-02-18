@@ -1,24 +1,25 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-import BackButton from "../components/BackButton";
+
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
 }
 
-const PREPARE_DURATION = 30; // seconds before auto-start
-
 export default function PrepareShooting({ theme, machineData }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   useIdleTimeout();
-  const [countdown, setCountdown] = useState(PREPARE_DURATION);
+  // const [countdown, setCountdown] = useState(PREPARE_DURATION); // Removed custom state
   const cameraCountdown = machineData.cameraCountdown || 5;
 
+  /*
   useEffect(() => {
     const timer = setInterval(() => {
       setCountdown((prev) => {
@@ -33,14 +34,11 @@ export default function PrepareShooting({ theme, machineData }: Props) {
 
     return () => clearInterval(timer);
   }, []);
+  */
 
   const handleStart = useCallback(() => {
     navigate("/main-shooting", { state });
   }, [navigate, state]);
-
-  const handleBack = () => {
-    navigate("/frame-selection", { state });
-  };
 
   return (
     <div
@@ -49,9 +47,11 @@ export default function PrepareShooting({ theme, machineData }: Props) {
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
     >
-      <BackButton onBackClick={handleBack} />
-
-      <div className="countdown-badge">{countdown}s</div>
+      <Countdown
+        seconds={COUNTDOWN.PHOTO_PREPARE.DURATION}
+        onComplete={handleStart}
+        visible={COUNTDOWN.PHOTO_PREPARE.VISIBLE}
+      />
 
       <div
         style={{

@@ -1,7 +1,10 @@
+import { useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import BackButton from "../components/BackButton";
+import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 import couponIcon from "../assets/icons/svg/coupon.svg";
 import qrIcon from "../assets/icons/svg/qrcode.svg";
 
@@ -57,9 +60,13 @@ export default function PaymentSelection({ theme, machineData }: Props) {
     });
   };
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     navigate("/");
-  };
+  }, [navigate]);
+
+  const handleCountdownComplete = useCallback(() => {
+    handleBack();
+  }, [handleBack]);
 
   return (
     <div
@@ -69,6 +76,12 @@ export default function PaymentSelection({ theme, machineData }: Props) {
       }}
     >
       <BackButton onBackClick={handleBack} />
+
+      <Countdown
+        seconds={COUNTDOWN.SELECT_PRINT.DURATION}
+        onComplete={handleCountdownComplete}
+        visible={COUNTDOWN.SELECT_PRINT.VISIBLE}
+      />
 
       <div
         style={{
