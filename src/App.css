@@ -65,7 +65,7 @@ button:active {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center; /* ค่าปกติสำหรับหน้า Home/Payment */
+  justify-content: center;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -73,12 +73,24 @@ button:active {
   overflow: hidden;
 }
 
-/* เพิ่มคลาสนี้: สำหรับหน้า FrameSelection หรือหน้าอื่นๆ ที่ต้องการจัดแบบ บน-กลาง-ล่าง */
 .page-container.page-space-between {
   justify-content: space-between;
   padding-top: 20px;
   padding-bottom: 20px;
 }
+
+/* ซ่อน Scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ========================================= */
+/* Buttons & Badges (Updated Alignment) */
+/* ========================================= */
 
 .back-button {
   position: absolute;
@@ -94,6 +106,27 @@ button:active {
   z-index: 100;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
+  backdrop-filter: blur(4px);
+}
+
+.countdown-badge {
+  position: absolute;
+  top: 20px;   /* ตำแหน่งเดียวกับ Back Button */
+  right: 20px;
+  height: 50px; /* บังคับสูงเท่า Back Button */
+  min-width: 80px; /* กำหนดความกว้างขั้นต่ำให้ดูสมดุล */
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 0 20px; /* padding ด้านข้าง */
+  border-radius: 25px; /* ปรับความมนให้เข้ากับความสูง 50px */
+  font-size: 18px; /* เพิ่มขนาดตัวอักษรนิดนึง */
+  font-weight: 600;
+  z-index: 100;
+  display: flex;       /* ใช้ Flexbox จัดกึ่งกลาง */
+  align-items: center; /* กลางแนวตั้ง */
+  justify-content: center; /* กลางแนวนอน */
+  backdrop-filter: blur(4px);
+  letter-spacing: 1px;
 }
 
 .primary-button {
@@ -106,17 +139,9 @@ button:active {
   min-width: 200px;
 }
 
-.countdown-badge {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 14px;
-  z-index: 100;
-}
+/* ========================================= */
+/* Other Components */
+/* ========================================= */
 
 .context-menu-overlay {
   position: fixed;
@@ -207,10 +232,7 @@ button:active {
   font-size: 16px;
 }
 
-/* ===================== */
 /* Context Menu Config Items */
-/* ===================== */
-
 .context-menu-config-item {
   display: flex !important;
   align-items: center;
@@ -245,10 +267,7 @@ button:active {
   font-weight: 600;
 }
 
-/* ===================== */
 /* Config Modal (shared) */
-/* ===================== */
-
 .config-modal-overlay {
   position: fixed;
   top: 0;
@@ -310,7 +329,6 @@ button:active {
 }
 
 /* Tabs */
-
 .config-tabs {
   display: flex;
   padding: 12px 20px 0;
@@ -340,7 +358,6 @@ button:active {
 }
 
 /* Body */
-
 .config-body {
   flex: 1;
   overflow-y: auto;
@@ -373,7 +390,6 @@ button:active {
 }
 
 /* Device list */
-
 .config-device-list {
   display: flex;
   flex-direction: column;
@@ -438,8 +454,7 @@ button:active {
   color: #fff;
 }
 
-/* Slider groups (Paper Position) */
-
+/* Slider groups */
 .config-slider-group {
   margin-bottom: 20px;
 }
@@ -503,7 +518,6 @@ button:active {
 }
 
 /* Paper preview */
-
 .config-paper-preview {
   display: flex;
   flex-direction: column;
@@ -534,7 +548,6 @@ button:active {
 }
 
 /* Actions row */
-
 .config-actions-row {
   display: flex;
   gap: 8px;
@@ -576,7 +589,6 @@ button:active {
 }
 
 /* Footer */
-
 .config-footer {
   display: flex;
   gap: 8px;
@@ -619,8 +631,6 @@ button:active {
   cursor: not-allowed;
 }
 
-/* Saved message */
-
 .config-saved-message {
   text-align: center;
   padding: 8px 16px;
@@ -628,15 +638,12 @@ button:active {
   color: #51cf66;
   background: rgba(81, 207, 102, 0.1);
 }
-/* ===================== */
-/* MIGRATED GLOBAL STYLES */
-/* ===================== */
 
-/* Typography */
+/* MIGRATED GLOBAL STYLES */
 .title-thai {
   font-size: 3rem;
   font-weight: 700;
-  color: #fff; /* Default, override with theme prop/style */
+  color: #fff;
   margin: 0 0 8px 0;
   line-height: 1.2;
 }
@@ -644,14 +651,13 @@ button:active {
 .title-english {
   font-size: 1.5rem;
   font-weight: 500;
-  color: #fff; /* Default */
+  color: #fff;
   margin: 0;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   opacity: 0.9;
 }
 
-/* Quantity Selector */
 .quantity-selector {
   display: flex;
   align-items: center;
@@ -701,7 +707,6 @@ button:active {
   background: white;
 }
 
-/* Price Display */
 .price-display-row {
   display: flex;
   align-items: baseline;
@@ -719,7 +724,6 @@ button:active {
   font-weight: 500;
 }
 
-/* Action Buttons (Selection) */
 .action-buttons-container {
   display: flex;
   gap: 20px;
@@ -741,7 +745,7 @@ button:active {
   gap: 8px;
   min-height: 140px;
   box-shadow: none;
-  background: transparent; /* Default */
+  background: transparent;
 }
 
 .option-button:hover {
@@ -766,7 +770,6 @@ button:active {
   opacity: 0.95;
 }
 
-/* Loading Spinner */
 .loading-spinner {
   display: flex;
   justify-content: center;
@@ -790,7 +793,6 @@ button:active {
   100% { transform: rotate(360deg); }
 }
 
-/* Alert Modal */
 .alert-modal-overlay {
   position: fixed;
   inset: 0;
@@ -857,7 +859,6 @@ button:active {
   to { opacity: 1; transform: scale(1); }
 }
 
-/* Icon Mask Utility */
 .icon-mask {
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
