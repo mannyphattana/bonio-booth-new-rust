@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { setPrinting as setPrintingState } from "../utils/printingState";
 
 interface PaperConfig {
   scale: number;
@@ -86,6 +87,14 @@ export default function PaperPositionModal({ open, onClose }: Props) {
 
     setPrinting(true);
     setSavedMessage("🖨️ กำลัง Test Print...");
+    
+    // Set printing state BEFORE printing to prevent device check notifications
+    setPrintingState(true, 45000); // 45 second timeout
+    console.log("[PaperPositionModal] Printing state set to true before test print");
+    
+    // Small delay to ensure printing state is set before device check runs
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     try {
       await invoke("print_test_photo", {
         printerName: selectedPrinter,
@@ -97,9 +106,13 @@ export default function PaperPositionModal({ open, onClose }: Props) {
       setSavedMessage("✅ Test Print สำเร็จ!");
     } catch (err: any) {
       setSavedMessage(`❌ Print Error: ${err?.toString()?.slice(0, 60)}`);
+    } finally {
+      setPrinting(false); // Clear local printing state
+      // Clear printing state after print completes (includes grace period)
+      console.log("[PaperPositionModal] Test print completed, clearing printing state");
+      setPrintingState(false);
+      setTimeout(() => setSavedMessage(""), 4000);
     }
-    setPrinting(false);
-    setTimeout(() => setSavedMessage(""), 4000);
   }, [currentConfig, tab]);
 
   const handleReset = () => {

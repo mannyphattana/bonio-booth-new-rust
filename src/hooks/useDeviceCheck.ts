@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { isPrinting } from "../utils/printingState";
 
 interface DeviceCheckOptions {
   enabled?: boolean;
@@ -86,16 +87,47 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     const savedPrinter = localStorage.getItem("selectedPrinter") || "";
     printerName = savedPrinter;
     const isConfiguredPrinter = !!savedPrinter;
-    if (savedPrinter) {
+    
+    // Check printing state first - if printing, skip printer status check to avoid false notifications
+    const printingState = isPrinting();
+    if (printingState && isConfiguredPrinter) {
+      console.log("[useDeviceCheck] Printer is printing or in grace period, skipping printer status check");
+      // Keep previous printer connected state to avoid false transitions
+      if (prevStateRef.current) {
+        printerConnected = prevStateRef.current.printerConnected;
+        console.log(`[useDeviceCheck] Using previous printer state: ${printerConnected}`);
+      } else {
+        printerConnected = true; // Assume connected during printing
+        console.log("[useDeviceCheck] No previous state, assuming printer connected during printing");
+      }
+      // Get available printers for potential alert (but don't change connected state)
+      try {
+        const printers: any[] = await invoke("get_printers");
+        availablePrinterNames = printers.map((p: any) => p.name);
+      } catch {
+        // Keep empty array if can't get printers
+      }
+    } else if (savedPrinter) {
       try {
         const printers: any[] = await invoke("get_printers");
         availablePrinterNames = printers.map((p: any) => p.name);
         // Check both name AND is_online — Get-Printer returns installed printers
         // even when physically unplugged, but WorkOffline flag changes to true
-        printerConnected = printers.some(
-          (p: any) => p.name === savedPrinter && p.is_online,
-        );
-      } catch {
+        const foundPrinter = printers.find((p: any) => p.name === savedPrinter);
+        printerConnected = foundPrinter?.is_online || false;
+        
+        // Log printer status for debugging
+        if (foundPrinter) {
+          console.log(
+            `[useDeviceCheck] Printer "${savedPrinter}": is_online=${foundPrinter.is_online}, status="${foundPrinter.status}"`,
+          );
+        } else {
+          console.log(
+            `[useDeviceCheck] Printer "${savedPrinter}": not found in printer list`,
+          );
+        }
+      } catch (err) {
+        console.error("[useDeviceCheck] Error checking printers:", err);
         printerConnected = false;
       }
     }

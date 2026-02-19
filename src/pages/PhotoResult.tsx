@@ -6,6 +6,7 @@ import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
+import { setPrinting } from "../utils/printingState";
 
 interface Props {
   theme: ThemeData;
@@ -429,19 +430,33 @@ export default function PhotoResult({ theme }: Props) {
         }
 
         if (printerName) {
-          await invoke("print_photo", {
-            imagePath: printPath,
-            printerName,
-            frameType,
-            scale,
-            verticalOffset,
-            horizontalOffset,
-            isLandscape,
-          });
+          // Set printing state BEFORE checking printer status to prevent false notifications
+          // This must be done synchronously before any async operations
+          setPrinting(true, 45000); // 45 second timeout (longer than print operation)
+          console.log("[PhotoResult] Printing state set to true before print");
+          
+          // Small delay to ensure printing state is set before device check runs
+          await new Promise(resolve => setTimeout(resolve, 100));
 
-          // Reduce paper level
-          await invoke("reduce_paper_level", { copies: 1 });
-          setPrintStatus("done");
+          try {
+            await invoke("print_photo", {
+              imagePath: printPath,
+              printerName,
+              frameType,
+              scale,
+              verticalOffset,
+              horizontalOffset,
+              isLandscape,
+            });
+
+            // Reduce paper level
+            await invoke("reduce_paper_level", { copies: 1 });
+            setPrintStatus("done");
+          } finally {
+            // Clear printing state after print completes (includes grace period)
+            console.log("[PhotoResult] Print completed, clearing printing state");
+            setPrinting(false);
+          }
         } else {
           setPrintStatus("no-printer");
           console.warn("No printer found");
@@ -449,6 +464,8 @@ export default function PhotoResult({ theme }: Props) {
       } catch (err) {
         console.error("Print error:", err);
         setPrintStatus("error");
+        // Clear printing state on error
+        setPrinting(false);
       }
     },
     [frameWidth, frameHeight],

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import type { ThemeData } from "../App";
+import { setPrinting } from "../utils/printingState";
 
 interface Props {
   theme: ThemeData;
@@ -148,30 +149,53 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
       const isLandscape = orientation === "landscape";
       const frameType = isLandscape ? "6x4" : "4x6";
 
-      // Print for each copy
-      for (let i = 0; i < copies; i++) {
-        console.log(`[RequestImage] Printing copy ${i + 1}/${copies}...`);
-        await invoke("print_photo", {
-          imagePath: tempPath,
-          printerName,
-          frameType,
-          scale: 100.0,
-          verticalOffset: 0.0,
-          horizontalOffset: 0.0,
-          isLandscape,
-        });
-      }
+      // Set printing state BEFORE printing to prevent device check notifications
+      // Calculate timeout: 30 seconds per copy + 30 seconds buffer
+      const printTimeout = copies * 30000 + 30000;
+      setPrinting(true, printTimeout);
+      console.log(`[RequestImage] Printing state set to true (${copies} copies, timeout: ${printTimeout}ms)`);
+      
+      // Small delay to ensure printing state is set before device check runs
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-      console.log("[RequestImage] Print successful!");
-      setPrintStatus("success");
+      try {
+        // Print for each copy
+        for (let i = 0; i < copies; i++) {
+          console.log(`[RequestImage] Printing copy ${i + 1}/${copies}...`);
+          await invoke("print_photo", {
+            imagePath: tempPath,
+            printerName,
+            frameType,
+            scale: 100.0,
+            verticalOffset: 0.0,
+            horizontalOffset: 0.0,
+            isLandscape,
+          });
+        }
+
+        console.log("[RequestImage] Print successful!");
+        setPrintStatus("success");
+      } catch (error) {
+        console.error("[RequestImage] Error:", error);
+        setPrintStatus("error");
+        setErrorMessage(
+          error instanceof Error ? error.message : "Unknown error occurred",
+        );
+      } finally {
+        setIsPrinting(false);
+        // Clear printing state after print completes (includes grace period)
+        console.log("[RequestImage] Print completed, clearing printing state");
+        setPrinting(false);
+      }
     } catch (error) {
       console.error("[RequestImage] Error:", error);
       setPrintStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Unknown error occurred",
       );
-    } finally {
       setIsPrinting(false);
+      // Clear printing state on error
+      setPrinting(false);
     }
   };
 
