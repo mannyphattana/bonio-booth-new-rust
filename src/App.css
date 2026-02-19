@@ -55,6 +55,10 @@ button:active {
   border-radius: 3px;
 }
 
+/* ========================================= */
+/* Main Container Definitions */
+/* ========================================= */
+
 .page-container {
   width: 100vw;
   height: 100vh;
@@ -78,6 +82,27 @@ button:active {
   flex: 1;
 }
 
+/* เพิ่มคลาสนี้: สำหรับหน้า FrameSelection หรือหน้าอื่นๆ ที่ต้องการจัดแบบ บน-กลาง-ล่าง */
+.page-container.page-space-between {
+  justify-content: space-between;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+/* ซ่อน Scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ========================================= */
+/* Buttons & Badges (Updated Alignment) */
+/* ========================================= */
+
 .back-button {
   position: absolute;
   top: 20px;
@@ -92,6 +117,36 @@ button:active {
   z-index: 100;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
+  backdrop-filter: blur(4px);
+}
+
+.countdown-badge {
+  position: absolute;
+  top: 20px;
+  /* ตำแหน่งเดียวกับ Back Button */
+  right: 20px;
+  height: 50px;
+  /* บังคับสูงเท่า Back Button */
+  min-width: 80px;
+  /* กำหนดความกว้างขั้นต่ำให้ดูสมดุล */
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 0 20px;
+  /* padding ด้านข้าง */
+  border-radius: 25px;
+  /* ปรับความมนให้เข้ากับความสูง 50px */
+  font-size: 18px;
+  /* เพิ่มขนาดตัวอักษรนิดนึง */
+  font-weight: 600;
+  z-index: 100;
+  display: flex;
+  /* ใช้ Flexbox จัดกึ่งกลาง */
+  align-items: center;
+  /* กลางแนวตั้ง */
+  justify-content: center;
+  /* กลางแนวนอน */
+  backdrop-filter: blur(4px);
+  letter-spacing: 1px;
 }
 
 .primary-button {
@@ -104,17 +159,9 @@ button:active {
   min-width: 200px;
 }
 
-.countdown-badge {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 14px;
-  z-index: 100;
-}
+/* ========================================= */
+/* Other Components */
+/* ========================================= */
 
 .context-menu-overlay {
   position: fixed;
@@ -205,10 +252,7 @@ button:active {
   font-size: 16px;
 }
 
-/* ===================== */
 /* Context Menu Config Items */
-/* ===================== */
-
 .context-menu-config-item {
   display: flex !important;
   align-items: center;
@@ -243,10 +287,7 @@ button:active {
   font-weight: 600;
 }
 
-/* ===================== */
 /* Config Modal (shared) */
-/* ===================== */
-
 .config-modal-overlay {
   position: fixed;
   top: 0;
@@ -308,7 +349,6 @@ button:active {
 }
 
 /* Tabs */
-
 .config-tabs {
   display: flex;
   padding: 12px 20px 0;
@@ -338,7 +378,6 @@ button:active {
 }
 
 /* Body */
-
 .config-body {
   flex: 1;
   overflow-y: auto;
@@ -371,7 +410,6 @@ button:active {
 }
 
 /* Device list */
-
 .config-device-list {
   display: flex;
   flex-direction: column;
@@ -436,8 +474,7 @@ button:active {
   color: #fff;
 }
 
-/* Slider groups (Paper Position) */
-
+/* Slider groups */
 .config-slider-group {
   margin-bottom: 20px;
 }
@@ -501,7 +538,6 @@ button:active {
 }
 
 /* Paper preview */
-
 .config-paper-preview {
   display: flex;
   flex-direction: column;
@@ -532,7 +568,6 @@ button:active {
 }
 
 /* Actions row */
-
 .config-actions-row {
   display: flex;
   gap: 8px;
@@ -574,7 +609,6 @@ button:active {
 }
 
 /* Footer */
-
 .config-footer {
   display: flex;
   gap: 8px;
@@ -617,8 +651,6 @@ button:active {
   cursor: not-allowed;
 }
 
-/* Saved message */
-
 .config-saved-message {
   text-align: center;
   padding: 8px 16px;
@@ -631,12 +663,11 @@ button:active {
 /* MIGRATED GLOBAL STYLES */
 /* ===================== */
 
-/* Typography */
+/* MIGRATED GLOBAL STYLES */
 .title-thai {
   font-size: 3rem;
   font-weight: 700;
   color: #fff;
-  /* Default, override with theme prop/style */
   margin: 0 0 8px 0;
   line-height: 1.2;
 }
@@ -645,14 +676,84 @@ button:active {
   font-size: 1.5rem;
   font-weight: 500;
   color: #fff;
-  /* Default */
   margin: 0;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   opacity: 0.9;
 }
 
-/* Quantity Selector */
+/* Shared title wrapper for all main pages */
+.page-title-section {
+  width: 100%;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Primary full-width action button (Next / Start / Print etc.) */
+.page-action-btn {
+  width: 90%;
+  max-width: 500px;
+  padding: 16px 40px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 35px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.2s ease;
+}
+
+.page-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 3-section page layout (title → body → footer) ─────────────────── */
+/* Mirrors legacy: .main-content-frame / .main-content                   */
+.page-main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Row 1: title area – fixed 35% */
+.page-row-top {
+  flex: 0 0 25%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Row 2: body / content – fills remaining space */
+.page-row-body {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* Row 3: footer button – fixed 25% */
+.page-row-footer {
+  flex: 0 0 25%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .quantity-selector {
   display: flex;
   align-items: center;
@@ -702,7 +803,6 @@ button:active {
   background: white;
 }
 
-/* Price Display */
 .price-display-row {
   display: flex;
   align-items: baseline;
@@ -720,7 +820,6 @@ button:active {
   font-weight: 500;
 }
 
-/* Action Buttons (Selection) */
 .action-buttons-container {
   display: flex;
   gap: 20px;
@@ -743,7 +842,6 @@ button:active {
   min-height: 140px;
   box-shadow: none;
   background: transparent;
-  /* Default */
 }
 
 .option-button:hover {
@@ -768,7 +866,6 @@ button:active {
   opacity: 0.95;
 }
 
-/* Loading Spinner */
 .loading-spinner {
   display: flex;
   justify-content: center;
@@ -797,7 +894,6 @@ button:active {
   }
 }
 
-/* Alert Modal */
 .alert-modal-overlay {
   position: fixed;
   inset: 0;
@@ -871,7 +967,6 @@ button:active {
   }
 }
 
-/* Icon Mask Utility */
 .icon-mask {
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;

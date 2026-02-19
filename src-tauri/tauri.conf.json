@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "Bonio Booth",
-        "width": 1080,
-        "height": 1920,
-        "fullscreen": true,
-        "resizable": false
+        "width": 720,
+        "height": 1280,
+        "fullscreen": false,
+        "resizable": true
       }
     ],
     "security": {
