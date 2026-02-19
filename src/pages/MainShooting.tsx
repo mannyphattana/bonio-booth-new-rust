@@ -122,7 +122,7 @@ export default function MainShooting({ theme, machineData }: Props) {
   const [phase, setPhase] = useState<
     "ready" | "countdown" | "flash" | "preview" | "done" | "preparing"
   >("ready");
-  const [isRecording, setIsRecording] = useState(false);
+  const [, setIsRecording] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
   const [showGetReady, setShowGetReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -136,7 +136,6 @@ export default function MainShooting({ theme, machineData }: Props) {
     width: 800,
     height: 600,
   });
-  const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
   useIdleTimeout();
 
   useEffect(() => {

@@ -2,8 +2,7 @@ import { useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-import BackButton from "../components/BackButton";
-import Countdown from "../components/Countdown"; // อย่าลืม import Countdown
+import Countdown from "../components/Countdown";
 
 interface Props {
   theme: ThemeData;
@@ -48,31 +47,8 @@ export default function PrepareShooting({ theme, machineData }: Props) {
         overflow: "hidden", // ห้ามเลื่อน
       }}
     >
-      {/* 1. Header Bar: จัดปุ่ม Back และ Countdown แบบเดียวกับหน้า FrameSelection */}
-      <div
-        style={{
-          position: "absolute",
-          top: "20px",
-          left: 0,
-          width: "100%",
-          padding: "0 20px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          zIndex: 100,
-          height: "50px",
-        }}
-      >
-        {/* ปุ่มย้อนกลับ */}
-        <div style={{ position: "relative", width: "50px", height: "50px" }}>
-          <BackButton onBackClick={handleBack} />
-        </div>
-
-        {/* ตัวนับเวลา (ใช้อันเดียวกับหน้า FrameSelection) */}
-        <div style={{ position: "relative" }}>
-          <Countdown seconds={300} onTimeout={() => navigate("/")} />
-        </div>
-      </div>
+      {/* 1. Header Bar: แสดง Countdown (ไม่มี BackButton ตาม Legacy) */}
+      <Countdown seconds={300} onComplete={() => navigate("/")} />
 
       <div
         style={{
@@ -416,14 +392,14 @@ export default function PrepareShooting({ theme, machineData }: Props) {
               color: theme.textButtonColor,
               background: theme.primaryColor,
               border: "none",
-              borderRadius: 35, // ปรับให้มนเท่าหน้าอื่น (จาก 16 เป็น 35)
+              borderRadius: 35,
               cursor: "pointer",
               minHeight: 60,
               letterSpacing: 0.5,
-              boxShadow: "0 5px 20px rgba(0,0,0,0.3)", // เพิ่มเงาให้เหมือนหน้าอื่น
+              boxShadow: "0 5px 20px rgba(0,0,0,0.3)",
             }}
           >
-            Start ({countdown}) {/* เอาเลข countdown มาโชว์ในปุ่มด้วย */}
+            Start
           </button>
         </div>
       </div>

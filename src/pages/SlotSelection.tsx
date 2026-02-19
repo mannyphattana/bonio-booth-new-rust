@@ -8,7 +8,7 @@ import type {
   FrameData,
 } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-import BackButton from "../components/BackButton";
+
 import Countdown from "../components/Countdown";
 
 interface Props {
@@ -142,34 +142,23 @@ export default function SlotSelection({ theme }: Props) {
         overflow: "hidden",
       }}
     >
-      {/* 1. Header: ปรับหัวข้อให้อยู่ในบรรทัดเดียวกันและต่ำลงอีกนิด */}
+      {/* 1. Header: Title centered, Countdown absolute top-right (no BackButton per legacy) */}
+      <Countdown seconds={300} onComplete={() => navigate("/")} />
       <header
         style={{
           width: "100%",
           height: "100px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: "center",
           padding: "0 40px",
           zIndex: 100,
           position: "relative",
         }}
       >
-        <div style={{ zIndex: 110 }}>
-          <BackButton
-            onBackClick={() => navigate("/main-shooting", { state })}
-          />
-        </div>
-
-        {/* ปรับแก้ "เลือกรูปของคุณ" ให้อยู่บรรทัดเดียวและต่ำลง */}
         <div
           style={{
-            position: "absolute",
-            left: "50%",
-            transform: "translateX(-50%)",
             textAlign: "center",
-            top: "50px",
-            width: "100%",
           }}
         >
           <h1
@@ -195,10 +184,6 @@ export default function SlotSelection({ theme }: Props) {
           >
             SELECT YOUR PHOTOS ({selectedPhotos.length}/{slots.length})
           </p>
-        </div>
-
-        <div style={{ zIndex: 110 }}>
-          <Countdown seconds={300} onTimeout={() => navigate("/")} />
         </div>
       </header>
 

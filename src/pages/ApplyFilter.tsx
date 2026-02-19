@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, Capture, FrameData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { FILTERS, type FilterConfig } from "../config/filters";
-import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 
 interface Props {
@@ -125,15 +124,14 @@ export default function ApplyFilter({ theme }: Props) {
 
     try {
       let filteredCaptures = [...frameCaptures];
-      let ffmpegAvailable = false;
       try {
         setApplyProgress("กำลังตรวจสอบ FFmpeg...");
-        ffmpegAvailable = await invoke<boolean>("ensure_ffmpeg");
-      } catch (err) {
+        await invoke<boolean>("ensure_ffmpeg");
+      } catch {
         try {
-          ffmpegAvailable = await invoke<boolean>("check_ffmpeg_available");
+          await invoke<boolean>("check_ffmpeg_available");
         } catch {
-          ffmpegAvailable = false;
+          // ffmpeg not available, proceed without it
         }
       }
 
@@ -241,32 +239,22 @@ export default function ApplyFilter({ theme }: Props) {
         `}
       </style>
 
-      {/* 1. Header */}
+      {/* 1. Header: no BackButton per Legacy (PhotoFilter). Countdown only */}
+      <Countdown seconds={300} onComplete={() => navigate("/")} />
       <div
         style={{
           position: "relative",
           width: "100%",
           padding: "50px 40px 0",
           display: "flex",
-          justifyContent: "space-between",
+          justifyContent: "center",
           alignItems: "flex-start",
           zIndex: 100,
         }}
       >
-        <div style={{ zIndex: 10 }}>
-          <BackButton
-            onBackClick={() => navigate("/slot-selection", { state })}
-          />
-        </div>
         <div
           style={{
-            position: "absolute",
-            left: "50%",
-            transform: "translateX(-50%)",
             textAlign: "center",
-            top: "45px",
-            width: "100%",
-            zIndex: 5,
           }}
         >
           <h1
@@ -292,9 +280,6 @@ export default function ApplyFilter({ theme }: Props) {
           >
             DECORATE YOUR PHOTO
           </p>
-        </div>
-        <div style={{ zIndex: 10 }}>
-          <Countdown seconds={300} onTimeout={() => navigate("/")} />
         </div>
       </div>
 
