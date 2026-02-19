@@ -1,10 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
+import type {
+  ThemeData,
+  MachineData,
+  Capture,
+  FrameSlot,
+  FrameData,
+} from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-
+import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
-import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -18,12 +23,10 @@ export default function SlotSelection({ theme }: Props) {
   useIdleTimeout();
 
   const captures: Capture[] = state.captures || [];
-  const selectedFrame = state.selectedFrame;
+  const selectedFrame: FrameData = state.selectedFrame;
   const slots: FrameSlot[] = selectedFrame?.grid?.slots || [];
 
-  // Get frame dimensions from grid or parse from imageSize
   const getFrameDimensions = () => {
-    // Use imageSize first — slot coordinates are in imageSize pixel space
     if (selectedFrame?.imageSize) {
       const parts = selectedFrame.imageSize.split("x");
       if (parts.length === 2) {
@@ -32,17 +35,12 @@ export default function SlotSelection({ theme }: Props) {
         if (w > 0 && h > 0) return { w, h };
       }
     }
-    // Fallback to grid dimensions
-    if (selectedFrame?.grid?.width && selectedFrame?.grid?.height) {
-      return { w: selectedFrame.grid.width, h: selectedFrame.grid.height };
-    }
     return { w: 1200, h: 3600 };
   };
 
   const { w: frameWidth, h: frameHeight } = getFrameDimensions();
   const frameAspectRatio = frameWidth / frameHeight;
 
-  // State: photoAssignments maps slotIndex → captureIndex
   const [photoAssignments, setPhotoAssignments] = useState<{
     [slotIndex: number]: number;
   }>({});
@@ -55,21 +53,20 @@ export default function SlotSelection({ theme }: Props) {
 
   const getAssignedCount = () => selectedPhotos.length;
 
-  // Calculate scale factor based on container size vs frame original dimensions
   const calculateScaleFactor = useCallback(() => {
     const container = containerRef.current;
     if (!container || !selectedFrame) return;
 
-    const containerWidth = container.offsetWidth || container.clientWidth;
-    const containerHeight = container.offsetHeight || container.clientHeight;
+    const containerWidth = container.offsetWidth;
+    const containerHeight = container.offsetHeight;
 
     const imgAspect = frameWidth / frameHeight;
     const containerAspect = containerWidth / containerHeight;
 
-    let renderedWidth: number;
-    let renderedHeight: number;
-    let offsetX = 0;
-    let offsetY = 0;
+    let renderedWidth,
+      renderedHeight,
+      offsetX = 0,
+      offsetY = 0;
 
     if (imgAspect > containerAspect) {
       renderedWidth = containerWidth;
@@ -89,48 +86,33 @@ export default function SlotSelection({ theme }: Props) {
   }, [selectedFrame, frameWidth, frameHeight]);
 
   useEffect(() => {
-    if (!selectedFrame) return;
-    const timer = setTimeout(() => {
-      calculateScaleFactor();
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [calculateScaleFactor]);
+    if (selectedFrame) {
+      const timer = setTimeout(calculateScaleFactor, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [calculateScaleFactor, selectedFrame]);
 
   useEffect(() => {
     window.addEventListener("resize", calculateScaleFactor);
     return () => window.removeEventListener("resize", calculateScaleFactor);
   }, [calculateScaleFactor]);
 
-  // Handle frame image load to recalculate scale
-  const handleFrameLoad = useCallback(() => {
-    calculateScaleFactor();
-  }, [calculateScaleFactor]);
-
-  // Photo click: toggle selection (adapts reference PhotoDecorate pattern)
   const handlePhotoClick = useCallback(
-    (photoIndex: number) => {
+    (idx: number) => {
       if (!selectedFrame) return;
-
-      if (selectedPhotos.includes(photoIndex)) {
-        // Deselect: remove from selectedPhotos, rebuild assignments
-        const newSelectedPhotos = selectedPhotos.filter(
-          (p) => p !== photoIndex,
-        );
-        setSelectedPhotos(newSelectedPhotos);
-
-        const newAssignments: { [slotIndex: number]: number } = {};
-        newSelectedPhotos.forEach((p, i) => {
-          newAssignments[i] = p;
-        });
-        setPhotoAssignments(newAssignments);
+      if (selectedPhotos.includes(idx)) {
+        const newPhotos = selectedPhotos.filter((p) => p !== idx);
+        setSelectedPhotos(newPhotos);
+        const newAssign: any = {};
+        newPhotos.forEach((p, i) => (newAssign[i] = p));
+        setPhotoAssignments(newAssign);
       } else if (selectedPhotos.length < slots.length) {
-        // Select: add to next available slot
-        const newSelectedPhotos = [...selectedPhotos, photoIndex];
-        setSelectedPhotos(newSelectedPhotos);
-
-        const newAssignments = { ...photoAssignments };
-        newAssignments[selectedPhotos.length] = photoIndex;
-        setPhotoAssignments(newAssignments);
+        const newPhotos = [...selectedPhotos, idx];
+        setSelectedPhotos(newPhotos);
+        setPhotoAssignments({
+          ...photoAssignments,
+          [selectedPhotos.length]: idx,
+        });
       }
     },
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
@@ -138,161 +120,223 @@ export default function SlotSelection({ theme }: Props) {
 
   const handleNext = () => {
     if (getAssignedCount() < slots.length) return;
-
-    // Build the ordered captures for the frame
     const frameCaptures = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
       return captureIdx !== undefined ? captures[captureIdx] : captures[0];
     });
-
-    navigate("/apply-filter", {
-      state: {
-        ...state,
-        frameCaptures,
-        frameCaptureIndices: Object.values(photoAssignments),
-      },
-    });
+    navigate("/apply-filter", { state: { ...state, frameCaptures } });
   };
+
+  if (!selectedFrame) return null;
 
   return (
     <div
       className="page-container"
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
-        justifyContent: "flex-start",
-        padding: "160px 0px",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        padding: 0,
+        position: "relative",
         overflow: "hidden",
       }}
     >
-      <Countdown
-        seconds={COUNTDOWN.PHOTO_DECORATE.DURATION}
-        onComplete={() => navigate("/")}
-        visible={COUNTDOWN.PHOTO_DECORATE.VISIBLE}
-      />
-
-      <h1
+      {/* 1. Header: ปรับหัวข้อให้อยู่ในบรรทัดเดียวกันและต่ำลงอีกนิด */}
+      <header
         style={{
-          color: theme.fontColor,
-          fontSize: 22,
-          marginTop: 60,
-          marginBottom: 4,
-          flexShrink: 0,
+          width: "100%",
+          height: "100px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 40px",
+          zIndex: 100,
+          position: "relative",
         }}
       >
-        เลือกรูปลงกรอบ
-      </h1>
-      <p
-        style={{
-          color: theme.fontColor,
-          opacity: 0.8,
-          fontSize: 14,
-          marginBottom: 12,
-          flexShrink: 0,
-        }}
-      >
-        SELECT PHOTOS FOR FRAME ({getAssignedCount()}/{slots.length})
-      </p>
+        <div style={{ zIndex: 110 }}>
+          <BackButton
+            onBackClick={() => navigate("/main-shooting", { state })}
+          />
+        </div>
 
-      {/* Frame preview with slots - uses object-fit contain pattern */}
+        {/* ปรับแก้ "เลือกรูปของคุณ" ให้อยู่บรรทัดเดียวและต่ำลง */}
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            transform: "translateX(-50%)",
+            textAlign: "center",
+            top: "50px",
+            width: "100%",
+          }}
+        >
+          <h1
+            style={{
+              color: "#e94560",
+              fontSize: "3.2rem",
+              fontWeight: "bold",
+              margin: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            เลือกรูปของคุณ
+          </h1>
+          <p
+            style={{
+              color: theme.fontColor,
+              opacity: 0.8,
+              fontSize: "1.1rem",
+              marginTop: "4px",
+              textTransform: "uppercase",
+              letterSpacing: "1px",
+            }}
+          >
+            SELECT YOUR PHOTOS ({selectedPhotos.length}/{slots.length})
+          </p>
+        </div>
+
+        <div style={{ zIndex: 110 }}>
+          <Countdown seconds={300} onTimeout={() => navigate("/")} />
+        </div>
+      </header>
+
+      {/* 2. Content Zone: รวมกรอบและ Thumbnail ไว้ด้วยกัน */}
       <div
         style={{
+          flex: 1,
           display: "flex",
-          justifyContent: "center",
+          flexDirection: "column",
           alignItems: "center",
-          flexShrink: 0,
-          width: "100%",
-          padding: "0 20px",
-          boxSizing: "border-box",
+          justifyContent: "center",
+          gap: "40px",
+          paddingBottom: "130px", // เว้นพื้นที่ให้ปุ่ม Next ด้านล่างมากขึ้น
         }}
       >
+        {/* Frame */}
         <div
           ref={containerRef}
           style={{
             position: "relative",
-            width: "100%",
-            maxWidth: `calc(55vh * ${frameAspectRatio})`,
+            width: "85%",
+            height: "35vh",
             aspectRatio: `${frameAspectRatio}`,
             isolation: "isolate",
-            backgroundColor: "transparent",
           }}
         >
-          {/* Frame image */}
-          {selectedFrame?.imageUrl && (
-            <img
-              ref={frameImgRef}
-              src={selectedFrame.imageUrl}
-              alt="Frame"
-              onLoad={handleFrameLoad}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                zIndex: 0,
-                pointerEvents: "none",
-              }}
-            />
-          )}
+          <img
+            ref={frameImgRef}
+            src={selectedFrame.imageUrl}
+            alt=""
+            onLoad={calculateScaleFactor}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              zIndex: 10,
+              pointerEvents: "none",
+            }}
+          />
 
-          {/* Slot previews - using scaleFactor + imageOffset */}
-          {slots.map((slot, slotIdx) => {
+          {slots.map((slot, i) => {
+            const captureIdx = photoAssignments[i];
             const slotX = slot.x * scaleFactor.x + imageOffset.x;
             const slotY = slot.y * scaleFactor.y + imageOffset.y;
-            const slotWidth = slot.width * scaleFactor.x;
-            const slotHeight = slot.height * scaleFactor.y;
-            const scaledRadius = slot.radius * scaleFactor.x;
-            const zIndex = slot.zIndex || 0;
-            const rotation = slot.rotate || 0;
-            const captureIdx = photoAssignments[slotIdx];
-            const hasPhoto = captureIdx !== undefined;
-
             return (
               <div
-                key={slotIdx}
+                key={i}
                 style={{
                   position: "absolute",
+                  zIndex: 5,
+                  overflow: "hidden",
                   left: `${slotX}px`,
                   top: `${slotY}px`,
-                  width: `${slotWidth}px`,
-                  height: `${slotHeight}px`,
-                  borderRadius: `${scaledRadius}px`,
-                  overflow: "hidden",
-                  zIndex: zIndex < 0 ? -1 : 1,
-                  transform:
-                    rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                  width: `${slot.width * scaleFactor.x}px`,
+                  height: `${slot.height * scaleFactor.y}px`,
+                  borderRadius: `${slot.radius * scaleFactor.x}px`,
+                  background: "rgba(0,0,0,0.05)",
                 }}
               >
-                {hasPhoto ? (
+                {captureIdx !== undefined && (
                   <img
                     src={captures[captureIdx].photo}
-                    alt={`Slot ${slotIdx + 1}`}
+                    alt=""
                     style={{
                       width: "100%",
                       height: "100%",
                       objectFit: "cover",
                     }}
                   />
-                ) : (
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 3. Thumbnails */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            maxWidth: "420px",
+            gap: "12px",
+            justifyContent: "center",
+            zIndex: 20,
+          }}
+        >
+          {captures.map((cap, idx) => {
+            const isSelected = selectedPhotos.includes(idx);
+            const slotIdx = Object.keys(photoAssignments).find(
+              (key) => photoAssignments[parseInt(key)] === idx,
+            );
+            return (
+              <div
+                key={idx}
+                onClick={() => handlePhotoClick(idx)}
+                style={{
+                  width: "85px",
+                  height: "85px",
+                  borderRadius: "15px",
+                  overflow: "hidden",
+                  border: isSelected
+                    ? "3px solid #fff"
+                    : "3px solid transparent",
+                  backgroundColor: "black",
+                  cursor: "pointer",
+                  transition: "0.2s",
+                  position: "relative",
+                  opacity: isSelected ? 0.6 : 1,
+                  boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
+                }}
+              >
+                <img
+                  src={cap.photo}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+                {isSelected && (
                   <div
                     style={{
-                      width: "100%",
-                      height: "100%",
-                      background: "rgba(0,0,0,0.15)",
-                      border: "1.5px dashed rgba(255,255,255,0.3)",
-                      boxSizing: "border-box",
+                      position: "absolute",
+                      top: 5,
+                      right: 5,
+                      width: "22px",
+                      height: "22px",
+                      background: "#e94560",
+                      color: "white",
+                      borderRadius: "50%",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      borderRadius: `${scaledRadius}px`,
+                      fontSize: "12px",
+                      fontWeight: "bold",
                     }}
                   >
-                    <span
-                      style={{ color: "rgba(255,255,255,0.4)", fontSize: 10 }}
-                    >
-                      {slotIdx + 1}
-                    </span>
+                    {parseInt(slotIdx!) + 1}
                   </div>
                 )}
               </div>
@@ -301,97 +345,66 @@ export default function SlotSelection({ theme }: Props) {
         </div>
       </div>
 
-      {/* Photo grid section */}
+      {/* 4. Footer: ปุ่ม Next ดันขึ้นและลดขนาด */}
+      <footer
+        style={{
+          position: "absolute",
+          bottom: "60px",
+          width: "100%",
+          display: "flex",
+          justifyContent: "center",
+          zIndex: 100,
+        }}
+      >
+        <button
+          onClick={handleNext}
+          disabled={selectedPhotos.length < slots.length}
+          style={{
+            background:
+              selectedPhotos.length >= slots.length
+                ? "rgba(255, 255, 255, 0.9)"
+                : "rgba(255, 255, 255, 0.4)",
+            backdropFilter: "blur(10px)",
+            color: selectedPhotos.length >= slots.length ? "#e94560" : "#fff",
+            padding: "14px 80px", // ลดขนาดปุ่มลง
+            borderRadius: "40px",
+            fontSize: "20px",
+            fontWeight: "bold",
+            border: "none",
+            cursor: "pointer",
+            transition: "0.3s",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+          }}
+        >
+          Next
+        </button>
+      </footer>
+
+      {/* Logo มุมขวาล่าง */}
       <div
         style={{
-          flex: 1,
-          width: "100%",
-          overflowY: "auto",
-          padding: "12px 16px",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          justifyContent: "center",
-          alignContent: "center",
+          position: "absolute",
+          bottom: "30px",
+          right: "40px",
+          opacity: 0.8,
         }}
       >
-        {captures.map((cap, idx) => {
-          const sequenceNumber = selectedPhotos.indexOf(idx);
-          const isPhotoSelected = sequenceNumber !== -1;
-
-          return (
-            <button
-              key={idx}
-              onClick={() => handlePhotoClick(idx)}
-              style={{
-                width: 90,
-                height: 110,
-                borderRadius: 12,
-                overflow: "hidden",
-                flexShrink: 0,
-                border: isPhotoSelected
-                  ? `3px solid ${theme.primaryColor}`
-                  : "3px solid rgba(255,255,255,0.15)",
-                opacity: isPhotoSelected ? 1 : 0.7,
-                position: "relative",
-                padding: 0,
-                background: "transparent",
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-              }}
-            >
-              <img
-                src={cap.photo}
-                alt={`Capture ${idx + 1}`}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                }}
-              />
-              {isPhotoSelected && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 4,
-                    right: 4,
-                    width: 24,
-                    height: 24,
-                    borderRadius: "50%",
-                    background: theme.primaryColor,
-                    color: theme.textButtonColor,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-                  }}
-                >
-                  {sequenceNumber + 1}
-                </div>
-              )}
-            </button>
-          );
-        })}
+        <span
+          style={{ fontSize: "24px", fontWeight: "bold", color: "#e94560" }}
+        >
+          timelab
+        </span>
+        <span
+          style={{
+            fontSize: "10px",
+            display: "block",
+            textAlign: "right",
+            color: "#e94560",
+          }}
+        >
+          PHOTO BOOTH
+        </span>
       </div>
-
-      {/* Next button */}
-      <button
-        className="primary-button"
-        onClick={handleNext}
-        disabled={getAssignedCount() < slots.length}
-        style={{
-          background:
-            getAssignedCount() >= slots.length ? theme.primaryColor : "#444",
-          color: theme.textButtonColor,
-          marginTop: 8,
-          marginBottom: 20,
-          flexShrink: 0,
-        }}
-      >
-        ถัดไป / NEXT
-      </button>
     </div>
   );
 }
