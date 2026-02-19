@@ -682,6 +682,78 @@ button:active {
   opacity: 0.9;
 }
 
+/* Shared title wrapper for all main pages */
+.page-title-section {
+  width: 100%;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Primary full-width action button (Next / Start / Print etc.) */
+.page-action-btn {
+  width: 90%;
+  max-width: 500px;
+  padding: 16px 40px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 35px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.2s ease;
+}
+
+.page-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 3-section page layout (title → body → footer) ─────────────────── */
+/* Mirrors legacy: .main-content-frame / .main-content                   */
+.page-main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Row 1: title area – fixed 35% */
+.page-row-top {
+  flex: 0 0 25%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Row 2: body / content – fills remaining space */
+.page-row-body {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* Row 3: footer button – fixed 25% */
+.page-row-footer {
+  flex: 0 0 25%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .quantity-selector {
   display: flex;
   align-items: center;

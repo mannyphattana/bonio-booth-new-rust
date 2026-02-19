@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -48,73 +49,26 @@ export default function PrepareShooting({ theme, machineData }: Props) {
       }}
     >
       {/* 1. Header Bar: แสดง Countdown (ไม่มี BackButton ตาม Legacy) */}
-      <Countdown seconds={300} onComplete={() => navigate("/")} />
+      <Countdown
+        seconds={COUNTDOWN.PHOTO_PREPARE.DURATION}
+        onComplete={() => navigate("/")}
+      />
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          padding: "40px 40px 0 40px", // ลด padding บนเพราะมี Header แล้ว
-          boxSizing: "border-box",
-          width: "100%",
-          height: "100%",
-          overflow: "hidden",
-          marginTop: "60px", // ดันเนื้อหาลงมาหลบ Header
-        }}
-      >
-        {/* Row 1: Title (35%) */}
-        <div
-          style={{
-            flex: "0 0 30%", // ลดลงนิดหน่อยเพื่อให้สมดุล
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div style={{ textAlign: "center" }}>
-            <h1
-              style={{
-                color: theme.fontColor,
-                fontSize: "3rem",
-                fontWeight: 700,
-                margin: "0 0 8px 0",
-                lineHeight: 1.2,
-              }}
-            >
+      <div className="page-main-content" style={{ marginTop: "60px" }}>
+        {/* Row 1: Title */}
+        <div className="page-row-top">
+          <div className="page-title-section">
+            <h1 className="title-thai" style={{ color: theme.fontColor }}>
               เตรียมถ่ายภาพ
             </h1>
-            <p
-              style={{
-                color: theme.fontColor,
-                fontSize: "1.5rem",
-                fontWeight: 500,
-                margin: 0,
-                letterSpacing: 0.5,
-                textTransform: "uppercase",
-              }}
-            >
+            <p className="title-english" style={{ color: theme.fontColor }}>
               PREPARE FOR PHOTOSHOOT
             </p>
           </div>
         </div>
 
-        {/* Row 2: Steps (flex: 1) */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-            padding: 10,
-            boxSizing: "border-box",
-          }}
-        >
+        {/* Row 2: Steps */}
+        <div className="page-row-body">
           <div
             style={{
               display: "flex",
@@ -371,32 +325,14 @@ export default function PrepareShooting({ theme, machineData }: Props) {
           </div>
         </div>
 
-        {/* Row 3: Start Button (25%) */}
-        <div
-          style={{
-            flex: "0 0 25%",
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
+        {/* Row 3: Footer */}
+        <div className="page-row-footer">
           <button
             onClick={handleStart}
+            className="page-action-btn"
             style={{
-              width: "90%",
-              maxWidth: 500,
-              padding: "16px 40px",
-              fontSize: 26,
-              fontWeight: 700,
               color: theme.textButtonColor,
               background: theme.primaryColor,
-              border: "none",
-              borderRadius: 35,
-              cursor: "pointer",
-              minHeight: 60,
-              letterSpacing: 0.5,
-              boxShadow: "0 5px 20px rgba(0,0,0,0.3)",
             }}
           >
             Start

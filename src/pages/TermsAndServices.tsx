@@ -53,10 +53,10 @@ export default function TermsAndServices({ theme }: Props) {
 
   const contentStyle: React.CSSProperties = {
     width: "100%",
+    maxWidth: "720px",
     backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderRadius: "16px",
-    padding: "2rem",
-    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+    padding: "3rem",
   };
 
   const titleStyle: React.CSSProperties = {

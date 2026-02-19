@@ -60,6 +60,25 @@ function CropOverlay({
         zIndex: 10,
       }}
     >
+      {/* 50% opacity mask outside the crop area */}
+      <path
+        d={`
+            M 0 0
+            H ${containerWidth}
+            V ${containerHeight}
+            H 0
+            Z
+            M ${visibleCropX} ${visibleCropY}
+            V ${visibleCropY + visibleCropH}
+            H ${visibleCropX + visibleCropW}
+            V ${visibleCropY}
+            Z
+          `}
+        fill="rgba(0, 0, 0, 0.5)"
+        fillRule="evenodd"
+      />
+
+      {/* Dashed border for the crop area */}
       <rect
         x={visibleCropX}
         y={visibleCropY}
@@ -98,12 +117,12 @@ export default function MainShooting({ theme, machineData }: Props) {
   // --------------------------------------------------
 
   // --- 2. Logic คำนวณขนาดรูป (แนวนอนต้องใหญ่หน่อย) ---
-  const firstSlot = slots[0] || { width: 3, height: 4 };
-  const isHorizontal = firstSlot.width > firstSlot.height;
+  // const firstSlot = slots[0] || { width: 3, height: 4 };
+  // const isHorizontal = firstSlot.width > firstSlot.height;
 
-  const thumbWidthVal = isHorizontal ? 140 : 100; // แนวนอน 140px, แนวตั้ง 100px
+  // const thumbWidthVal = isHorizontal ? 140 : 100; // แนวนอน 140px, แนวตั้ง 100px
   const thumbGap = 16;
-  const containerMaxWidthVal = thumbWidthVal * 3 + thumbGap * 2 + 20; // คำนวณความกว้าง Container ให้พอดี 3 รูป
+  // const containerMaxWidthVal = thumbWidthVal * 3 + thumbGap * 2 + 20; // คำนวณความกว้าง Container ให้พอดี 3 รูป
   // --------------------------------------------------
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -647,14 +666,14 @@ export default function MainShooting({ theme, machineData }: Props) {
 
   return (
     <div
-      className="page-container page-space-between"
+      className="page-container"
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         height: "100vh",
         overflow: "hidden",
       }}
     >
-      {/* 1. Header */}
+      {/* 1. Header (Absolute) */}
       <div
         style={{
           position: "absolute",
@@ -712,259 +731,206 @@ export default function MainShooting({ theme, machineData }: Props) {
         </div>
       </div>
 
-      {/* 2. Title */}
-      <div
-        style={{
-          width: "100%",
-          textAlign: "center",
-          marginTop: "40px",
-          zIndex: 10,
-          flexShrink: 0,
-        }}
-      >
-        <h1
-          style={{
-            color: "#e94560",
-            fontSize: "42px",
-            fontWeight: "bold",
-            margin: 0,
-            lineHeight: 1,
-          }}
-        >
-          มองกล้อง!
-        </h1>
-        <p
-          style={{
-            color: "#e94560",
-            letterSpacing: "1px",
-            opacity: 0.8,
-            fontSize: "14px",
-            marginTop: "5px",
-            textTransform: "uppercase",
-          }}
-        >
-          LET'S TAKE A PHOTO
-        </p>
-      </div>
-
-      {/* 3. Camera View */}
-      <div
-        style={{
-          flex: 1,
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "10px 0",
-          minHeight: 0,
-        }}
-      >
-        <div
-          ref={cameraContainerRef}
-          style={{
-            position: "relative",
-            width: "85%",
-            maxHeight: "50vh",
-            borderRadius: 20,
-            overflow: "hidden",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-            background: "black",
-            aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
-          }}
-        >
-          {cameraType === "webcam" && (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: "scaleX(-1)",
-              }}
-            />
-          )}
-          {cameraType === "canon" && canonCamera.liveViewFrame && (
-            <img
-              ref={canonLiveViewRef}
-              src={canonCamera.liveViewFrame}
-              alt="Live View"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: "scaleX(-1)",
-              }}
-            />
-          )}
-          {currentSlot && cameraReady && (
-            <CropOverlay
-              slotWidth={currentSlot.width}
-              slotHeight={currentSlot.height}
-              videoWidth={videoDimensions.width}
-              videoHeight={videoDimensions.height}
-              containerWidth={containerDimensions.width}
-              containerHeight={containerDimensions.height}
-            />
-          )}
-          {phase === "countdown" && countdown > 0 && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 20,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 150,
-                  fontWeight: 900,
-                  color: "white",
-                  textShadow: "0 4px 20px rgba(0,0,0,0.5)",
-                  animation: "countdownPulse 1s infinite",
-                }}
-              >
-                {countdown}
-              </div>
-            </div>
-          )}
-          {showGetReady && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0,0,0,0.6)",
-                zIndex: 25,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 40,
-                  fontWeight: 800,
-                  color: "white",
-                  marginBottom: 10,
-                }}
-              >
-                Get
-              </div>
-              <div style={{ fontSize: 40, fontWeight: 800, color: "white" }}>
-                ready...
-              </div>
-            </div>
-          )}
-          {showFlash && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: "white",
-                animation: "flashAnim 0.3s forwards",
-                zIndex: 30,
-              }}
-            />
-          )}
+      <div className="page-main-content">
+        {/* Row 1: Title */}
+        <div className="page-row-top">
+          <div className="page-title-section">
+            <h1 className="title-thai" style={{ color: theme.fontColor }}>
+              มองกล้อง!
+            </h1>
+            <p className="title-english" style={{ color: theme.fontColor }}>
+              LOOK AT THE CAMERA ({captures.length + 1}/{totalCaptures})
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* 4. Thumbnails Grid (ใช้สูตรเดิมวน loop แต่ใส่ Style ใหม่) */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          flexShrink: 0,
-          zIndex: 20,
-          paddingBottom: "60px",
-          paddingTop: "10px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "center",
-            gap: `${thumbGap}px`,
-            maxWidth: `${containerMaxWidthVal}px`,
-          }}
-        >
-          {Array.from({ length: totalCaptures }).map((_, idx) => {
-            const slot = slots[0];
-            const ratio = slot ? `${slot.width} / ${slot.height}` : "3 / 4";
-
-            return (
-              <div
-                key={idx}
+        {/* Row 2: Camera View */}
+        <div className="page-row-body">
+          <div
+            ref={cameraContainerRef}
+            style={{
+              position: "relative",
+              width: "85%",
+              maxHeight: "50vh",
+              borderRadius: 20,
+              overflow: "hidden",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+              background: "black",
+              aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
+            }}
+          >
+            {cameraType === "webcam" && (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
                 style={{
-                  width: `${thumbWidthVal}px`, // ใช้ความกว้างที่คำนวณไว้ (แนวนอน 140, แนวตั้ง 100)
-                  aspectRatio: ratio,
-                  borderRadius: "12px",
-                  backgroundColor: "white",
-                  overflow: "hidden",
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  transform: "scaleX(-1)",
+                }}
+              />
+            )}
+            {cameraType === "canon" && canonCamera.liveViewFrame && (
+              <img
+                ref={canonLiveViewRef}
+                src={canonCamera.liveViewFrame}
+                alt="Live View"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  transform: "scaleX(-1)",
+                }}
+              />
+            )}
+            {currentSlot && cameraReady && (
+              <CropOverlay
+                slotWidth={currentSlot.width}
+                slotHeight={currentSlot.height}
+                videoWidth={videoDimensions.width}
+                videoHeight={videoDimensions.height}
+                containerWidth={containerDimensions.width}
+                containerHeight={containerDimensions.height}
+              />
+            )}
+            {phase === "countdown" && countdown > 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  boxShadow: "0 4px 15px rgba(0,0,0,0.15)",
-                  border: "none",
+                  zIndex: 20,
                 }}
               >
-                {captures[idx] ? (
-                  <img
-                    src={captures[idx].photo}
-                    alt="captured"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                    }}
-                  />
-                ) : (
-                  <span
-                    style={{
-                      color: "#eee",
-                      fontWeight: "bold",
-                      fontSize: "36px",
-                    }}
-                  >
-                    {idx + 1}
-                  </span>
-                )}
+                <div
+                  style={{
+                    fontSize: 150,
+                    fontWeight: 900,
+                    color: "white",
+                    textShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                    animation: "countdownPulse 1s infinite",
+                  }}
+                >
+                  {countdown}
+                </div>
               </div>
-            );
-          })}
+            )}
+            {showGetReady && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(0,0,0,0.6)",
+                  zIndex: 25,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 40,
+                    fontWeight: 800,
+                    color: "white",
+                    marginBottom: 10,
+                  }}
+                >
+                  Get
+                </div>
+                <div style={{ fontSize: 40, fontWeight: 800, color: "white" }}>
+                  ready...
+                </div>
+              </div>
+            )}
+            {showFlash && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "white",
+                  animation: "flashAnim 0.3s forwards",
+                  zIndex: 30,
+                }}
+              />
+            )}
+          </div>
         </div>
-
-        {/* Logo */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: "30px",
-            right: "40px",
-            opacity: 0.8,
-          }}
-        >
-          <span style={{ fontSize: "24px", fontWeight: "bold", color: "#fff" }}>
-            timelab
-          </span>
-          <span
+        {/* Row 3: Thumbnails (Footer) */}
+        <div className="page-row-footer">
+          <div
             style={{
-              fontSize: "10px",
-              display: "block",
-              textAlign: "right",
-              color: "#fff",
+              display: "flex",
+              flexWrap: "wrap",
+              justifyContent: "center",
+              gap: `${thumbGap}px`,
+              // maxWidth: `${containerMaxWidthVal}px`,
             }}
           >
-            PHOTO BOOTH
-          </span>
+            {Array.from({ length: totalCaptures }).map((_, idx) => {
+              // Calculate aspect ratio from slot[1] as per requirement (system uses n+2)
+              const slot = selectedFrame?.grid?.slots?.[1];
+              const ratio = slot ? slot.width / slot.height : 1;
+              const isLandscape = ratio > 1;
+
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    width: "160px",
+                    height: "160px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: isLandscape ? "100%" : "auto",
+                      height: isLandscape ? "auto" : "100%",
+                      maxWidth: "100%",
+                      maxHeight: "100%",
+                      aspectRatio: `${ratio}`,
+                      backgroundColor: "rgba(128, 128, 128, 0.5)",
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      boxShadow: "0 4px 15px rgba(0,0,0,0.15)",
+                      borderRadius: "5px",
+                    }}
+                  >
+                    {captures[idx] ? (
+                      <img
+                        src={captures[idx].photo}
+                        alt="captured"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          color: "#eee",
+                          fontWeight: "bold",
+                          fontSize: "36px",
+                        }}
+                      >
+                        {idx + 1}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

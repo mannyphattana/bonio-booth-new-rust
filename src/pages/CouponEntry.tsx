@@ -161,86 +161,149 @@ export default function CouponEntry({ theme }: Props) {
       />
 
       <div
-        className="page-content"
-        style={{ gap: "10%", padding: 20, width: "100%", overflow: "hidden" }}
+        className="page-main-content"
+        style={{ gap: "10%", overflow: "hidden" }}
       >
-        {/* Title */}
-        <div style={{ textAlign: "center", marginTop: 20 }}>
-          <h1
-            style={{
-              color: theme.fontColor,
-              fontSize: "3rem",
-              fontWeight: 700,
-              margin: "0 0 8px 0",
-              lineHeight: 1.2,
-            }}
-          >
-            ใช้คูปองส่วนลด
-          </h1>
-          <p
-            style={{
-              color: theme.fontColor,
-              fontSize: "1.5rem",
-              fontWeight: 500,
-              margin: 0,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-            }}
-          >
-            USE DISCOUNT COUPON
-          </p>
-        </div>
-
-        {/* Code display */}
-        <div
-          style={{
-            width: "90%",
-            display: "flex",
-            justifyContent: "center",
-            margin: "20px 0",
-          }}
-        >
-          <div
-            style={{
-              width: "90%",
-              minHeight: 80,
-              padding: 20,
-              background: "#f5f5f5",
-              borderRadius: 16,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "1.5rem",
-              fontWeight: 700,
-              color: "#2c2c2c",
-              letterSpacing: 2,
-              border: error ? "2px solid #e74c3c" : "2px solid #e8e8e8",
-              wordBreak: "break-all",
-              textAlign: "center",
-            }}
-          >
-            {code || (
-              <span style={{ color: "#999", fontWeight: 400 }}>
-                Enter coupon code
-              </span>
-            )}
+        {/* Row 1: Title */}
+        <div className="page-row-top">
+          <div className="page-title-section">
+            <h1 className="title-thai" style={{ color: theme.fontColor }}>
+              ใช้คูปองส่วนลด
+            </h1>
+            <p className="title-english" style={{ color: theme.fontColor }}>
+              USE DISCOUNT COUPON
+            </p>
           </div>
         </div>
 
-        {/* QWERTY Keyboard */}
+        {/* Row 2: code display */}
         <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            width: "100%",
-            maxWidth: 900,
-            margin: "20px 0",
-          }}
+          className="page-row-body"
+          style={{ flexDirection: "column", gap: "12px" }}
         >
-          {KEYBOARD_ROWS.map((row, rowIdx) => (
+          {/* Code display */}
+          <div
+            style={{
+              width: "90%",
+              display: "flex",
+              justifyContent: "center",
+              margin: "20px 0",
+            }}
+          >
             <div
-              key={rowIdx}
+              style={{
+                width: "90%",
+                minHeight: 80,
+                padding: 20,
+                background: "#f5f5f5",
+                borderRadius: 16,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "1.5rem",
+                fontWeight: 700,
+                color: "#2c2c2c",
+                letterSpacing: 2,
+                border: error ? "2px solid #e74c3c" : "2px solid #e8e8e8",
+                wordBreak: "break-all",
+                textAlign: "center",
+              }}
+            >
+              {code || (
+                <span style={{ color: "#999", fontWeight: 400 }}>
+                  Enter coupon code
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: keyboard */}
+        <div
+          className="page-row-bottom"
+          style={{ width: "100%", marginBlockEnd: "10%" }}
+        >
+          {/* QWERTY Keyboard */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              width: "100%",
+              maxWidth: 900,
+              margin: "20px 0",
+            }}
+          >
+            {KEYBOARD_ROWS.map((row, rowIdx) => (
+              <div
+                key={rowIdx}
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                {rowIdx === 3
+                  ? // Row 4 (ZXCVBNM): add invisible spacers for centering like old app
+                    ["", ...row, ""].map((key, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => key && handleKeyPress(key)}
+                        style={{
+                          minWidth: 30,
+                          height: 70,
+                          borderRadius: 12,
+                          border: "2px solid #e8e8e8",
+                          background: "#ffffff",
+                          color: "#2c2c2c",
+                          fontSize: 20,
+                          fontWeight: 600,
+                          cursor: key ? "pointer" : "default",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "0 12px",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                          flex: 1,
+                          margin: "0 4px",
+                          visibility: key ? "visible" : "hidden",
+                        }}
+                      >
+                        {key}
+                      </button>
+                    ))
+                  : row.map((key) => (
+                      <button
+                        key={key}
+                        onClick={() => handleKeyPress(key)}
+                        style={{
+                          minWidth: 30,
+                          height: 70,
+                          borderRadius: 12,
+                          border: "2px solid #e8e8e8",
+                          background: "#ffffff",
+                          color: "#2c2c2c",
+                          fontSize: 20,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "0 12px",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                          flex: 1,
+                          margin: "0 4px",
+                        }}
+                      >
+                        {key}
+                      </button>
+                    ))}
+              </div>
+            ))}
+
+            {/* Bottom row: Delete + Confirm (both wide) */}
+            <div
               style={{
                 display: "flex",
                 justifyContent: "center",
@@ -248,134 +311,70 @@ export default function CouponEntry({ theme }: Props) {
                 flexWrap: "wrap",
               }}
             >
-              {rowIdx === 3
-                ? // Row 4 (ZXCVBNM): add invisible spacers for centering like old app
-                  ["", ...row, ""].map((key, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => key && handleKeyPress(key)}
-                      style={{
-                        minWidth: 30,
-                        height: 70,
-                        borderRadius: 12,
-                        border: "2px solid #e8e8e8",
-                        background: "#ffffff",
-                        color: "#2c2c2c",
-                        fontSize: 20,
-                        fontWeight: 600,
-                        cursor: key ? "pointer" : "default",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "0 12px",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                        flex: 1,
-                        margin: "0 4px",
-                        visibility: key ? "visible" : "hidden",
-                      }}
-                    >
-                      {key}
-                    </button>
-                  ))
-                : row.map((key) => (
-                    <button
-                      key={key}
-                      onClick={() => handleKeyPress(key)}
-                      style={{
-                        minWidth: 30,
-                        height: 70,
-                        borderRadius: 12,
-                        border: "2px solid #e8e8e8",
-                        background: "#ffffff",
-                        color: "#2c2c2c",
-                        fontSize: 20,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "0 12px",
-                        boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                        flex: 1,
-                        margin: "0 4px",
-                      }}
-                    >
-                      {key}
-                    </button>
-                  ))}
-            </div>
-          ))}
-
-          {/* Bottom row: Delete + Confirm (both wide) */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
-            <button
-              onClick={handleBackspace}
-              style={{
-                flex: 2,
-                minWidth: 120,
-                height: 70,
-                borderRadius: 12,
-                border: "2px solid #e8e8e8",
-                background: "#ffffff",
-                color: "#2c2c2c",
-                fontSize: 20,
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "0 12px",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                margin: "0 4px",
-              }}
-            >
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              <button
+                onClick={handleBackspace}
+                style={{
+                  flex: 2,
+                  minWidth: 120,
+                  height: 70,
+                  borderRadius: 12,
+                  border: "2px solid #e8e8e8",
+                  background: "#ffffff",
+                  color: "#2c2c2c",
+                  fontSize: 20,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 12px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                  margin: "0 4px",
+                }}
               >
-                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                <line x1="10" y1="11" x2="10" y2="17" />
-                <line x1="14" y1="11" x2="14" y2="17" />
-              </svg>
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={loading || !code.trim()}
-              style={{
-                flex: 2,
-                minWidth: 120,
-                height: 70,
-                borderRadius: 12,
-                border: "2px solid #e8e8e8",
-                background: loading || !code.trim() ? "#cccccc" : "#ffffff",
-                color: loading || !code.trim() ? "#999" : "#2c2c2c",
-                fontSize: 20,
-                fontWeight: 600,
-                cursor: loading || !code.trim() ? "not-allowed" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "0 12px",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-                margin: "0 4px",
-                opacity: loading || !code.trim() ? 0.5 : 1,
-              }}
-            >
-              {loading ? "Validating..." : "Confirm"}
-            </button>
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={loading || !code.trim()}
+                style={{
+                  flex: 2,
+                  minWidth: 120,
+                  height: 70,
+                  borderRadius: 12,
+                  border: "2px solid #e8e8e8",
+                  background:
+                    loading || !code.trim() ? "#cccccc" : theme.primaryColor,
+                  color:
+                    loading || !code.trim() ? "#999" : theme.textButtonColor,
+                  fontSize: 20,
+                  fontWeight: 600,
+                  cursor: loading || !code.trim() ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "0 12px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                  margin: "0 4px",
+                  opacity: loading || !code.trim() ? 0.5 : 1,
+                }}
+              >
+                {loading ? "Validating..." : "Confirm"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -442,41 +442,26 @@ export default function PhotoResult({ theme }: Props) {
             position: "absolute",
             left: "50%",
             transform: "translateX(-50%)",
-            textAlign: "center",
             top: "80px",
             width: "100%",
             zIndex: 5,
           }}
         >
-          <h1
-            style={{
-              color: "#e94560",
-              fontSize: "2.6rem",
-              fontWeight: "bold",
-              margin: 0,
-              lineHeight: 1,
-            }}
-          >
-            รูปภาพของคุณ
-          </h1>
-          <p
-            style={{
-              color: "#e94560",
-              opacity: 0.8,
-              fontSize: "1rem",
-              marginTop: "5px",
-              textTransform: "uppercase",
-              letterSpacing: "1px",
-            }}
-          >
-            YOUR PHOTO IS READY
-          </p>
+          <div className="page-title-section">
+            <h1 className="title-thai" style={{ color: theme.fontColor }}>
+              รูปภาพของคุณ
+            </h1>
+            <p className="title-english" style={{ color: theme.fontColor }}>
+              YOUR PHOTO IS READY
+            </p>
+          </div>
         </div>
 
         {/* ตัวนับเวลาขวาบน */}
         <div style={{ zIndex: 10 }}>
           <Countdown
             seconds={COUNTDOWN.PHOTO_RESULT.DURATION}
+            visible={COUNTDOWN.PHOTO_RESULT.VISIBLE}
             onComplete={() => navigate("/")}
           />
         </div>
@@ -596,7 +581,7 @@ export default function PhotoResult({ theme }: Props) {
         >
           <h3
             style={{
-              color: "#e94560",
+              color: theme.fontColor,
               fontSize: "16px",
               fontWeight: "bold",
               margin: "0 0 10px 0",
@@ -709,9 +694,12 @@ export default function PhotoResult({ theme }: Props) {
           style={{
             backgroundColor:
               uploadStatus === "done" || uploadStatus === "error"
-                ? "#f13b4f"
+                ? theme.primaryColor
                 : "#666",
-            color: "white",
+            color:
+              uploadStatus === "done" || uploadStatus === "error"
+                ? theme.textButtonColor
+                : "white",
             padding: "14px 70px",
             borderRadius: "14px",
             fontSize: "22px",
@@ -723,7 +711,7 @@ export default function PhotoResult({ theme }: Props) {
                 : "not-allowed",
             boxShadow:
               uploadStatus === "done" || uploadStatus === "error"
-                ? "0 8px 25px rgba(241, 59, 79, 0.4)"
+                ? "0 8px 25px rgba(0,0,0,0.25)"
                 : "none",
             display: "flex",
             alignItems: "center",
