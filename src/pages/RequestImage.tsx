@@ -5,6 +5,7 @@ import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import type { ThemeData } from "../App";
 import { setPrinting } from "../utils/printingState";
+import { COUNTDOWN } from "../config/appConfig";
 
 interface Props {
   theme: ThemeData;
@@ -135,10 +136,12 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
       // Calculate timeout: 30 seconds per copy + 30 seconds buffer
       const printTimeout = copies * 30000 + 30000;
       setPrinting(true, printTimeout);
-      console.log(`[RequestImage] Printing state set to true (${copies} copies, timeout: ${printTimeout}ms)`);
-      
+      console.log(
+        `[RequestImage] Printing state set to true (${copies} copies, timeout: ${printTimeout}ms)`,
+      );
+
       // Small delay to ensure printing state is set before device check runs
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       try {
         // Print for each copy
@@ -202,7 +205,7 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
 
       {/* Countdown — visible only while printing or after success */}
       <Countdown
-        seconds={600}
+        seconds={COUNTDOWN.REQUEST_IMAGE.DURATION}
         onComplete={handleCountdownComplete}
         visible={isPrinting || printStatus === "success"}
       />

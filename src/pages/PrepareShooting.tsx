@@ -2,7 +2,6 @@ import { useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 
@@ -42,81 +41,34 @@ export default function PrepareShooting({ theme, machineData }: Props) {
 
   return (
     <div
-      className="page-container"
+      className="page-container page-space-between" // เพิ่ม class page-space-between
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
+        height: "100vh", // บังคับเต็มจอ
+        overflow: "hidden", // ห้ามเลื่อน
       }}
     >
+      {/* 1. Header Bar: แสดง Countdown (ไม่มี BackButton ตาม Legacy) */}
       <Countdown
         seconds={COUNTDOWN.PHOTO_PREPARE.DURATION}
-        onComplete={handleStart}
-        visible={COUNTDOWN.PHOTO_PREPARE.VISIBLE}
+        onComplete={() => navigate("/")}
       />
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          padding: 40,
-          boxSizing: "border-box",
-          width: "100%",
-          height: "100%",
-          overflow: "hidden",
-        }}
-      >
-        {/* Row 1: Title (35%) */}
-        <div
-          style={{
-            flex: "0 0 35%",
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div style={{ textAlign: "center" }}>
-            <h1
-              style={{
-                color: theme.fontColor,
-                fontSize: "3rem",
-                fontWeight: 700,
-                margin: "0 0 8px 0",
-                lineHeight: 1.2,
-              }}
-            >
+      <div className="page-main-content" style={{ marginTop: "60px" }}>
+        {/* Row 1: Title */}
+        <div className="page-row-top">
+          <div className="page-title-section">
+            <h1 className="title-thai" style={{ color: theme.fontColor }}>
               เตรียมถ่ายภาพ
             </h1>
-            <p
-              style={{
-                color: theme.fontColor,
-                fontSize: "1.5rem",
-                fontWeight: 500,
-                margin: 0,
-                letterSpacing: 0.5,
-                textTransform: "uppercase",
-              }}
-            >
+            <p className="title-english" style={{ color: theme.fontColor }}>
               PREPARE FOR PHOTOSHOOT
             </p>
           </div>
         </div>
 
-        {/* Row 2: Steps (flex: 1) */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-            padding: 10,
-            boxSizing: "border-box",
-          }}
-        >
+        {/* Row 2: Steps */}
+        <div className="page-row-body">
           <div
             style={{
               display: "flex",
@@ -373,32 +325,14 @@ export default function PrepareShooting({ theme, machineData }: Props) {
           </div>
         </div>
 
-        {/* Row 3: Start Button (25%) */}
-        <div
-          style={{
-            flex: "0 0 25%",
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
+        {/* Row 3: Footer */}
+        <div className="page-row-footer">
           <button
             onClick={handleStart}
+            className="page-action-btn"
             style={{
-              width: "90%",
-              maxWidth: 500,
-              padding: "16px 40px",
-              fontSize: 26,
-              fontWeight: 700,
               color: theme.textButtonColor,
               background: theme.primaryColor,
-              border: "none",
-              borderRadius: 16,
-              cursor: "pointer",
-              minHeight: 60,
-              letterSpacing: 0.5,
-              boxShadow: "none",
             }}
           >
             Start
