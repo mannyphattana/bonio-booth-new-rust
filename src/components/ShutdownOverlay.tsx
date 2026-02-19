@@ -18,6 +18,8 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
   if (!state.isScheduled || state.isPaused) return null;
 
   const isTimer = state.reason === "timer";
+  const isCloseApp = state.shutdownType === "close-app";
+  const isShutdown = state.shutdownType === "shutdown" || !state.shutdownType; // Default to shutdown if not specified
 
   const handleClick = () => {
     if (isTimer) {
@@ -37,6 +39,27 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
   const progress = state.totalSeconds > 0
     ? ((state.totalSeconds - state.remainingSeconds) / state.totalSeconds) * 100
     : 0;
+
+  // Determine title and description based on shutdown type
+  const getTitle = () => {
+    if (isTimer) {
+      return "ขออภัย เนื่องจากอยู่นอกเวลาทำการ";
+    }
+    if (isCloseApp) {
+      return "กำลังจะปิดแอพ";
+    }
+    return "กำลังจะปิดเครื่อง";
+  };
+
+  const getDescription = () => {
+    if (isTimer) {
+      return "เครื่องจะปิดตัวลงอีก " + timeStr + " นาที";
+    }
+    if (isCloseApp) {
+      return "แอพจะปิดตัวลงอีก " + timeStr + " นาที";
+    }
+    return "ปิดเครื่องจาก Dashboard";
+  };
 
   return (
     <div
@@ -68,7 +91,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
           marginBottom: 16,
         }}
       >
-        {isTimer ? "ขออภัย เนื่องจากอยู่นอกเวลาทำการ" : "กำลังจะปิดเครื่อง"}
+        {getTitle()}
       </h1>
 
       {/* Countdown */}
@@ -109,9 +132,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
 
       {/* Reason */}
       <p style={{ color: "#aaa", fontSize: 18, marginBottom: 8 }}>
-        {isTimer
-          ? "เครื่องจะปิดตัวลงอีก " + timeStr + " นาที"
-          : "ปิดเครื่องจาก Dashboard"}
+        {getDescription()}
       </p>
 
       {/* Tap hint */}

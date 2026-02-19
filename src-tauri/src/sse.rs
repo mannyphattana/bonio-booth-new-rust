@@ -305,10 +305,20 @@ fn process_sse_event(app: &AppHandle, event_type: &str, data: &str) {
                 .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("manual");
+            let shutdown_type = parsed
+                .get("shutdownType")
+                .and_then(|v| v.as_str())
+                .map(|s| {
+                    if s == "close-app" {
+                        crate::shutdown::ShutdownType::CloseApp
+                    } else {
+                        crate::shutdown::ShutdownType::Shutdown
+                    }
+                });
 
             info!(
-                "[SSE] Shutdown scheduled: {:?} minutes, reason: {}",
-                minutes, reason
+                "[SSE] Shutdown scheduled: {:?} minutes, reason: {}, type: {:?}",
+                minutes, reason, shutdown_type
             );
 
             // Trigger shutdown manager
@@ -318,7 +328,7 @@ fn process_sse_event(app: &AppHandle, event_type: &str, data: &str) {
                 } else {
                     crate::shutdown::ShutdownReason::Manual
                 };
-                shutdown_mgr.start_countdown(minutes, reason);
+                shutdown_mgr.start_countdown(minutes, reason, shutdown_type);
             }
         }
         "shutdown-immediate" => {

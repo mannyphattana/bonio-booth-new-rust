@@ -17,6 +17,16 @@ pub enum ShutdownReason {
     Timer,
 }
 
+/// Shutdown type - what action to take when countdown finishes
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ShutdownType {
+    /// Shutdown the OS (power off)
+    Shutdown,
+    /// Close the app only (exit application)
+    CloseApp,
+}
+
 /// Shutdown state (sent to frontend)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +36,7 @@ pub struct ShutdownState {
     pub remaining_seconds: u32,
     pub total_seconds: u32,
     pub reason: Option<ShutdownReason>,
+    pub shutdown_type: Option<ShutdownType>,
 }
 
 impl Default for ShutdownState {
@@ -36,6 +47,7 @@ impl Default for ShutdownState {
             remaining_seconds: 0,
             total_seconds: 0,
             reason: None,
+            shutdown_type: None,
         }
     }
 }
@@ -81,12 +93,12 @@ impl ShutdownManager {
     }
 
     /// Start countdown
-    pub fn start_countdown(&self, minutes: Option<u32>, reason: ShutdownReason) {
+    pub fn start_countdown(&self, minutes: Option<u32>, reason: ShutdownReason, shutdown_type: Option<ShutdownType>) {
         let minutes = minutes.unwrap_or(DEFAULT_COUNTDOWN_MINUTES);
         let total_seconds = minutes * 60;
         info!(
-            "[ShutdownManager] Starting countdown: {} minutes ({}s), reason: {:?}",
-            minutes, total_seconds, reason
+            "[ShutdownManager] Starting countdown: {} minutes ({}s), reason: {:?}, type: {:?}",
+            minutes, total_seconds, reason, shutdown_type
         );
 
         // Cancel existing countdown
@@ -98,6 +110,7 @@ impl ShutdownManager {
             state.remaining_seconds = total_seconds;
             state.total_seconds = total_seconds;
             state.reason = Some(reason);
+            state.shutdown_type = shutdown_type;
 
             // Pause if in transaction
             if self.is_in_transaction.load(Ordering::Relaxed) {
@@ -117,7 +130,7 @@ impl ShutdownManager {
 
     /// Ensure countdown is running — only starts if not already scheduled.
     /// Used by timer auto-shutdown to avoid resetting an active countdown on every poll.
-    pub fn ensure_countdown(&self, minutes: Option<u32>, reason: ShutdownReason) {
+    pub fn ensure_countdown(&self, minutes: Option<u32>, reason: ShutdownReason, shutdown_type: Option<ShutdownType>) {
         let state = self.state.lock().unwrap();
         if state.is_scheduled {
             // Countdown already active, don't restart
@@ -128,7 +141,7 @@ impl ShutdownManager {
             return;
         }
         drop(state);
-        self.start_countdown(minutes, reason);
+        self.start_countdown(minutes, reason, shutdown_type);
     }
 
     /// Cancel shutdown only if the reason matches the given reason.
@@ -225,6 +238,7 @@ impl ShutdownManager {
             state.remaining_seconds = 0;
             state.total_seconds = 0;
             state.reason = Some(ShutdownReason::Timer);
+            // Preserve shutdown_type if exists
             return;
         }
         self.execute_shutdown();
@@ -323,8 +337,23 @@ impl ShutdownManager {
                         return;
                     }
 
-                    // Execute OS shutdown
-                    execute_os_shutdown(app_handle.clone()).await;
+                    // Check shutdown type
+                    let shutdown_type = {
+                        let s = state.lock().unwrap();
+                        s.shutdown_type.clone()
+                    };
+
+                    match shutdown_type {
+                        Some(ShutdownType::CloseApp) => {
+                            info!("[ShutdownManager] Executing close app");
+                            execute_close_app(app_handle.clone()).await;
+                        }
+                        _ => {
+                            // Default to OS shutdown
+                            info!("[ShutdownManager] Executing OS shutdown");
+                            execute_os_shutdown(app_handle.clone()).await;
+                        }
+                    }
                     return;
                 }
             }
@@ -342,9 +371,60 @@ impl ShutdownManager {
         }
 
         let app_handle = self.app_handle.clone();
+        let shutdown_type = {
+            let state = self.state.lock().unwrap();
+            state.shutdown_type.clone()
+        };
+
         tauri::async_runtime::spawn(async move {
-            execute_os_shutdown(app_handle).await;
+            match shutdown_type {
+                Some(ShutdownType::CloseApp) => {
+                    execute_close_app(app_handle).await;
+                }
+                _ => {
+                    execute_os_shutdown(app_handle).await;
+                }
+            }
         });
+    }
+}
+
+/// Execute close app (exit application without shutting down OS)
+async fn execute_close_app(app_handle: Arc<Mutex<Option<AppHandle>>>) {
+    info!("[ShutdownManager] ========== EXECUTING CLOSE APP ==========");
+
+    // Extract AppHandle from mutex synchronously (can't hold MutexGuard across .await)
+    let app_opt = app_handle.lock().unwrap().clone();
+
+    // Step 1: Notify backend (going offline) via API — immediate Telegram notification
+    if let Some(ref app) = app_opt {
+        if let Some(state) = app.try_state::<crate::api::AppState>() {
+            let machine_id = state.machine_id.lock().unwrap().clone();
+            let machine_port = state.machine_port.lock().unwrap().clone();
+            if !machine_id.is_empty() {
+                info!("[ShutdownManager] Notifying backend: going offline (close app)...");
+                crate::api::notify_going_offline_internal(&machine_id, &machine_port).await;
+            }
+        }
+    }
+
+    // Step 2: Destroy SSE connection
+    if let Some(ref app) = app_opt {
+        if let Some(sse_client) = app.try_state::<std::sync::Mutex<crate::sse::SseClient>>() {
+            let client = sse_client.lock().unwrap();
+            client.destroy();
+            info!("[ShutdownManager] SSE connection destroyed");
+        }
+    }
+
+    // Step 3: Wait for TCP FIN to reach backend
+    info!("[ShutdownManager] Waiting {}s before closing app...", POST_DESTROY_DELAY_SECONDS);
+    tokio::time::sleep(std::time::Duration::from_secs(POST_DESTROY_DELAY_SECONDS)).await;
+
+    // Step 4: Exit app
+    if let Some(ref app) = app_opt {
+        info!("[ShutdownManager] Exiting application...");
+        app.exit(0);
     }
 }
 
@@ -451,12 +531,18 @@ pub fn start_shutdown_countdown(
     shutdown_mgr: tauri::State<'_, Arc<ShutdownManager>>,
     minutes: Option<u32>,
     reason: Option<String>,
+    shutdown_type: Option<String>,
 ) {
     let reason = match reason.as_deref() {
         Some("timer") => ShutdownReason::Timer,
         _ => ShutdownReason::Manual,
     };
-    shutdown_mgr.start_countdown(minutes, reason);
+    let shutdown_type = match shutdown_type.as_deref() {
+        Some("close-app") => Some(ShutdownType::CloseApp),
+        Some("shutdown") => Some(ShutdownType::Shutdown),
+        _ => None, // Default to OS shutdown for backward compatibility
+    };
+    shutdown_mgr.start_countdown(minutes, reason, shutdown_type);
 }
 
 /// Cancel shutdown countdown
@@ -496,12 +582,18 @@ pub fn ensure_shutdown_countdown(
     shutdown_mgr: tauri::State<'_, Arc<ShutdownManager>>,
     minutes: Option<u32>,
     reason: Option<String>,
+    shutdown_type: Option<String>,
 ) {
     let reason = match reason.as_deref() {
         Some("timer") => ShutdownReason::Timer,
         _ => ShutdownReason::Manual,
     };
-    shutdown_mgr.ensure_countdown(minutes, reason);
+    let shutdown_type = match shutdown_type.as_deref() {
+        Some("close-app") => Some(ShutdownType::CloseApp),
+        Some("shutdown") => Some(ShutdownType::Shutdown),
+        _ => None, // Default to OS shutdown for backward compatibility
+    };
+    shutdown_mgr.ensure_countdown(minutes, reason, shutdown_type);
 }
 
 /// Cancel timer-based shutdown only (won't cancel manual/dashboard shutdowns)

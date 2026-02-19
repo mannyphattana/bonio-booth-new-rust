@@ -121,6 +121,27 @@ pub async fn init_machine(
     let status = res.status();
     let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
+    // Log response data for debugging
+    log::info!("[API] init_machine response: status={}", status);
+    if let Some(is_shutdown_ready) = body.get("isShutdownReady") {
+        log::info!("[API] init_machine - isShutdownReady: {:?}", is_shutdown_ready);
+    }
+    if let Some(is_closed_app_ready) = body.get("isClosedAppReady") {
+        log::info!("[API] init_machine - isClosedAppReady: {:?}", is_closed_app_ready);
+    }
+    if let Some(machine) = body.get("machine") {
+        if let Some(machine_id) = machine.get("_id") {
+            log::info!("[API] init_machine - machine._id: {:?}", machine_id);
+        }
+    }
+    // Log full response body (truncated if too large)
+    let body_str = serde_json::to_string(&body).unwrap_or_default();
+    if body_str.len() > 1000 {
+        log::info!("[API] init_machine - response body (truncated): {}...", &body_str[..1000]);
+    } else {
+        log::info!("[API] init_machine - response body: {}", body_str);
+    }
+
     if status.is_success() {
         // Cache machine data and theme (theme is at root level)
         if let Some(machine) = body.get("machine") {

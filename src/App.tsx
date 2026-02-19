@@ -107,7 +107,7 @@ function App() {
     }
   }, []);
 
-  const initMachine = async (machineId: string) => {
+  const initMachine = useCallback(async (machineId: string) => {
     try {
       await invoke("set_machine_config", {
         machineId,
@@ -135,24 +135,29 @@ function App() {
     } catch (err) {
       console.error("Init error:", err);
     }
-  };
+  }, []);
 
   // SSE connection - receive events from backend
   // Shutdown events are handled directly in Rust backend (shutdown manager)
+  // Use stable callbacks to prevent unnecessary reconnects
+  const handleMaintenanceMode = useCallback((enabled: boolean) => {
+    setShowMaintenance(enabled);
+  }, []);
+
+  const handleConfigUpdated = useCallback((configType: string) => {
+    console.log("[App] Config updated via SSE:", configType);
+    // Re-fetch machine & theme data from backend
+    const savedMachineId = localStorage.getItem("machineId");
+    if (savedMachineId) {
+      initMachine(savedMachineId);
+    }
+  }, [initMachine]);
+
   const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
     enabled: isVerified && !!machineData?._id,
-    onMaintenanceMode: (enabled) => {
-      setShowMaintenance(enabled);
-    },
-    onConfigUpdated: (configType) => {
-      console.log("[App] Config updated via SSE:", configType);
-      // Re-fetch machine & theme data from backend
-      const savedMachineId = localStorage.getItem("machineId");
-      if (savedMachineId) {
-        initMachine(savedMachineId);
-      }
-    },
+    onMaintenanceMode: handleMaintenanceMode,
+    onConfigUpdated: handleConfigUpdated,
   });
 
   // Shutdown countdown — listens to Rust shutdown manager events
@@ -177,15 +182,41 @@ function App() {
 
   // Timer Auto-Shutdown — polls backend every 30s to check operating hours
   // When outside operating hours, starts a 2-minute shutdown countdown
-  useTimerShutdown({
-    enabled: isVerified,
-    onMachineDataRefreshed: useCallback((data: any) => {
-      if (data.machine) {
+  // Only refresh machineData if it actually changed (prevent unnecessary re-renders)
+  const handleMachineDataRefreshed = useCallback((data: any) => {
+    if (data.machine) {
+      // Only update if machineId changed or if critical fields changed
+      const currentMachineId = machineData?._id;
+      const newMachineId = data.machine._id;
+      
+      if (currentMachineId !== newMachineId) {
+        // Machine changed, update everything
         setMachineData(data.machine);
         if (data.theme) setThemeData(data.theme);
         if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+      } else {
+        // Same machine, only update if critical fields changed
+        const currentPaperLevel = machineData?.paperLevel;
+        const newPaperLevel = data.machine.paperLevel;
+        const currentMaintenanceMode = machineData?.isMaintenanceMode;
+        const newMaintenanceMode = data.machine.isMaintenanceMode;
+        
+        if (
+          currentPaperLevel !== newPaperLevel ||
+          currentMaintenanceMode !== newMaintenanceMode ||
+          machineData?.lineUrl !== data.machine?.lineUrl
+        ) {
+          setMachineData(data.machine);
+          if (data.theme) setThemeData(data.theme);
+          if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+        }
       }
-    }, []),
+    }
+  }, [machineData]);
+
+  useTimerShutdown({
+    enabled: isVerified,
+    onMachineDataRefreshed: handleMachineDataRefreshed,
   });
 
   const handleMaintenanceResolved = useCallback(() => {

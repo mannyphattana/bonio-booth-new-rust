@@ -8,6 +8,7 @@ export interface ShutdownState {
   remainingSeconds: number;
   totalSeconds: number;
   reason?: "manual" | "timer";
+  shutdownType?: "shutdown" | "close-app";
 }
 
 interface UseShutdownOptions {
@@ -56,6 +57,7 @@ export function useShutdown(options: UseShutdownOptions = {}) {
           isPaused: false,
           remainingSeconds: 0,
           totalSeconds: 0,
+          shutdownType: undefined,
         });
       });
       unlisteners.push(u3);
