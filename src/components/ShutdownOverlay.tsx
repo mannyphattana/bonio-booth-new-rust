@@ -19,7 +19,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
 
   const isTimer = state.reason === "timer";
   const isCloseApp = state.shutdownType === "close-app";
-  const isShutdown = state.shutdownType === "shutdown" || !state.shutdownType; // Default to shutdown if not specified
+  // const isShutdown = state.shutdownType === "shutdown" || !state.shutdownType; // Default to shutdown if not specified
 
   const handleClick = () => {
     if (isTimer) {

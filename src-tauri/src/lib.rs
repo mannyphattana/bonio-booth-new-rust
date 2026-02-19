@@ -290,6 +290,7 @@ pub fn run() {
             printer::print_test_photo,
             printer::list_dslr_cameras,
             printer::reduce_paper_level,
+            printer::get_printer_paper_sizes,
             // Video
             video::check_ffmpeg_available,
             video::ensure_ffmpeg,

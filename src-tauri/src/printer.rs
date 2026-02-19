@@ -9,6 +9,89 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// PowerShell print script that uses System.Drawing.Printing for per-job paper size control.
+/// This allows selecting cut/no-cut paper size dynamically, even with a single printer driver.
+#[cfg(target_os = "windows")]
+const PRINT_SCRIPT: &str = r#"
+param(
+    [string]$PrinterName,
+    [string]$ImagePath,
+    [string]$FrameType
+)
+
+Add-Type -AssemblyName System.Drawing
+
+$needsCut = ($FrameType -eq '2x6') -or ($FrameType -eq '6x2')
+$isLandscape = ($FrameType -eq '6x4') -or ($FrameType -eq '6x2')
+
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.PrinterSettings.PrinterName = $PrinterName
+
+if (-not $doc.PrinterSettings.IsValid) {
+    Write-Host "PRINT_ERROR:Printer '$PrinterName' not found or invalid"
+    exit 1
+}
+
+# Find appropriate paper size based on cut requirement
+$sizes = $doc.PrinterSettings.PaperSizes
+$selectedPaper = $null
+
+if ($needsCut) {
+    # Look for cut paper size (e.g., "2x6", "4x6 2 Cuts", "4x6(2cut)", etc.)
+    foreach ($ps in $sizes) {
+        $n = $ps.PaperName.ToLower()
+        if ($n -match '2\s*x\s*6|cut') {
+            $selectedPaper = $ps
+            break
+        }
+    }
+} else {
+    # Look for standard 4x6 paper WITHOUT cut
+    foreach ($ps in $sizes) {
+        $n = $ps.PaperName.ToLower()
+        if (($n -match '4\s*x\s*6|6\s*x\s*4') -and ($n -notmatch 'cut|2\s*x\s*6')) {
+            $selectedPaper = $ps
+            break
+        }
+    }
+}
+
+if ($selectedPaper) {
+    $doc.DefaultPageSettings.PaperSize = $selectedPaper
+    Write-Host "PAPER:$($selectedPaper.PaperName)"
+} else {
+    Write-Host "PAPER:DEFAULT(no match)"
+    foreach ($ps in $sizes) {
+        Write-Host "  AVAILABLE:$($ps.PaperName)"
+    }
+}
+
+$doc.DefaultPageSettings.Landscape = $isLandscape
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0,0,0,0)
+
+$img = [System.Drawing.Image]::FromFile($ImagePath)
+
+$doc.add_PrintPage({
+    param($sender, $e)
+    $bounds = $e.PageBounds
+    $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $e.Graphics.DrawImage($img, 0, 0, $bounds.Width, $bounds.Height)
+    $e.HasMorePages = $false
+})
+
+try {
+    $doc.Print()
+    Write-Host "PRINT_SUCCESS"
+} catch {
+    Write-Host "PRINT_ERROR:$($_.Exception.Message)"
+    exit 1
+} finally {
+    $img.Dispose()
+    $doc.Dispose()
+}
+"#;
+
 /// Create a Command that hides the console window on Windows
 fn hidden_command(program: &str) -> Command {
     let mut cmd = Command::new(program);
@@ -298,7 +381,7 @@ pub async fn print_photo(
     scale: Option<f64>,
     vertical_offset: Option<f64>,
     horizontal_offset: Option<f64>,
-    is_landscape: Option<bool>,
+    _is_landscape: Option<bool>,
 ) -> Result<bool, String> {
     let scale_val = scale.unwrap_or(100.0);
     let vert_val = vertical_offset.unwrap_or(0.0);
@@ -373,36 +456,79 @@ pub async fn print_photo(
         }
     };
 
-    // Save processed image to temp PNG
+    // For cut frames: duplicate image to fill the full 4x6 paper so the printer can cut
+    // 2x6 (portrait-cut): place two copies side-by-side → 4x6 paper
+    // 6x2 (landscape-cut): place two copies top-to-bottom → 6x4 paper
+    let final_image: image::DynamicImage = match frame_type.as_str() {
+        "2x6" => {
+            let w = processed.width();
+            let h = processed.height();
+            let mut canvas = image::RgbaImage::from_pixel(w * 2, h, image::Rgba([255, 255, 255, 255]));
+            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), 0, 0);
+            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), w as i64, 0);
+            image::DynamicImage::ImageRgba8(canvas)
+        }
+        "6x2" => {
+            let w = processed.width();
+            let h = processed.height();
+            let mut canvas = image::RgbaImage::from_pixel(w, h * 2, image::Rgba([255, 255, 255, 255]));
+            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), 0, 0);
+            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), 0, h as i64);
+            image::DynamicImage::ImageRgba8(canvas)
+        }
+        _ => processed,
+    };
+
+    // Save final image to temp PNG
     let temp_dir = std::env::temp_dir().join("bonio-booth");
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let temp_path = temp_dir.join("print-processed.png");
-    processed
+    final_image
         .save(&temp_path)
         .map_err(|e| format!("Failed to save processed image: {}", e))?;
 
     let temp_path_str = temp_path.to_string_lossy().to_string();
 
-    // Print using rundll32 shimgvw.dll (same as old project)
-    // This delegates all fit-to-page logic to the printer driver
+    // Print using PowerShell System.Drawing.Printing for per-job paper size control
+    // This allows selecting cut/no-cut paper size per job, even with a single printer driver
     #[cfg(target_os = "windows")]
     {
-        let output = hidden_command("rundll32")
+        let script_path = temp_dir.join("bonio-print.ps1");
+        std::fs::write(&script_path, PRINT_SCRIPT)
+            .map_err(|e| format!("Failed to write print script: {}", e))?;
+
+        let output = hidden_command("powershell")
             .args(&[
-                "shimgvw.dll,ImageView_PrintTo",
-                "/pt",
-                &temp_path_str,
-                &printer_name,
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-File", &script_path.to_string_lossy(),
+                "-PrinterName", &printer_name,
+                "-ImagePath", &temp_path_str,
+                "-FrameType", &frame_type,
             ])
             .output()
             .map_err(|e| format!("Print failed: {}", e))?;
 
-        if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let _ = std::fs::remove_file(&script_path);
+
+        // Log output for debugging
+        log::info!("[Printer] PowerShell stdout: {}", stdout.trim());
+        if !stderr.is_empty() {
+            log::warn!("[Printer] PowerShell stderr: {}", stderr.trim());
+        }
+
+        if stdout.contains("PRINT_SUCCESS") {
             Ok(true)
+        } else if stdout.contains("PRINT_ERROR:") {
+            let err_msg = stdout.lines()
+                .find(|l| l.starts_with("PRINT_ERROR:"))
+                .unwrap_or("Unknown print error");
+            Err(err_msg.to_string())
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("Print error: {}", stderr))
+            Err(format!("Print failed. stdout: {} stderr: {}", stdout.trim(), stderr.trim()))
         }
     }
 
@@ -429,7 +555,7 @@ pub async fn print_test_photo(
     scale: f64,
     vertical_offset: f64,
     horizontal_offset: f64,
-    is_landscape: bool,
+    frame_type: String,
 ) -> Result<bool, String> {
     // Find test.jpg - check multiple possible locations
     let test_image_path = {
@@ -490,12 +616,12 @@ pub async fn print_test_photo(
         })?
     };
 
-    let frame_type = if is_landscape { "6x4" } else { "4x6" };
+    let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
     print_photo(
         test_image_path,
         printer_name,
-        frame_type.to_string(),
+        frame_type,
         Some(scale),
         Some(vertical_offset),
         Some(horizontal_offset),
@@ -540,4 +666,46 @@ pub async fn reduce_paper_level(
             None
         },
     })
+}
+
+/// Get available paper sizes for a specific printer (for debugging and UI)
+#[tauri::command]
+pub async fn get_printer_paper_sizes(printer_name: String) -> Result<Vec<String>, String> {
+    let ps_cmd = format!(
+        r#"
+        Add-Type -AssemblyName System.Drawing
+        $doc = New-Object System.Drawing.Printing.PrintDocument
+        $doc.PrinterSettings.PrinterName = '{}'
+        if (-not $doc.PrinterSettings.IsValid) {{
+            Write-Host "ERROR:Invalid printer"
+            exit 1
+        }}
+        $sizes = @()
+        foreach ($ps in $doc.PrinterSettings.PaperSizes) {{
+            $sizes += $ps.PaperName
+        }}
+        $doc.Dispose()
+        $sizes | ForEach-Object {{ Write-Host $_ }}
+        "#,
+        printer_name.replace("'", "''")
+    );
+
+    let output = hidden_command("powershell")
+        .args(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps_cmd])
+        .output()
+        .map_err(|e| format!("Failed to query paper sizes: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    if stdout.contains("ERROR:") {
+        return Err(format!("Printer '{}' not found or invalid", printer_name));
+    }
+
+    let sizes: Vec<String> = stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    Ok(sizes)
 }

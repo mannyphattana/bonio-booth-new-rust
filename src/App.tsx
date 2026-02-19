@@ -204,7 +204,8 @@ function App() {
         if (
           currentPaperLevel !== newPaperLevel ||
           currentMaintenanceMode !== newMaintenanceMode ||
-          machineData?.lineUrl !== data.machine?.lineUrl
+          machineData?.lineUrl !== data.machine?.lineUrl ||
+          machineData?.cameraCountdown !== data.machine?.cameraCountdown
         ) {
           setMachineData(data.machine);
           if (data.theme) setThemeData(data.theme);

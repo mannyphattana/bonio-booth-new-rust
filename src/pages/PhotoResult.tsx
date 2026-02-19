@@ -376,24 +376,29 @@ export default function PhotoResult({ theme }: Props) {
       try {
         setPrintStatus("printing");
 
-        // Save to temp file
-        const printPath: string = await invoke("save_temp_image", {
-          imageDataBase64: composedImg,
-          filename: "print-frame.png",
-        });
-
         // Determine frame type for cutting
+        // Rust print_photo handles duplication automatically for 2x6 and 6x2
         let frameType = "4x6";
         let isLandscape = false;
         if (frameWidth && frameHeight) {
           const ratio = frameWidth / frameHeight;
           if (ratio < 0.5) {
-            frameType = "2x6";
+            frameType = "2x6";      // portrait-cut: 2x6 → duplicated to 4x6 by Rust
+          } else if (ratio > 2) {
+            frameType = "6x2";      // landscape-cut: 6x2 → duplicated to 6x4 by Rust
+            isLandscape = true;
           } else if (ratio > 1) {
-            frameType = "6x4";
+            frameType = "6x4";      // landscape no-cut
             isLandscape = true;
           }
+          // else: 4x6 portrait no-cut (default)
         }
+
+        // Save to temp file (Rust handles 2x6/6x2 duplication internally)
+        const printPath: string = await invoke("save_temp_image", {
+          imageDataBase64: composedImg,
+          filename: "print-frame.png",
+        });
 
         // Load paper position config (per-orientation: paperConfigPortrait / paperConfigLandscape)
         let scale = 100;

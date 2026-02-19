@@ -15,7 +15,7 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
   const [imageUrl, setImageUrl] = useState<string>("");
   const [copies, setCopies] = useState<number>(1);
   const [orientation, setOrientation] = useState<
-    "portrait" | "landscape" | "portrait-cut"
+    "portrait" | "landscape" | "portrait-cut" | "landscape-cut"
   >("portrait");
   const [isPrinting, setIsPrinting] = useState(false);
   const [printStatus, setPrintStatus] = useState<
@@ -108,34 +108,19 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
       let imageBase64 = await convertImageUrlToBase64(imageUrl);
 
       const isPortraitCut = orientation === "portrait-cut";
+      const isLandscapeCut = orientation === "landscape-cut";
 
-      // For portrait-cut (2x6): duplicate image side-by-side to make 4x6
+      // Determine frameType - Rust print_photo handles duplication for 2x6/6x2 internally
+      let frameType = "4x6";
+      let isLandscape = false;
       if (isPortraitCut) {
-        console.log("[RequestImage] Duplicating image for 2x6 -> 4x6...");
-        const doubleCanvas = document.createElement("canvas");
-        const img = new Image();
-
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => {
-            const frameWidth = 1200;
-            const frameHeight = 3600;
-            doubleCanvas.width = frameWidth * 2;
-            doubleCanvas.height = frameHeight;
-            const dCtx = doubleCanvas.getContext("2d", { colorSpace: "srgb" });
-            if (dCtx) {
-              dCtx.fillStyle = "#ffffff";
-              dCtx.fillRect(0, 0, doubleCanvas.width, doubleCanvas.height);
-              dCtx.drawImage(img, 0, 0, frameWidth, frameHeight);
-              dCtx.drawImage(img, frameWidth, 0, frameWidth, frameHeight);
-              imageBase64 = doubleCanvas.toDataURL("image/jpeg", 1.0);
-              resolve();
-            } else {
-              reject(new Error("Failed to get canvas context"));
-            }
-          };
-          img.onerror = () => reject(new Error("Failed to load image"));
-          img.src = imageBase64;
-        });
+        frameType = "2x6";
+      } else if (isLandscapeCut) {
+        frameType = "6x2";
+        isLandscape = true;
+      } else if (orientation === "landscape") {
+        frameType = "6x4";
+        isLandscape = true;
       }
 
       // Save base64 image to temp file via Rust
@@ -145,9 +130,6 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
         filename: "request-image-print.jpg",
       });
       console.log("[RequestImage] Temp file saved:", tempPath);
-
-      const isLandscape = orientation === "landscape";
-      const frameType = isLandscape ? "6x4" : "4x6";
 
       // Set printing state BEFORE printing to prevent device check notifications
       // Calculate timeout: 30 seconds per copy + 30 seconds buffer
@@ -466,6 +448,7 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
               <option value="portrait">Portrait (ตั้ง) 4x6</option>
               <option value="portrait-cut">Portrait Cut (ตั้ง-ตัด) 2x6</option>
               <option value="landscape">Landscape (นอน) 6x4</option>
+              <option value="landscape-cut">Landscape Cut (นอน-ตัด) 6x2</option>
             </select>
           </div>
 

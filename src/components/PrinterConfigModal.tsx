@@ -67,7 +67,10 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
           <div className="config-info-box">
             <p>📋 <strong>กฎการตัดกระดาษ:</strong></p>
             <p style={{ fontSize: 12, marginTop: 4, opacity: 0.8 }}>
-              • Frame 2x6 (Portrait) → <span style={{ color: "#ff6b6b" }}>บังคับตัดกระดาษ</span>
+              • Frame 2x6 (Portrait) → <span style={{ color: "#ff6b6b" }}>✂️ ตัดกระดาษ</span>
+            </p>
+            <p style={{ fontSize: 12, opacity: 0.8 }}>
+              • Frame 6x2 (Landscape) → <span style={{ color: "#ff6b6b" }}>✂️ ตัดกระดาษ</span>
             </p>
             <p style={{ fontSize: 12, opacity: 0.8 }}>
               • Frame 4x6 / 6x4 → <span style={{ color: "#51cf66" }}>ไม่ตัดกระดาษ</span>
