@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import BackButton from "../components/BackButton";
+import Countdown from "../components/Countdown"; // อย่าลืม import Countdown
 
 interface Props {
   theme: ThemeData;
@@ -44,31 +45,56 @@ export default function PrepareShooting({ theme, machineData }: Props) {
 
   return (
     <div
-      className="page-container"
+      className="page-container page-space-between" // เพิ่ม class page-space-between
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
+        height: "100vh", // บังคับเต็มจอ
+        overflow: "hidden" // ห้ามเลื่อน
       }}
     >
-      <BackButton onBackClick={handleBack} />
+      {/* 1. Header Bar: จัดปุ่ม Back และ Countdown แบบเดียวกับหน้า FrameSelection */}
+      <div 
+        style={{
+          position: "absolute",
+          top: "20px",
+          left: 0,
+          width: "100%",
+          padding: "0 20px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          zIndex: 100,
+          height: "50px"
+        }}
+      >
+        {/* ปุ่มย้อนกลับ */}
+        <div style={{ position: "relative", width: "50px", height: "50px" }}>
+           <BackButton onBackClick={handleBack} />
+        </div>
 
-      <div className="countdown-badge">{countdown}s</div>
+        {/* ตัวนับเวลา (ใช้อันเดียวกับหน้า FrameSelection) */}
+        <div style={{ position: "relative" }}>
+           <Countdown seconds={300} onTimeout={() => navigate("/")} />
+        </div>
+      </div>
 
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          padding: 40,
+          padding: "40px 40px 0 40px", // ลด padding บนเพราะมี Header แล้ว
           boxSizing: "border-box",
           width: "100%",
           height: "100%",
           overflow: "hidden",
+          marginTop: "60px" // ดันเนื้อหาลงมาหลบ Header
         }}
       >
         {/* Row 1: Title (35%) */}
         <div
           style={{
-            flex: "0 0 35%",
+            flex: "0 0 30%", // ลดลงนิดหน่อยเพื่อให้สมดุล
             width: "100%",
             display: "flex",
             flexDirection: "column",
@@ -394,14 +420,14 @@ export default function PrepareShooting({ theme, machineData }: Props) {
               color: theme.textButtonColor,
               background: theme.primaryColor,
               border: "none",
-              borderRadius: 16,
+              borderRadius: 35, // ปรับให้มนเท่าหน้าอื่น (จาก 16 เป็น 35)
               cursor: "pointer",
               minHeight: 60,
               letterSpacing: 0.5,
-              boxShadow: "none",
+              boxShadow: "0 5px 20px rgba(0,0,0,0.3)", // เพิ่มเงาให้เหมือนหน้าอื่น
             }}
           >
-            Start
+            Start ({countdown}) {/* เอาเลข countdown มาโชว์ในปุ่มด้วย */}
           </button>
         </div>
       </div>

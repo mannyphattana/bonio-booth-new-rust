@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { QRCodeSVG } from "qrcode.react";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import Countdown from "../components/Countdown";
 
 interface Props {
   theme: ThemeData;
@@ -15,18 +16,19 @@ export default function PhotoResult({ theme }: Props) {
   const location = useLocation();
   const state = (location.state as any) || {};
 
-
+  // ดึงข้อมูลรูปภาพและเฟรมเพื่อมาโชว์ทันที
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const selectedFrame = state.selectedFrame;
   const selectedFilter = state.selectedFilter;
   const slots: FrameSlot[] = selectedFrame?.grid?.slots || [];
-  // Slot coordinates are in imageSize space (matching old project)
-  // imageSize = frame pixel dimensions (e.g. "2400x3600")
-  // grid.width/height = logical frame format (e.g. 1200x1800 = 2x3)
+  
+  // คำนวณขนาด Frame สำหรับจัด Layout และ Aspect Ratio
   const [_imgW, _imgH] = (selectedFrame?.imageSize || "").split("x").map(Number);
   const frameWidth = (_imgW > 0 ? _imgW : selectedFrame?.grid?.width) || 1200;
   const frameHeight = (_imgH > 0 ? _imgH : selectedFrame?.grid?.height) || 1800;
+  const frameAspectRatioCSS = `${frameWidth} / ${frameHeight}`; 
 
+  // States สำหรับการทำงานเบื้องหลัง
   const [composedImage, setComposedImage] = useState<string>("");
   const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
   const [sessionId, setSessionId] = useState<string>("");
@@ -34,27 +36,19 @@ export default function PhotoResult({ theme }: Props) {
   const [uploadStatus, setUploadStatus] = useState<string>("processing");
   const [printStatus, setPrintStatus] = useState<string>("idle");
   const [error, setError] = useState("");
-  const [countdown, setCountdown] = useState(300);
-  const [, setStatusText] = useState("กำลังประมวลผล...");
+  const [statusText, setStatusText] = useState("กำลังเตรียมข้อมูล...");
 
   const hasStarted = useRef(false);
   const hasCreatedPresign = useRef(false);
   const hasUploadedFiles = useRef(false);
   useIdleTimeout();
 
-  // Compose frame image
+  // ====================================================================
+  // Logic 1: Compose frame image (รันเบื้องหลังเพื่อเอาไปปริ้นท์/อัปโหลด)
+  // ====================================================================
   const composeFrame = useCallback(async () => {
     try {
-      setStatusText("กำลังรวมรูปภาพ...");
-      console.log("📸 [PhotoResult] Frame dimensions:", {
-        imageSize: selectedFrame?.imageSize,
-        gridWidth: selectedFrame?.grid?.width,
-        gridHeight: selectedFrame?.grid?.height,
-        usedWidth: frameWidth,
-        usedHeight: frameHeight,
-        slotsCount: slots.length,
-        firstSlot: slots[0],
-      });
+      setStatusText("กำลังประมวลผลรูปภาพ...");
       const photosBase64 = frameCaptures.map((c: Capture) => c.photo);
 
       const result: string = await invoke("compose_frame", {
@@ -74,25 +68,18 @@ export default function PhotoResult({ theme }: Props) {
     }
   }, [frameCaptures, selectedFrame, slots, frameWidth, frameHeight]);
 
-  // Step 1: Create presigned upload session immediately
-  // This returns qrcodeStorageUrl + presigned URLs + sessionId
-  // QR code is displayed BEFORE any files are uploaded (matches reference flow)
+  // ====================================================================
+  // Logic 2: Create presigned upload session (รันเบื้องหลัง)
+  // ====================================================================
   useEffect(() => {
     if (hasCreatedPresign.current) return;
-
-    const transactionId =
-      state.transactionId ||
-      state.referenceId ||
-      state.transaction_id ||
-      "";
-
-    console.log("📸 [PhotoResult] State keys:", Object.keys(state));
-    console.log("📸 [PhotoResult] transactionId:", transactionId);
-    console.log("📸 [PhotoResult] state.transactionId:", state.transactionId);
-    console.log("📸 [PhotoResult] state.referenceId:", state.referenceId);
+    const transactionId = state.transactionId || state.referenceId || state.transaction_id || "";
 
     if (!transactionId) {
-      console.error("❌ [PhotoResult] No transactionId found in state! Cannot create presign session.");
+      console.error("❌ No transactionId found! Cannot create presign session.");
+      // Fallback สำหรับโหมด Dev (ถ้าไม่มี transaction ให้โชว์ QR จำลอง)
+      setQrCodeUrl("https://example.com/mock-qr-code");
+      setUploadStatus("done"); 
       return;
     }
 
@@ -100,376 +87,180 @@ export default function PhotoResult({ theme }: Props) {
 
     const createPresignSession = async () => {
       try {
-        console.log("📸 [PhotoResult] Creating presigned upload session...");
-
-        // Format transaction code (optional)
         const transactionCode = state.referenceId
-          ? state.referenceId.startsWith("TXN-")
-            ? state.referenceId
-            : `TXN-${state.referenceId}`
+          ? state.referenceId.startsWith("TXN-") ? state.referenceId : `TXN-${state.referenceId}`
           : undefined;
 
-        // Build files metadata for presign request
         const filesMeta: { type: string; contentType: string }[] = [];
-
-        // finalImage (composed frame photo) - always present
-        filesMeta.push({ type: "photo", contentType: "image/jpeg" });
-
-        // Individual capture photos
+        filesMeta.push({ type: "photo", contentType: "image/jpeg" }); // finalImage
         frameCaptures.forEach((cap: Capture) => {
-          if (cap.photo) {
-            filesMeta.push({ type: "photo", contentType: "image/jpeg" });
-          }
+          if (cap.photo) filesMeta.push({ type: "photo", contentType: "image/jpeg" });
         });
-
-        // ONE compiled frame video (if any captures have video)
         if (frameCaptures.some((cap: Capture) => cap.videoPath)) {
           filesMeta.push({ type: "video", contentType: "video/mp4" });
         }
 
-        console.log("📸 [PhotoResult] Files metadata for presign:", {
-          totalFiles: filesMeta.length,
-          photos: filesMeta.filter((f) => f.type === "photo").length,
-          videos: filesMeta.filter((f) => f.type === "video").length,
-        });
-
         const presignResult: any = await invoke("create_presign_upload", {
-          transactionId,
-          files: filesMeta,
-          transactionCode: transactionCode || null,
+          transactionId, files: filesMeta, transactionCode: transactionCode || null,
         });
 
-        // The API response is wrapped in ApiResponse { success, data, error }
         const responseData = presignResult.data || presignResult;
 
         if (presignResult.success && responseData.qrcodeStorageUrl) {
-          console.log(
-            "✅ [PhotoResult] Presign session created! QR Code URL:",
-            responseData.qrcodeStorageUrl
-          );
-          // Set QR code URL immediately - shows QR before upload starts
           setQrCodeUrl(responseData.qrcodeStorageUrl);
           setSessionId(responseData.photoSession?.id || "");
           setUploadUrls(responseData.uploadUrls || []);
-          console.log("✅ [PhotoResult] Session ID:", responseData.photoSession?.id);
-          console.log("✅ [PhotoResult] Upload URLs count:", responseData.uploadUrls?.length || 0);
         } else {
-          console.error(
-            "❌ [PhotoResult] Failed to create presign session:",
-            responseData.error || responseData.message || presignResult.error
-          );
-          hasCreatedPresign.current = false; // Allow retry
+          hasCreatedPresign.current = false;
         }
       } catch (err) {
-        console.error("❌ [PhotoResult] Error creating presign session:", err);
-        hasCreatedPresign.current = false; // Allow retry
+        hasCreatedPresign.current = false;
       }
     };
-
     createPresignSession();
-  }, [state?.transactionId, state?.referenceId]); // eslint-disable-line
+  }, [state?.transactionId, state?.referenceId]);
 
-  // Step 2: Upload files to presigned URLs (runs after presign + compose are done)
+  // ====================================================================
+  // Logic 3: Upload files (รันเบื้องหลัง)
+  // ====================================================================
   const uploadFiles = useCallback(
     async (composedImg: string) => {
-      if (hasUploadedFiles.current) return;
-      if (!sessionId || uploadUrls.length === 0) {
-        console.warn("⚠️ [PhotoResult] No sessionId/uploadUrls yet, waiting...");
-        return;
-      }
+      if (hasUploadedFiles.current || !sessionId || uploadUrls.length === 0) return;
       hasUploadedFiles.current = true;
 
       try {
         setUploadStatus("uploading");
-        setStatusText("กำลังอัปโหลด...");
+        setStatusText("กำลังอัปโหลดไฟล์...");
 
-        // Separate photo and video upload URLs (sorted by order)
-        const photoUrls = uploadUrls
-          .filter((u: any) => u.type === "photo")
-          .sort((a: any, b: any) => a.order - b.order);
-        const videoUrls = uploadUrls
-          .filter((u: any) => u.type === "video")
-          .sort((a: any, b: any) => a.order - b.order);
-
-        console.log(
-          `📤 [PhotoResult] Upload targets: ${photoUrls.length} photo URLs, ${videoUrls.length} video URLs`
-        );
-
+        const photoUrls = uploadUrls.filter((u: any) => u.type === "photo").sort((a: any, b: any) => a.order - b.order);
+        const videoUrls = uploadUrls.filter((u: any) => u.type === "video").sort((a: any, b: any) => a.order - b.order);
         const uploadedFiles: { key: string; type: string; order: number }[] = [];
         let photoIdx = 0;
 
-        // Upload composed frame (order 1 = finalImage)
         if (photoIdx < photoUrls.length) {
-          setStatusText("กำลังอัปโหลดรูปเฟรม...");
-          const composedPath: string = await invoke("save_temp_image", {
-            imageDataBase64: composedImg,
-            filename: "frame-photo.jpg",
-          });
+          const composedPath: string = await invoke("save_temp_image", { imageDataBase64: composedImg, filename: "frame-photo.jpg" });
           try {
-            await invoke("upload_to_presigned_url", {
-              url: photoUrls[photoIdx].uploadUrl,
-              filePath: composedPath,
-              contentType: "image/jpeg",
-            });
-            uploadedFiles.push({
-              key: photoUrls[photoIdx].key,
-              type: "photo",
-              order: photoUrls[photoIdx].order,
-            });
-            console.log(`✅ [PhotoResult] Frame photo uploaded (order ${photoUrls[photoIdx].order})`);
-          } catch (err) {
-            console.error("❌ [PhotoResult] Frame photo upload failed:", err);
-          }
+            await invoke("upload_to_presigned_url", { url: photoUrls[photoIdx].uploadUrl, filePath: composedPath, contentType: "image/jpeg" });
+            uploadedFiles.push({ key: photoUrls[photoIdx].key, type: "photo", order: photoUrls[photoIdx].order });
+          } catch (err) {}
           photoIdx++;
         }
 
-        // Upload individual capture photos
         for (let i = 0; i < frameCaptures.length && photoIdx < photoUrls.length; i++) {
-          setStatusText(`กำลังอัปโหลดรูป ${i + 1}/${frameCaptures.length}...`);
-          const photoPath: string = await invoke("save_temp_image", {
-            imageDataBase64: frameCaptures[i].photo,
-            filename: `photo-${i + 1}.jpg`,
-          });
+          const photoPath: string = await invoke("save_temp_image", { imageDataBase64: frameCaptures[i].photo, filename: `photo-${i + 1}.jpg` });
           try {
-            await invoke("upload_to_presigned_url", {
-              url: photoUrls[photoIdx].uploadUrl,
-              filePath: photoPath,
-              contentType: "image/jpeg",
-            });
-            uploadedFiles.push({
-              key: photoUrls[photoIdx].key,
-              type: "photo",
-              order: photoUrls[photoIdx].order,
-            });
-            console.log(`✅ [PhotoResult] Photo ${i + 1} uploaded (order ${photoUrls[photoIdx].order})`);
-          } catch (err) {
-            console.error(`❌ [PhotoResult] Photo ${i + 1} upload failed:`, err);
-          }
+            await invoke("upload_to_presigned_url", { url: photoUrls[photoIdx].uploadUrl, filePath: photoPath, contentType: "image/jpeg" });
+            uploadedFiles.push({ key: photoUrls[photoIdx].key, type: "photo", order: photoUrls[photoIdx].order });
+          } catch (err) {}
           photoIdx++;
         }
 
-        // Upload compiled frame video (ONE video with all captures in frame layout)
         if (videoUrls.length > 0) {
-          // Collect all video paths from captures
-          const videoPaths = frameCaptures
-            .map((cap: Capture) => cap.videoPath)
-            .filter((p): p is string => !!p);
-
+          const videoPaths = frameCaptures.map((cap: Capture) => cap.videoPath).filter((p): p is string => !!p);
           if (videoPaths.length > 0) {
-            setStatusText("กำลังรวมวิดีโอ...");
             try {
-              // Compose all capture videos into one framed video
-              console.log(`🎬 [PhotoResult] Composing framed video with ${videoPaths.length} captures...`);
-              // Resolve LUT path for video filter if a filter is selected
               let lutPath: string | null = null;
               if (selectedFilter && selectedFilter.type === "lut" && selectedFilter.lutFile) {
-                try {
-                  lutPath = await invoke<string>("resolve_lut_path", {
-                    lutFile: selectedFilter.lutFile,
-                  });
-                } catch (err) {
-                  console.warn("⚠️ [PhotoResult] Could not resolve LUT path for video:", err);
-                }
+                try { lutPath = await invoke<string>("resolve_lut_path", { lutFile: selectedFilter.lutFile }); } catch (err) {}
               }
-
               const composedVideoPath: string = await invoke("compose_frame_video", {
-                frameImageUrl: selectedFrame?.imageUrl || "",
-                videoPaths,
-                slots: slots,
-                frameWidth: frameWidth,
-                frameHeight: frameHeight,
-                outputFilename: "framed-video.mp4",
-                lutPath: lutPath,
+                frameImageUrl: selectedFrame?.imageUrl || "", videoPaths, slots, frameWidth, frameHeight, outputFilename: "framed-video.mp4", lutPath,
               });
-              console.log(`✅ [PhotoResult] Framed video composed: ${composedVideoPath}`);
-
-              setStatusText("กำลังอัปโหลดวิดีโอ...");
-              await invoke("upload_to_presigned_url", {
-                url: videoUrls[0].uploadUrl,
-                filePath: composedVideoPath,
-                contentType: "video/mp4",
-              });
-              uploadedFiles.push({
-                key: videoUrls[0].key,
-                type: "video",
-                order: videoUrls[0].order,
-              });
-              console.log(`✅ [PhotoResult] Framed video uploaded (order ${videoUrls[0].order})`);
-            } catch (err) {
-              console.error("❌ [PhotoResult] Video compose/upload failed:", err);
-            }
+              await invoke("upload_to_presigned_url", { url: videoUrls[0].uploadUrl, filePath: composedVideoPath, contentType: "video/mp4" });
+              uploadedFiles.push({ key: videoUrls[0].key, type: "video", order: videoUrls[0].order });
+            } catch (err) {}
           }
         }
 
-        // Confirm upload
         if (uploadedFiles.length > 0) {
-          console.log(`📤 [PhotoResult] Confirming ${uploadedFiles.length} uploaded files...`);
-          try {
-            await invoke("confirm_upload", {
-              sessionId,
-              uploadedFiles,
-            });
-            console.log("✅ [PhotoResult] Upload confirmed!");
-          } catch (err) {
-            console.error("❌ [PhotoResult] Confirm upload failed:", err);
-          }
+          try { await invoke("confirm_upload", { sessionId, uploadedFiles }); } catch (err) {}
         }
-
         setUploadStatus("done");
         setStatusText("อัปโหลดเสร็จสิ้น!");
       } catch (err) {
-        console.error("❌ [PhotoResult] Upload error:", err);
         setUploadStatus("error");
-        hasUploadedFiles.current = false; // Allow retry
+        hasUploadedFiles.current = false;
       }
     },
     [sessionId, uploadUrls, frameCaptures]
   );
 
-  // Print the composed frame
+  // ====================================================================
+  // Logic 4: Print frame (รันเบื้องหลัง)
+  // ====================================================================
   const printFrame = useCallback(
     async (composedImg: string) => {
       try {
         setPrintStatus("printing");
+        const printPath: string = await invoke("save_temp_image", { imageDataBase64: composedImg, filename: "print-frame.png" });
 
-        // Save to temp file
-        const printPath: string = await invoke("save_temp_image", {
-          imageDataBase64: composedImg,
-          filename: "print-frame.png",
-        });
-
-        // Determine frame type for cutting
         let frameType = "4x6";
         let isLandscape = false;
         if (frameWidth && frameHeight) {
           const ratio = frameWidth / frameHeight;
-          if (ratio < 0.5) {
-            frameType = "2x6";
-          } else if (ratio > 1) {
-            frameType = "6x4";
-            isLandscape = true;
-          }
+          if (ratio < 0.5) frameType = "2x6";
+          else if (ratio > 1) { frameType = "6x4"; isLandscape = true; }
         }
 
-        // Load paper position config (per-orientation: paperConfigPortrait / paperConfigLandscape)
-        let scale = 100;
-        let verticalOffset = 0;
-        let horizontalOffset = 0;
+        let scale = 100; let verticalOffset = 0; let horizontalOffset = 0;
         try {
           const key = isLandscape ? "paperConfigLandscape" : "paperConfigPortrait";
           const saved = localStorage.getItem(key);
           if (saved) {
             const config = JSON.parse(saved);
-            scale = config.scale ?? 100;
-            verticalOffset = config.vertical ?? 0;
-            horizontalOffset = config.horizontal ?? 0;
+            scale = config.scale ?? 100; verticalOffset = config.vertical ?? 0; horizontalOffset = config.horizontal ?? 0;
           }
-        } catch { /* use defaults */ }
+        } catch {}
 
-        // Get selected printer (from config or auto-detect)
         let printerName = localStorage.getItem("selectedPrinter") || "";
-
         if (!printerName) {
-          // Fallback: auto-detect printer
           const printers: any[] = await invoke("get_printers");
-          const dnpPrinter = printers.find(
-            (p: any) =>
-              p.name.toLowerCase().includes("qw-410") ||
-              p.name.toLowerCase().includes("dnp") ||
-              p.is_online
-          );
+          const dnpPrinter = printers.find((p: any) => p.name.toLowerCase().includes("qw-410") || p.name.toLowerCase().includes("dnp") || p.is_online);
           if (dnpPrinter) printerName = dnpPrinter.name;
         }
 
         if (printerName) {
-          await invoke("print_photo", {
-            imagePath: printPath,
-            printerName,
-            frameType,
-            scale,
-            verticalOffset,
-            horizontalOffset,
-            isLandscape,
-          });
-
-          // Reduce paper level
+          await invoke("print_photo", { imagePath: printPath, printerName, frameType, scale, verticalOffset, horizontalOffset, isLandscape });
           await invoke("reduce_paper_level", { copies: 1 });
           setPrintStatus("done");
         } else {
           setPrintStatus("no-printer");
-          console.warn("No printer found");
         }
       } catch (err) {
-        console.error("Print error:", err);
         setPrintStatus("error");
       }
     },
     [frameWidth, frameHeight]
   );
 
-  // Main effect - compose frame + print immediately
-  // Upload is triggered separately when presign data + composed image are both ready
+  // Trigger: Compose -> Print
   useEffect(() => {
     if (hasStarted.current) return;
     hasStarted.current = true;
-
     const process = async () => {
-      // Compose frame
       const composedImg = await composeFrame();
       if (!composedImg) return;
-
-      // Print immediately (doesn't need presign)
       printFrame(composedImg);
     };
-
     process();
-  }, []); // eslint-disable-line
+  }, []);
 
-  // Trigger upload when presign data arrives AND composedImage is ready
+  // Trigger: Upload
   useEffect(() => {
     if (!composedImage || !sessionId || uploadUrls.length === 0) return;
     if (hasUploadedFiles.current) return;
-
     uploadFiles(composedImage);
   }, [composedImage, sessionId, uploadUrls, uploadFiles]);
 
-  // Auto-return countdown
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          navigate("/");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [navigate]);
-
-  // Printer disconnect check
-  useEffect(() => {
-    const checkPrinter = setInterval(async () => {
-      try {
-        const printers: any[] = await invoke("get_printers");
-        const hasPrinter = printers.some((p: any) => p.is_online);
-        if (!hasPrinter && printStatus === "printing") {
-          setError("เครื่องปริ้นถูกถอดออก กรุณาเชื่อมต่อใหม่");
-          setTimeout(() => navigate("/"), 3000);
-        }
-      } catch {
-        // Ignore
-      }
-    }, 5000);
-
-    return () => clearInterval(checkPrinter);
-  }, [printStatus, navigate]);
 
   const handleHome = () => {
     navigate("/");
   };
+
+
+  // ====================================================================
+  // UI แสดงผลรูปภาพแบบ "ทันที (Instant CSS Compose)"
+  // ====================================================================
 
   return (
     <div
@@ -477,186 +268,158 @@ export default function PhotoResult({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "120px 0",
+        padding: 0, 
+        position: "relative",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        userSelect: "none", 
       }}
     >
+      {/* 1. Header */}
+      <div style={{ position: "relative", width: "100%", padding: "50px 40px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", zIndex: 100 }}>
+        
+        {/* โลโก้ซ้ายบน */}
+        <div style={{ zIndex: 10, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+           <span style={{ fontSize: "28px", fontWeight: "bold", color: "#f13b4f", lineHeight: 0.9 }}>timelab</span>
+           <span style={{ fontSize: "10px", color: "#f13b4f", letterSpacing: "1px", fontWeight: "bold" }}>PHOTO BOOTH</span>
+        </div>
 
-      <div className="countdown-badge">
-        กลับหน้าหลักใน {countdown}s
-      </div>
+        {/* หัวข้อตรงกลาง */}
+        <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", textAlign: "center", top: "80px", width: "100%", zIndex: 5 }}>
+          <h1 style={{ color: "#e94560", fontSize: "2.6rem", fontWeight: "bold", margin: 0, lineHeight: 1 }}>
+            รูปภาพของคุณ
+          </h1>
+          <p style={{ color: "#e94560", opacity: 0.8, fontSize: "1rem", marginTop: "5px", textTransform: "uppercase", letterSpacing: "1px" }}>
+            YOUR PHOTO IS READY
+          </p>
+        </div>
 
-      <h1
-        style={{
-          color: theme.fontColor,
-          fontSize: 22,
-          marginTop: 20,
-          marginBottom: 4,
-        }}
-      >
-        ภาพถ่ายของคุณ
-      </h1>
-      <p
-        style={{
-          color: theme.fontColor,
-          opacity: 0.8,
-          fontSize: 14,
-          marginBottom: 12,
-        }}
-      >
-        YOUR PHOTO
-      </p>
-
-      {/* Composed frame preview */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "8px 24px",
-          width: "100%",
-          minHeight: 0,
-        }}
-      >
-        {composedImage ? (
-          <div
-            style={{
-              maxWidth: "80%",
-              maxHeight: "45vh",
-              borderRadius: 12,
-              overflow: "hidden",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              aspectRatio: `${frameWidth} / ${frameHeight}`,
-            }}
-          >
-            <img
-              src={composedImage}
-              alt="Final Photo"
-              style={{
-                maxWidth: "100%",
-                maxHeight: "45vh",
-                objectFit: "contain",
-                borderRadius: 12,
-              }}
-            />
-          </div>
-        ) : (
-          <div
-            style={{
-              color: "#aaa",
-              fontSize: 16,
-              textAlign: "center",
-            }}
-          >
-            กำลังประมวลผลรูปภาพ...
-          </div>
-        )}
-      </div>
-
-      {/* QR Code for download */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 8,
-          padding: "0 16px",
-          marginBottom: 8,
-        }}
-      >
-        <p style={{ color: theme.fontColor, fontSize: 14 }}>
-          สแกนเพื่อดาวน์โหลดรูปภาพ
-        </p>
-
-        <div
-          style={{
-            background: "#fff",
-            padding: 12,
-            borderRadius: 12,
-            width: 160,
-            height: 160,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          {qrCodeUrl ? (
-            <QRCodeSVG value={qrCodeUrl} size={136} />
-          ) : (
-            <div style={{ color: "#999", fontSize: 12, textAlign: "center" }}>
-              {uploadStatus === "uploading"
-                ? "Uploading..."
-                : uploadStatus === "error"
-                  ? "Upload failed"
-                  : "Generating..."}
-            </div>
-          )}
+        {/* ตัวนับเวลาขวาบน */}
+        <div style={{ zIndex: 10 }}>
+           <Countdown seconds={300} onTimeout={() => navigate("/")} />
         </div>
       </div>
 
-      {/* Status indicators */}
-      <div
-        style={{
-          display: "flex",
-          gap: 16,
-          marginBottom: 8,
-          fontSize: 13,
-        }}
-      >
-        <span>
-          📤{" "}
-          {uploadStatus === "done"
-            ? "✅ Uploaded"
-            : uploadStatus === "uploading"
-              ? "⏳ Uploading..."
-              : uploadStatus === "error"
-                ? "❌ Error"
-                : "⏳ Processing"}
-        </span>
-        <span>
-          🖨️{" "}
-          {printStatus === "done"
-            ? "✅ Printed"
-            : printStatus === "printing"
-              ? "⏳ Printing..."
-              : printStatus === "no-printer"
-                ? "⚠️ No printer"
-                : printStatus === "error"
-                  ? "❌ Error"
-                  : "⏳ Waiting"}
-        </span>
+      {/* 2. เนื้อหาตรงกลาง */}
+      <div style={{ 
+        flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        paddingTop: "120px", paddingBottom: "20px", width: "100%"
+      }}>
+        
+        {/* 🔥 โชว์รูปทันทีด้วยเทคนิค CSS Layering ซ้อนกัน 🔥 */}
+        <div style={{
+          width: "auto", 
+          maxWidth: "85%", 
+          height: "auto", 
+          maxHeight: "45vh", 
+          aspectRatio: frameAspectRatioCSS, 
+          borderRadius: "10px", 
+          overflow: "hidden",
+          boxShadow: "0 15px 35px rgba(0,0,0,0.25)", 
+          position: "relative", 
+          backgroundColor: "white", 
+        }}>
+          {selectedFrame && frameCaptures.length > 0 ? (
+            <div style={{ position: "relative", width: "100%", height: "100%" }}>
+              
+              {/* เลเยอร์ 1: รูปลูกค้าที่ถูกใส่ฟิลเตอร์มาแล้ว (อยู่ชั้นล่าง) */}
+              {slots.map((slot: any, index: number) => {
+                const capture = frameCaptures[index] || frameCaptures[0];
+                if (!capture) return null;
+
+                // คำนวณตำแหน่ง % ให้ตรงกับเฟรม
+                const left = (slot.x / frameWidth) * 100;
+                const top = (slot.y / frameHeight) * 100;
+                const width = (slot.width / frameWidth) * 100;
+                const height = (slot.height / frameHeight) * 100;
+
+                return (
+                  <div key={index} style={{
+                    position: "absolute", left: `${left}%`, top: `${top}%`,
+                    width: `${width}%`, height: `${height}%`, zIndex: 5, overflow: "hidden",
+                  }}>
+                    <img src={capture.photo} draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  </div>
+                );
+              })}
+
+              {/* เลเยอร์ 2: กรอบเฟรม PNG เจาะทะลุ (อยู่ชั้นบนสุด) */}
+              <img
+                src={selectedFrame.imageUrl}
+                draggable={false}
+                style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "fill", zIndex: 10, pointerEvents: "none" }}
+              />
+
+            </div>
+          ) : (
+            <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#aaa" }}>
+              ไม่พบข้อมูลรูปภาพ
+            </div>
+          )}
+        </div>
+
+        {/* 3. ส่วนของ QR Code */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", marginTop: "40px", flexShrink: 0 }}>
+          
+          <h3 style={{ color: "#e94560", fontSize: "16px", fontWeight: "bold", margin: "0 0 10px 0" }}>
+            Download Digital File
+          </h3>
+
+          <div style={{
+            width: "140px", height: "140px", backgroundColor: "white", borderRadius: "15px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 5px 15px rgba(0,0,0,0.1)", overflow: "hidden", padding: "10px",
+            marginBottom: "5px"
+          }}>
+            {qrCodeUrl ? (
+              <QRCodeSVG value={qrCodeUrl} size={120} level="M" />
+            ) : (
+              <div style={{ width: "100%", height: "100%", border: "2px dashed #ddd", borderRadius: "10px", display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", flexDirection: "column", gap: "5px" }}>
+                <div style={{width: 20, height: 20, border: '2px solid #eee', borderTop: '2px solid #e94560', borderRadius: '50%', animation: 'spin 1s linear infinite'}} />
+                <span style={{fontSize: "11px", marginTop: "5px"}}>Generating...</span>
+              </div>
+            )}
+          </div>
+
+          {/* สถานะ Upload & Print (อิงตาม Logic หลังบ้าน) */}
+          <div style={{ display: "flex", gap: "15px", fontSize: "12px", color: "#888", marginTop: "5px", fontWeight: "500" }}>
+            <span>
+               📤 {uploadStatus === "done" ? "Uploaded" : uploadStatus === "uploading" ? "Uploading..." : uploadStatus === "error" ? "❌ Error" : "Processing"}
+            </span>
+            <span>
+               🖨️ {printStatus === "done" ? "Printed" : printStatus === "printing" ? "Printing..." : printStatus === "no-printer" ? "⚠️ No printer" : printStatus === "error" ? "❌ Error" : "Waiting"}
+            </span>
+          </div>
+
+        </div>
       </div>
 
-      {/* Error display */}
-      {error && (
-        <p
+      {/* 4. ปุ่มล่างสุด "ปิดหน้าต่าง / CLOSE" */}
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", paddingBottom: "50px", paddingTop: "10px", zIndex: 100 }}>
+        <button
+          onClick={handleHome}
+          // ล็อกปุ่มไว้ถ้ายังอัปโหลดไม่เสร็จ (ยกเว้นมี Error ก็ให้ปิดได้เลย)
+          disabled={uploadStatus !== "done" && uploadStatus !== "error"} 
           style={{
-            color: "#e94560",
-            fontSize: 14,
-            marginBottom: 8,
-            textAlign: "center",
-            padding: "0 16px",
+            backgroundColor: (uploadStatus === "done" || uploadStatus === "error") ? "#f13b4f" : "#666", 
+            color: "white", padding: "14px 70px", borderRadius: "14px",
+            fontSize: "22px", fontWeight: "600", border: "none",
+            cursor: (uploadStatus === "done" || uploadStatus === "error") ? "pointer" : "not-allowed",
+            boxShadow: (uploadStatus === "done" || uploadStatus === "error") ? "0 8px 25px rgba(241, 59, 79, 0.4)" : "none",
+            display: "flex", alignItems: "center", justifyContent: "center", 
+            transition: "all 0.3s", outline: "none", minWidth: "220px", letterSpacing: "1px"
           }}
         >
-          {error}
-        </p>
-      )}
-
-      {/* Home button */}
-      <button
-        className="primary-button"
-        onClick={handleHome}
-        style={{
-          background: theme.primaryColor,
-          color: theme.textButtonColor,
-          marginBottom: 20,
-        }}
-      >
-        กลับหน้าหลัก / HOME
-      </button>
+          {/* เปลี่ยนคำตามสถานะ */}
+          {(uploadStatus !== "done" && uploadStatus !== "error") ? statusText : "ปิดหน้าต่าง / CLOSE"}
+        </button>
+      </div>
+      
+      <style>
+        {`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}
+      </style>
     </div>
   );
 }
