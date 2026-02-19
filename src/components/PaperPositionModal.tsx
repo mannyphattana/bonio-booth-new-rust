@@ -129,6 +129,25 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     setCurrentConfig({ ...DEFAULT_CONFIG });
   };
 
+  const handleShowPaperSizes = async () => {
+    const selectedPrinter = localStorage.getItem("selectedPrinter");
+    if (!selectedPrinter) {
+      setSavedMessage("⚠️ กรุณาเลือกเครื่องปริ้นก่อน");
+      setTimeout(() => setSavedMessage(""), 3000);
+      return;
+    }
+    setSavedMessage("🔍 กำลังดึงข้อมูล Paper Sizes...");
+    try {
+      const sizes = await invoke<string[]>("get_printer_paper_sizes", { printerName: selectedPrinter });
+      const list = sizes.length > 0 ? sizes.join("\n") : "(ไม่พบ paper sizes)";
+      alert(`Paper Sizes ของ '${selectedPrinter}':\n\n${list}`);
+      setSavedMessage("");
+    } catch (err: any) {
+      setSavedMessage(`❌ ${err?.toString()?.slice(0, 80)}`);
+      setTimeout(() => setSavedMessage(""), 5000);
+    }
+  };
+
   const updateValue = (key: keyof PaperConfig, value: number) => {
     setCurrentConfig((prev) => ({ ...prev, [key]: value }));
   };
@@ -379,6 +398,13 @@ export default function PaperPositionModal({ open, onClose }: Props) {
           <div className="config-actions-row">
             <button className="config-reset-btn" onClick={handleReset}>
               🔄 Reset ค่าเริ่มต้น
+            </button>
+            <button
+              className="config-debug-btn"
+              onClick={handleShowPaperSizes}
+              style={{ fontSize: "0.8em", opacity: 0.7 }}
+            >
+              🔍 Paper Sizes
             </button>
             <button
               className="config-test-print-btn"

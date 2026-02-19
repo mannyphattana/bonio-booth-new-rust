@@ -9,88 +9,373 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// PowerShell print script that uses System.Drawing.Printing for per-job paper size control.
-/// This allows selecting cut/no-cut paper size dynamically, even with a single printer driver.
+/// Raw FFI declarations for Win32 print functions not available in the windows crate
 #[cfg(target_os = "windows")]
-const PRINT_SCRIPT: &str = r#"
-param(
-    [string]$PrinterName,
-    [string]$ImagePath,
-    [string]$FrameType
-)
+mod print_ffi {
+    /// DOCINFOW structure for StartDocW
+    #[repr(C)]
+    pub struct DOCINFOW {
+        pub cb_size: i32,
+        pub doc_name: *const u16,
+        pub output: *const u16,
+        pub datatype: *const u16,
+        pub fw_type: u32,
+    }
 
-Add-Type -AssemblyName System.Drawing
+    #[link(name = "gdi32")]
+    extern "system" {
+        pub fn StartDocW(hdc: isize, lpdi: *const DOCINFOW) -> i32;
+        pub fn EndDoc(hdc: isize) -> i32;
+        pub fn StartPage(hdc: isize) -> i32;
+        pub fn EndPage(hdc: isize) -> i32;
+    }
 
-$needsCut = ($FrameType -eq '2x6') -or ($FrameType -eq '6x2')
-$isLandscape = ($FrameType -eq '6x4') -or ($FrameType -eq '6x2')
+    #[link(name = "winspool")]
+    extern "system" {
+        pub fn DeviceCapabilitiesW(
+            p_device: *const u16,
+            p_port: *const u16,
+            fw_capability: u16,
+            p_output: *mut u16,
+            p_dev_mode: *const u8,
+        ) -> i32;
+    }
 
-$doc = New-Object System.Drawing.Printing.PrintDocument
-$doc.PrinterSettings.PrinterName = $PrinterName
-
-if (-not $doc.PrinterSettings.IsValid) {
-    Write-Host "PRINT_ERROR:Printer '$PrinterName' not found or invalid"
-    exit 1
+    pub const DC_PAPERNAMES: u16 = 16;
+    pub const DC_PAPERS: u16 = 2;
 }
 
-# Find appropriate paper size based on cut requirement
-$sizes = $doc.PrinterSettings.PaperSizes
-$selectedPaper = $null
+/// Helper: convert Rust string to null-terminated wide string (UTF-16)
+#[cfg(target_os = "windows")]
+fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
 
-if ($needsCut) {
-    # Look for cut paper size (e.g., "2x6", "4x6 2 Cuts", "4x6(2cut)", etc.)
-    foreach ($ps in $sizes) {
-        $n = $ps.PaperName.ToLower()
-        if ($n -match '2\s*x\s*6|cut') {
-            $selectedPaper = $ps
-            break
+/// Query available paper sizes from a printer driver using Win32 DeviceCapabilities API.
+/// Returns Vec of (paper_id, paper_name) tuples.
+#[cfg(target_os = "windows")]
+fn win32_get_paper_sizes(printer_name: &str) -> Result<Vec<(i16, String)>, String> {
+    use print_ffi::*;
+
+    let wide_name = to_wide(printer_name);
+
+    unsafe {
+        // Get count of paper sizes
+        let count = DeviceCapabilitiesW(
+            wide_name.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERNAMES,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
+
+        if count <= 0 {
+            return Ok(vec![]);
         }
-    }
-} else {
-    # Look for standard 4x6 paper WITHOUT cut
-    foreach ($ps in $sizes) {
-        $n = $ps.PaperName.ToLower()
-        if (($n -match '4\s*x\s*6|6\s*x\s*4') -and ($n -notmatch 'cut|2\s*x\s*6')) {
-            $selectedPaper = $ps
-            break
+
+        let count = count as usize;
+
+        // Get paper names (each name is 64 wide chars)
+        let mut names_buf = vec![0u16; count * 64];
+        DeviceCapabilitiesW(
+            wide_name.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERNAMES,
+            names_buf.as_mut_ptr(),
+            std::ptr::null(),
+        );
+
+        // Get paper IDs (array of WORD = u16)
+        let mut ids_buf = vec![0u16; count];
+        DeviceCapabilitiesW(
+            wide_name.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERS,
+            ids_buf.as_mut_ptr(),
+            std::ptr::null(),
+        );
+
+        let mut result = Vec::new();
+        for i in 0..count {
+            let name_slice = &names_buf[i * 64..(i + 1) * 64];
+            let end = name_slice.iter().position(|&c| c == 0).unwrap_or(64);
+            let name = String::from_utf16_lossy(&name_slice[..end]);
+            result.push((ids_buf[i] as i16, name));
         }
+
+        Ok(result)
     }
 }
 
-if ($selectedPaper) {
-    $doc.DefaultPageSettings.PaperSize = $selectedPaper
-    Write-Host "PAPER:$($selectedPaper.PaperName)"
-} else {
-    Write-Host "PAPER:DEFAULT(no match)"
-    foreach ($ps in $sizes) {
-        Write-Host "  AVAILABLE:$($ps.PaperName)"
+/// Check if a printer with the given name exists by trying to open it.
+#[cfg(target_os = "windows")]
+fn win32_printer_exists(printer_name: &str) -> bool {
+    use windows::Win32::Graphics::Printing::{OpenPrinterW, ClosePrinter};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::core::PCWSTR;
+
+    let wide_name = to_wide(printer_name);
+    unsafe {
+        let mut handle = HANDLE::default();
+        let ok = OpenPrinterW(
+            PCWSTR(wide_name.as_ptr()),
+            &mut handle,
+            None,
+        ).is_ok();
+        if ok {
+            let _ = ClosePrinter(handle);
+        }
+        ok
     }
 }
 
-$doc.DefaultPageSettings.Landscape = $isLandscape
-$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0,0,0,0)
+/// Print an image using native Win32 GDI API.
+/// No PowerShell, no popup windows, full control over paper size and orientation.
+/// Auto-switches to "{printer_name} (CUT)" driver for cut frames if available.
+#[cfg(target_os = "windows")]
+fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Result<(), String> {
+    use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::Graphics::Printing::{
+        OpenPrinterW, ClosePrinter, DocumentPropertiesW,
+    };
+    use windows::Win32::Foundation::{HANDLE, HWND};
+    use windows::core::PCWSTR;
 
-$img = [System.Drawing.Image]::FromFile($ImagePath)
+    let needs_cut = frame_type == "2x6" || frame_type == "6x2";
+    let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
-$doc.add_PrintPage({
-    param($sender, $e)
-    $bounds = $e.PageBounds
-    $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-    $e.Graphics.DrawImage($img, 0, 0, $bounds.Width, $bounds.Height)
-    $e.HasMorePages = $false
-})
+    // Auto-switch drivers: if needs_cut, try "{name} (CUT)" variant
+    // If no-cut, use base name (strip " (CUT)" suffix if present)
+    let actual_printer = if needs_cut {
+        let cut_name = if printer_name.to_uppercase().contains("(CUT)") {
+            printer_name.to_string()
+        } else {
+            format!("{} (CUT)", printer_name)
+        };
+        // Verify CUT printer exists by trying to open it
+        if win32_printer_exists(&cut_name) {
+            log::info!("[Printer] Auto-switching to CUT driver: '{}'", cut_name);
+            cut_name
+        } else {
+            log::info!("[Printer] CUT driver '{}' not found, using '{}'", cut_name, printer_name);
+            printer_name.to_string()
+        }
+    } else {
+        // For no-cut: use base name (without " (CUT)")
+        let base_name = printer_name.replace(" (CUT)", "").replace(" (cut)", "");
+        if base_name != printer_name && win32_printer_exists(&base_name) {
+            log::info!("[Printer] Using base (no-cut) driver: '{}'", base_name);
+            base_name
+        } else {
+            printer_name.to_string()
+        }
+    };
 
-try {
-    $doc.Print()
-    Write-Host "PRINT_SUCCESS"
-} catch {
-    Write-Host "PRINT_ERROR:$($_.Exception.Message)"
-    exit 1
-} finally {
-    $img.Dispose()
-    $doc.Dispose()
+    log::info!("[Printer] Actual printer for job: '{}'", actual_printer);
+
+    let wide_name = to_wide(&actual_printer);
+    let wide_winspool = to_wide("WINSPOOL");
+
+    unsafe {
+        // 1. Open printer
+        let mut printer_handle = HANDLE::default();
+        OpenPrinterW(
+            PCWSTR(wide_name.as_ptr()),
+            &mut printer_handle,
+            None,
+        ).map_err(|e| format!("OpenPrinter failed: {}", e))?;
+
+        // 2. Get DEVMODE buffer size
+        let dm_size = DocumentPropertiesW(
+            HWND::default(),
+            printer_handle,
+            PCWSTR(wide_name.as_ptr()),
+            None,
+            None,
+            0,
+        );
+
+        if dm_size < 0 {
+            let _ = ClosePrinter(printer_handle);
+            return Err("DocumentProperties: failed to get DEVMODE size".into());
+        }
+
+        // 3. Get current DEVMODE
+        let mut dm_buf = vec![0u8; dm_size as usize];
+        let dm_ptr = dm_buf.as_mut_ptr() as *mut DEVMODEW;
+
+        let res = DocumentPropertiesW(
+            HWND::default(),
+            printer_handle,
+            PCWSTR(wide_name.as_ptr()),
+            Some(dm_ptr),
+            None,
+            2, // DM_OUT_BUFFER
+        );
+
+        if res < 0 {
+            let _ = ClosePrinter(printer_handle);
+            return Err("DocumentProperties: failed to get DEVMODE".into());
+        }
+
+        // 4. Find and set paper size
+        let paper_sizes = win32_get_paper_sizes(&actual_printer)?;
+        log::info!("[Printer] frame_type=\"{}\" needs_cut={} is_landscape={}", frame_type, needs_cut, is_landscape);
+        log::info!("[Printer] Available paper sizes for '{}' ({} found):", actual_printer, paper_sizes.len());
+        for (id, name) in &paper_sizes {
+            log::info!("[Printer]   id={} name=\"{}\"", id, name);
+        }
+
+        let selected = if needs_cut {
+            // First try: exact match for "2x6" or "cut"
+            let first = paper_sizes.iter().find(|(_, n)| {
+                let lower = n.to_lowercase();
+                lower.contains("cut") || lower.contains("2x6")
+            });
+            if first.is_some() {
+                log::info!("[Printer] Cut paper found via primary match (cut/2x6)");
+                first
+            } else {
+                // Fallback: any paper with "cut" in the name
+                let fallback = paper_sizes.iter().find(|(_, n)| {
+                    n.to_lowercase().contains("cut")
+                });
+                if fallback.is_some() {
+                    log::info!("[Printer] Cut paper found via fallback match (any 'cut')");
+                }
+                fallback
+            }
+        } else {
+            paper_sizes.iter().find(|(_, n)| {
+                let lower = n.to_lowercase();
+                (lower.contains("4x6") || lower.contains("6x4"))
+                    && !lower.contains("cut") && !lower.contains("2x6")
+            })
+        };
+
+        let dm = &mut *dm_ptr;
+
+        if let Some((paper_id, paper_name)) = selected {
+            dm.Anonymous1.Anonymous1.dmPaperSize = *paper_id;
+            dm.dmFields |= DM_PAPERSIZE;
+            log::info!("[Printer] Selected paper: \"{}\" (id={})", paper_name, paper_id);
+        } else {
+            log::warn!("[Printer] No matching paper for frame_type={}, using driver default", frame_type);
+        }
+
+        // Set orientation
+        dm.Anonymous1.Anonymous1.dmOrientation = if is_landscape { 2 } else { 1 };
+        dm.dmFields |= DM_ORIENTATION;
+
+        // Apply modified DEVMODE
+        DocumentPropertiesW(
+            HWND::default(),
+            printer_handle,
+            PCWSTR(wide_name.as_ptr()),
+            Some(dm_ptr),
+            Some(dm_ptr as *const _),
+            10, // DM_IN_BUFFER(8) | DM_OUT_BUFFER(2)
+        );
+
+        let _ = ClosePrinter(printer_handle);
+
+        // 5. Create device context with modified DEVMODE
+        let hdc = CreateDCW(
+            PCWSTR(wide_winspool.as_ptr()),
+            PCWSTR(wide_name.as_ptr()),
+            PCWSTR::null(),
+            Some(dm_ptr as *const _),
+        );
+
+        if hdc.is_invalid() {
+            return Err("CreateDC failed".into());
+        }
+
+        // 6. Get printable area
+        let page_w = GetDeviceCaps(hdc, HORZRES);
+        let page_h = GetDeviceCaps(hdc, VERTRES);
+        log::info!("[Printer] Page: {}x{} device units", page_w, page_h);
+
+        // 7. Load image and convert to BGRA bottom-up (Windows bitmap format)
+        let img = image::open(image_path)
+            .map_err(|e| format!("Failed to open image for printing: {}", e))?;
+        let rgba = img.to_rgba8();
+        let (img_w, img_h) = (rgba.width(), rgba.height());
+        let raw = rgba.as_raw();
+        let stride = (img_w * 4) as usize;
+        let mut bgra = vec![0u8; stride * img_h as usize];
+        for y in 0..img_h as usize {
+            let src_row = y * stride;
+            let dst_row = (img_h as usize - 1 - y) * stride;
+            for x in 0..img_w as usize {
+                let si = src_row + x * 4;
+                let di = dst_row + x * 4;
+                bgra[di]     = raw[si + 2]; // B
+                bgra[di + 1] = raw[si + 1]; // G
+                bgra[di + 2] = raw[si];     // R
+                bgra[di + 3] = raw[si + 3]; // A
+            }
+        }
+
+        // 8. Print
+        let doc_name = to_wide("Bonio Booth Print");
+        let doc_info = print_ffi::DOCINFOW {
+            cb_size: std::mem::size_of::<print_ffi::DOCINFOW>() as i32,
+            doc_name: doc_name.as_ptr(),
+            output: std::ptr::null(),
+            datatype: std::ptr::null(),
+            fw_type: 0,
+        };
+
+        // Extract raw isize handle for FFI calls
+        // CreatedHDC -> HDC -> isize (all repr(transparent))
+        let raw_hdc: isize = std::mem::transmute_copy(&hdc);
+
+        if print_ffi::StartDocW(raw_hdc, &doc_info) <= 0 {
+            return Err("StartDoc failed".into());
+        }
+
+        if print_ffi::StartPage(raw_hdc) <= 0 {
+            print_ffi::EndDoc(raw_hdc);
+            return Err("StartPage failed".into());
+        }
+
+        SetStretchBltMode(hdc, HALFTONE);
+
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: img_w as i32,
+                biHeight: img_h as i32,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: 0, // BI_RGB
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [RGBQUAD::default()],
+        };
+
+        StretchDIBits(
+            hdc,
+            0, 0, page_w, page_h,
+            0, 0, img_w as i32, img_h as i32,
+            Some(bgra.as_ptr() as *const _),
+            &bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+
+        print_ffi::EndPage(raw_hdc);
+        print_ffi::EndDoc(raw_hdc);
+
+        log::info!("[Printer] Print job sent successfully via Win32 GDI");
+        Ok(())
+    }
 }
-"#;
 
 /// Create a Command that hides the console window on Windows
 fn hidden_command(program: &str) -> Command {
@@ -490,46 +775,11 @@ pub async fn print_photo(
 
     let temp_path_str = temp_path.to_string_lossy().to_string();
 
-    // Print using PowerShell System.Drawing.Printing for per-job paper size control
-    // This allows selecting cut/no-cut paper size per job, even with a single printer driver
+    // Print using native Win32 GDI API - no PowerShell, no popup windows
     #[cfg(target_os = "windows")]
     {
-        let script_path = temp_dir.join("bonio-print.ps1");
-        std::fs::write(&script_path, PRINT_SCRIPT)
-            .map_err(|e| format!("Failed to write print script: {}", e))?;
-
-        let output = hidden_command("powershell")
-            .args(&[
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-File", &script_path.to_string_lossy(),
-                "-PrinterName", &printer_name,
-                "-ImagePath", &temp_path_str,
-                "-FrameType", &frame_type,
-            ])
-            .output()
-            .map_err(|e| format!("Print failed: {}", e))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let _ = std::fs::remove_file(&script_path);
-
-        // Log output for debugging
-        log::info!("[Printer] PowerShell stdout: {}", stdout.trim());
-        if !stderr.is_empty() {
-            log::warn!("[Printer] PowerShell stderr: {}", stderr.trim());
-        }
-
-        if stdout.contains("PRINT_SUCCESS") {
-            Ok(true)
-        } else if stdout.contains("PRINT_ERROR:") {
-            let err_msg = stdout.lines()
-                .find(|l| l.starts_with("PRINT_ERROR:"))
-                .unwrap_or("Unknown print error");
-            Err(err_msg.to_string())
-        } else {
-            Err(format!("Print failed. stdout: {} stderr: {}", stdout.trim(), stderr.trim()))
-        }
+        win32_gdi_print(&printer_name, &temp_path_str, &frame_type)
+            .map(|_| true)
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -572,24 +822,27 @@ pub async fn print_test_photo(
             exists
         };
 
+        // File name pattern: "Print test {frame_type}.png" e.g. "Print test 4x6.png"
+        let test_filename = format!("Print test {}.png", frame_type);
+
         // 1. Resource directory (Tauri bundled)
         if let Ok(resource_dir) = app.path().resource_dir() {
-            try_path(resource_dir.join("test.jpg"));
+            try_path(resource_dir.join(&test_filename));
         }
 
         // 2. Next to executable
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                try_path(exe_dir.join("test.jpg"));
+                try_path(exe_dir.join(&test_filename));
                 // NSIS _up_ directory
-                try_path(exe_dir.join("_up_").join("test.jpg"));
+                try_path(exe_dir.join("_up_").join(&test_filename));
                 // Dev mode: walk up to project root
                 let mut dir = exe_dir.to_path_buf();
                 for _ in 0..5 {
                     if let Some(parent) = dir.parent() {
                         dir = parent.to_path_buf();
-                        try_path(dir.join("public").join("test.jpg"));
-                        try_path(dir.join("test.jpg"));
+                        try_path(dir.join("public").join(&test_filename));
+                        try_path(dir.join(&test_filename));
                     } else {
                         break;
                     }
@@ -599,8 +852,8 @@ pub async fn print_test_photo(
 
         // 3. CWD
         if let Ok(cwd) = std::env::current_dir() {
-            try_path(cwd.join("test.jpg"));
-            try_path(cwd.join("public").join("test.jpg"));
+            try_path(cwd.join(&test_filename));
+            try_path(cwd.join("public").join(&test_filename));
         }
 
         // Log all searched paths for debugging
@@ -610,7 +863,7 @@ pub async fn print_test_photo(
         }
 
         found_path.ok_or_else(|| {
-            let msg = format!("test.jpg not found. Searched paths:\n  {}", search_log);
+            let msg = format!("{} not found. Searched paths:\n  {}", test_filename, search_log);
             error!("[Printer] {}", msg);
             msg
         })?
@@ -671,41 +924,15 @@ pub async fn reduce_paper_level(
 /// Get available paper sizes for a specific printer (for debugging and UI)
 #[tauri::command]
 pub async fn get_printer_paper_sizes(printer_name: String) -> Result<Vec<String>, String> {
-    let ps_cmd = format!(
-        r#"
-        Add-Type -AssemblyName System.Drawing
-        $doc = New-Object System.Drawing.Printing.PrintDocument
-        $doc.PrinterSettings.PrinterName = '{}'
-        if (-not $doc.PrinterSettings.IsValid) {{
-            Write-Host "ERROR:Invalid printer"
-            exit 1
-        }}
-        $sizes = @()
-        foreach ($ps in $doc.PrinterSettings.PaperSizes) {{
-            $sizes += $ps.PaperName
-        }}
-        $doc.Dispose()
-        $sizes | ForEach-Object {{ Write-Host $_ }}
-        "#,
-        printer_name.replace("'", "''")
-    );
-
-    let output = hidden_command("powershell")
-        .args(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps_cmd])
-        .output()
-        .map_err(|e| format!("Failed to query paper sizes: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-
-    if stdout.contains("ERROR:") {
-        return Err(format!("Printer '{}' not found or invalid", printer_name));
+    #[cfg(target_os = "windows")]
+    {
+        let paper_sizes = win32_get_paper_sizes(&printer_name)?;
+        Ok(paper_sizes.iter().map(|(id, name)| format!("{} (id={})", name, id)).collect())
     }
 
-    let sizes: Vec<String> = stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    Ok(sizes)
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = printer_name;
+        Ok(vec!["Paper size query not supported on this platform".to_string()])
+    }
 }

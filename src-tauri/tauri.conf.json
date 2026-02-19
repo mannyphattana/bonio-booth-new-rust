@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Bonio Booth",
-  "version": "0.4.0-7",
+  "version": "0.4.0-15",
   "identifier": "com.boniolabs.booth",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -37,7 +37,10 @@
       "../EDSDK/**/*": "EDSDK/",
       "../filters/*": "filters/",
       "../node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe": "ffmpeg.exe",
-      "../public/test.jpg": "test.jpg"
+      "../public/Print test 4x6.png": "Print test 4x6.png",
+      "../public/Print test 2x6.png": "Print test 2x6.png",
+      "../public/Print test 6x4.png": "Print test 6x4.png",
+      "../public/Print test 6x2.png": "Print test 6x2.png"
     },
     "windows": {
       "nsis": {
