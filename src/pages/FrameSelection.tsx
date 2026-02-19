@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
@@ -21,6 +21,15 @@ export default function FrameSelection({ theme }: Props) {
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [selectedFrame, setSelectedFrame] = useState<FrameData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // --- ระบบ Drag & Scroll ---
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollBy = (offset: number) => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: offset, behavior: "smooth" });
+    }
+  };
 
   useEffect(() => {
     loadFrames();
@@ -51,16 +60,30 @@ export default function FrameSelection({ theme }: Props) {
     });
   };
 
+  const arrowButtonStyle: React.CSSProperties = {
+    background: "rgba(0,0,0,0.4)",
+    color: "white",
+    border: "1px solid rgba(255,255,255,0.3)",
+    width: "50px",
+    height: "50px",
+    borderRadius: "50%",
+    fontSize: "24px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    zIndex: 20,
+    transition: "background 0.2s",
+  };
+
   return (
     <div
       className="page-container page-space-between"
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
-        // ล็อคไม่ให้หน้าจอเลื่อนเด็ดขาด
         height: "100vh",
         overflow: "hidden",
-        paddingTop: "20px",
-        paddingBottom: "20px",
       }}
     >
       <Countdown
@@ -69,19 +92,40 @@ export default function FrameSelection({ theme }: Props) {
         visible={COUNTDOWN.FRAME_SELECTION.VISIBLE}
       />
 
-      <h1
+      {/* 2. ส่วนหัวข้อ (Title) */}
+      <div
         style={{
-          color: theme.fontColor,
-          fontSize: 24,
-          marginTop: 60,
-          marginBottom: 8,
+          width: "100%",
+          textAlign: "center",
+          marginTop: "80px",
+          zIndex: 10,
+          height: "80px",
+          flexShrink: 0,
         }}
       >
-        เลือกกรอบรูป
-      </h1>
-      <p style={{ color: theme.fontColor, opacity: 0.8, marginBottom: 16 }}>
-        SELECT FRAME
-      </p>
+        <h1
+          style={{
+            color: "#e94560",
+            fontSize: "42px",
+            fontWeight: "bold",
+            margin: 0,
+            lineHeight: 1,
+          }}
+        >
+          เลือกกรอบรูป
+        </h1>
+        <p
+          style={{
+            color: theme.fontColor,
+            letterSpacing: "2px",
+            opacity: 0.8,
+            fontSize: "16px",
+            marginTop: "5px",
+          }}
+        >
+          SELECT YOUR FRAME
+        </p>
+      </div>
 
       {loading ? (
         <div
@@ -138,6 +182,19 @@ export default function FrameSelection({ theme }: Props) {
                 </div>
               ))}
             </HorizontalScroll>
+
+            <button
+              onClick={() => scrollBy(200)}
+              style={{ ...arrowButtonStyle, marginLeft: "10px" }}
+              onMouseOver={(e) =>
+                (e.currentTarget.style.background = "rgba(233, 69, 96, 0.8)")
+              }
+              onMouseOut={(e) =>
+                (e.currentTarget.style.background = "rgba(0,0,0,0.4)")
+              }
+            >
+              &#8250;
+            </button>
           </div>
 
           {/* 3. รูปพรีวิว (Preview) - ย่อขนาดลงอีก และห้ามดันจนล้น */}
@@ -148,7 +205,7 @@ export default function FrameSelection({ theme }: Props) {
               display: "flex",
               justifyContent: "center",
               alignItems: "center",
-              minHeight: 0, // สำคัญมาก!
+              minHeight: 0,
               overflow: "hidden",
               padding: "10px 0",
             }}
