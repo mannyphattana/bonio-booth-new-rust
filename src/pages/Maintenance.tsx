@@ -13,6 +13,7 @@ interface Props {
   onOpenConfig: (type: "camera" | "printer") => void;
   lineUrl?: string;
   backgroundSecond?: string;
+  isNetworkError?: boolean;
 }
 
 export default function Maintenance({
@@ -20,6 +21,7 @@ export default function Maintenance({
   onOpenConfig,
   lineUrl,
   backgroundSecond,
+  isNetworkError = false,
 }: Props) {
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
     cameraOk: false,
@@ -87,7 +89,7 @@ export default function Maintenance({
       try {
         const printers: any[] = await invoke("get_printers");
         const found = printers.find(
-          (p: any) => p.name === savedPrinter && p.is_online
+          (p: any) => p.name === savedPrinter && p.is_online,
         );
         if (found) {
           printerOk = true;
@@ -159,70 +161,86 @@ export default function Maintenance({
         </div>
 
         <h1 style={styles.title}>SYSTEM MAINTENANCE</h1>
-        <p style={styles.subtitle}>ระบบอยู่ระหว่างการซ่อมบำรุง</p>
-
-        <p style={styles.instruction}>
-          กรุณาตรวจสอบอุปกรณ์ ด้านล่าง หรือติดต่อพนักงาน
+        <p style={styles.subtitle}>
+          {isNetworkError
+            ? "กำลังเชื่อมต่อกับเซิร์ฟเวอร์..."
+            : "ระบบอยู่ระหว่างการซ่อมบำรุง"}
         </p>
 
-        {/* Device status cards */}
-        <div style={styles.deviceCards}>
-          {/* Camera status */}
-          <div
-            style={{
-              ...styles.deviceCard,
-              borderColor: deviceStatus.cameraOk ? "#4CAF50" : "#f44336",
-            }}
-          >
-            <div style={styles.deviceHeader}>
-              <span style={styles.deviceIcon}>📷</span>
-              <span style={styles.deviceLabel}>กล้อง (Camera)</span>
-              <span
-                style={{
-                  ...styles.statusBadge,
-                  background: deviceStatus.cameraOk ? "#4CAF50" : "#f44336",
-                }}
-              >
-                {checking ? "..." : deviceStatus.cameraOk ? "OK" : "NOT FOUND"}
-              </span>
-            </div>
-            <div style={styles.deviceDetail}>{deviceStatus.cameraName}</div>
-            <button
-              style={styles.configButton}
-              onClick={() => onOpenConfig("camera")}
-            >
-              ตั้งค่ากล้องใหม่
-            </button>
-          </div>
+        <p style={styles.instruction}>
+          {isNetworkError
+            ? "กรุณารอสักครู่ ระบบกำลังพยายามเชื่อมต่อเครือข่ายเชื่อมต่ออีกครั้ง"
+            : "กรุณาตรวจสอบอุปกรณ์ ด้านล่าง หรือติดต่อพนักงาน"}
+        </p>
 
-          {/* Printer status */}
-          <div
-            style={{
-              ...styles.deviceCard,
-              borderColor: deviceStatus.printerOk ? "#4CAF50" : "#f44336",
-            }}
-          >
-            <div style={styles.deviceHeader}>
-              <span style={styles.deviceIcon}>🖨️</span>
-              <span style={styles.deviceLabel}>เครื่องปริ้น (Printer)</span>
-              <span
-                style={{
-                  ...styles.statusBadge,
-                  background: deviceStatus.printerOk ? "#4CAF50" : "#f44336",
-                }}
-              >
-                {checking ? "..." : deviceStatus.printerOk ? "OK" : "NOT FOUND"}
-              </span>
-            </div>
-            <div style={styles.deviceDetail}>{deviceStatus.printerName}</div>
-            <button
-              style={styles.configButton}
-              onClick={() => onOpenConfig("printer")}
+        {/* Device status cards - hide during network errors since we can't reliably get status */}
+        {!isNetworkError && (
+          <div style={styles.deviceCards}>
+            {/* Camera status */}
+            <div
+              style={{
+                ...styles.deviceCard,
+                borderColor: deviceStatus.cameraOk ? "#4CAF50" : "#f44336",
+              }}
             >
-              ตั้งค่าเครื่องปริ้นใหม่
-            </button>
+              <div style={styles.deviceHeader}>
+                <span style={styles.deviceIcon}>📷</span>
+                <span style={styles.deviceLabel}>กล้อง (Camera)</span>
+                <span
+                  style={{
+                    ...styles.statusBadge,
+                    background: deviceStatus.cameraOk ? "#4CAF50" : "#f44336",
+                  }}
+                >
+                  {checking
+                    ? "..."
+                    : deviceStatus.cameraOk
+                      ? "OK"
+                      : "NOT FOUND"}
+                </span>
+              </div>
+              <div style={styles.deviceDetail}>{deviceStatus.cameraName}</div>
+              <button
+                style={styles.configButton}
+                onClick={() => onOpenConfig("camera")}
+              >
+                ตั้งค่ากล้องใหม่
+              </button>
+            </div>
+
+            {/* Printer status */}
+            <div
+              style={{
+                ...styles.deviceCard,
+                borderColor: deviceStatus.printerOk ? "#4CAF50" : "#f44336",
+              }}
+            >
+              <div style={styles.deviceHeader}>
+                <span style={styles.deviceIcon}>🖨️</span>
+                <span style={styles.deviceLabel}>เครื่องปริ้น (Printer)</span>
+                <span
+                  style={{
+                    ...styles.statusBadge,
+                    background: deviceStatus.printerOk ? "#4CAF50" : "#f44336",
+                  }}
+                >
+                  {checking
+                    ? "..."
+                    : deviceStatus.printerOk
+                      ? "OK"
+                      : "NOT FOUND"}
+                </span>
+              </div>
+              <div style={styles.deviceDetail}>{deviceStatus.printerName}</div>
+              <button
+                style={styles.configButton}
+                onClick={() => onOpenConfig("printer")}
+              >
+                ตั้งค่าเครื่องปริ้นใหม่
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* LINE QR code */}
         {lineUrl && (
@@ -241,9 +259,11 @@ export default function Maintenance({
         )}
 
         <p style={styles.footerNote}>
-          {deviceStatus.cameraOk && deviceStatus.printerOk
-            ? "✅ อุปกรณ์พร้อมใช้งานแล้ว กำลังกลับหน้าหลัก..."
-            : "⏳ ระบบกำลังตรวจสอบอุปกรณ์อัตโนมัติ..."}
+          {isNetworkError
+            ? "⏳ กำลังเชื่อมต่อเครือข่าย..."
+            : deviceStatus.cameraOk && deviceStatus.printerOk
+              ? "✅ อุปกรณ์พร้อมใช้งานแล้ว กำลังกลับหน้าหลัก..."
+              : "⏳ ระบบกำลังตรวจสอบอุปกรณ์อัตโนมัติ..."}
         </p>
       </div>
     </div>
