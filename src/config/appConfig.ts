@@ -3,47 +3,47 @@
  */
 export const COUNTDOWN = {
   GET_HELP: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: false,
   },
   TERMS_AND_SERVICES: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: false,
   },
   DISCOUNT_COUPON: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: false,
   },
   PAYMENT_QR: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true, // not used
   },
   SELECT_PRINT: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   FRAME_SELECTION: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   SLOT_SELECTION: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   PHOTO_PREPARE: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   PHOTO_DECORATE: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   PHOTO_FILTER: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   PHOTO_RESULT: {
-    DURATION: 30000,
+    DURATION: 300,
     VISIBLE: true,
   },
   REQUEST_IMAGE: {

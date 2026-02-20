@@ -15,8 +15,8 @@
         "title": "Bonio Booth",
         "width": 720,
         "height": 1280,
-        "fullscreen": false,
-        "resizable": true
+        "fullscreen": true,
+        "resizable": false
       }
     ],
     "security": {
