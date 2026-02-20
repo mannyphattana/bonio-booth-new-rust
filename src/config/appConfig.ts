@@ -60,3 +60,12 @@ export const REFETCH_INTERVAL = {
   SYSTEM_MAINTENANCE: 10,
   OUT_OF_PAPER: 10,
 };
+
+/**
+ * เปิด = true: ไม่ขึ้น maintenance เมื่อไม่เจอกล้อง/เครื่องปริ้น (ใช้เทสต่อเนื่องได้)
+ * ปิด = false: ขึ้น maintenance เมื่อไม่เจออุปกรณ์ (โหมดใช้งานจริง)
+ */
+export const DEVICE_CHECK = {
+  /** true = ข้าม maintenance เมื่อไม่เจอกล้อง/ปริ้น (สำหรับเทส) */
+  ALLOW_TEST_WITHOUT_DEVICES: true,
+};

@@ -674,7 +674,7 @@ pub async fn print_photo(
 
     // Load original image (auto-detect format from content, not extension)
     let img = {
-        let reader = image::io::Reader::open(&image_path)
+        let reader = image::ImageReader::open(&image_path)
             .map_err(|e| format!("Failed to open image file: {}", e))?
             .with_guessed_format()
             .map_err(|e| format!("Failed to guess image format: {}", e))?;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { isPrinting } from "../utils/printingState";
+import { DEVICE_CHECK } from "../config/appConfig";
 
 interface DeviceCheckOptions {
   enabled?: boolean;
@@ -157,11 +158,14 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
       }
 
       // If either device is configured but not found on startup → maintenance
-      if (
-        (isConfiguredCamera && !cameraConnected) ||
-        (isConfiguredPrinter && !printerConnected)
-      ) {
-        if (onMaintenanceNeeded) onMaintenanceNeeded();
+      // (ข้ามถ้า ALLOW_TEST_WITHOUT_DEVICES = true เพื่อเทสต่อเนื่องโดยไม่ขึ้น maintenance)
+      if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES) {
+        if (
+          (isConfiguredCamera && !cameraConnected) ||
+          (isConfiguredPrinter && !printerConnected)
+        ) {
+          if (onMaintenanceNeeded) onMaintenanceNeeded();
+        }
       }
 
       prevStateRef.current = currentState;
@@ -191,7 +195,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         } catch {
           /* ignore */
         }
-        if (onMaintenanceNeeded) onMaintenanceNeeded();
+        if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
       }
 
       // Camera reconnect transition
@@ -228,7 +232,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         } catch {
           /* ignore */
         }
-        if (onMaintenanceNeeded) onMaintenanceNeeded();
+        if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
       }
 
       // Printer reconnect transition
