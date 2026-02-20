@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
+import RecordRTC from "recordrtc";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { useCanon } from "../hooks/useCanon";
@@ -129,7 +130,7 @@ export default function MainShooting({ theme, machineData }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraContainerRef = useRef<HTMLDivElement>(null);
   const canonLiveViewRef = useRef<HTMLImageElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaRecorderRef = useRef<RecordRTC | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isRecordingRef = useRef(false);
   const sequenceRunningRef = useRef(false);
@@ -263,7 +264,7 @@ export default function MainShooting({ theme, machineData }: Props) {
         video: {
           width: { ideal: 2560 },
           height: { ideal: 1440 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 30, min: 30 }, // บังคับ min 30fps
         },
         audio: false,
       },
@@ -271,7 +272,7 @@ export default function MainShooting({ theme, machineData }: Props) {
         video: {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 30, min: 30 }, // บังคับ min 30fps
         },
         audio: false,
       },
@@ -347,35 +348,27 @@ export default function MainShooting({ theme, machineData }: Props) {
       return;
     }
 
-    // Webcam: use MediaRecorder
+    // Webcam: use RecordRTC
     if (!streamRef.current || isRecordingRef.current) return;
 
-    const chunks: Blob[] = [];
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
       ? "video/webm;codecs=vp9"
       : "video/webm";
 
-    const recorder = new MediaRecorder(streamRef.current, {
-      mimeType,
+    const recorder = new RecordRTC(streamRef.current, {
+      type: "video",
+      mimeType: mimeType as any,
       videoBitsPerSecond: 15000000,
+      frameRate: 30,
+      timeSlice: 1000, // บังคับให้เขียนข้อมูลลง buffer ทุกๆ 1 วินาที ช่วยลดปัญหา frame drop
+      disableLogs: true,
     });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      (window as any).__lastVideoUrl = url;
-      (window as any).__lastVideoBlob = blob;
-      (window as any).__lastVideoReady = true;
-    };
 
     (window as any).__lastVideoReady = false;
     (window as any).__lastVideoUrl = "";
     (window as any).__lastVideoBlob = null;
-    recorder.start();
+    
+    recorder.startRecording();
     mediaRecorderRef.current = recorder;
     isRecordingRef.current = true;
     setIsRecording(true);
@@ -396,33 +389,23 @@ export default function MainShooting({ theme, machineData }: Props) {
       return Promise.resolve({ url: "", blob: null });
     }
 
-    // Webcam: standard MediaRecorder flow
+    // Webcam: standard RecordRTC flow
     return new Promise((resolve) => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
-      }
-      isRecordingRef.current = false;
-      setIsRecording(false);
-
-      // Poll until onstop callback fires and sets __lastVideoReady
-      const check = setInterval(() => {
-        if ((window as any).__lastVideoReady) {
-          clearInterval(check);
-          resolve({
-            url: (window as any).__lastVideoUrl || "",
-            blob: (window as any).__lastVideoBlob || null,
-          });
-        }
-      }, 50);
-
-      // Timeout after 3 seconds
-      setTimeout(() => {
-        clearInterval(check);
-        resolve({
-          url: (window as any).__lastVideoUrl || "",
-          blob: (window as any).__lastVideoBlob || null,
+      if (mediaRecorderRef.current && mediaRecorderRef.current.getState() !== "inactive") {
+        mediaRecorderRef.current.stopRecording(() => {
+          const blob = mediaRecorderRef.current!.getBlob();
+          const url = URL.createObjectURL(blob);
+          
+          isRecordingRef.current = false;
+          setIsRecording(false);
+          
+          resolve({ url, blob });
         });
-      }, 3000);
+      } else {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        resolve({ url: "", blob: null });
+      }
     });
   }, []);
 
