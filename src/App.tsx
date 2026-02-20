@@ -1,5 +1,5 @@
 import { MemoryRouter as Router, Routes, Route } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Home from "./pages/Home";
 import PaymentSelection from "./pages/PaymentSelection";
@@ -25,6 +25,7 @@ import { useShutdown } from "./hooks/useShutdown";
 import { useDeviceCheck } from "./hooks/useDeviceCheck";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { useTimerShutdown } from "./hooks/useTimerShutdown";
+import { REFETCH_INTERVAL } from "./config/appConfig";
 import "./App.css";
 
 export interface ThemeData {
@@ -85,9 +86,11 @@ function App() {
   const [isVerified, setIsVerified] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [maintenanceConfig, setMaintenanceConfig] = useState<
-    "camera" | "printer" | null
+    "camera" | "printer" | "network" | null
   >(null);
   const [lineUrl, setLineUrl] = useState<string>("");
+
+  const initRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Restore camera type from localStorage to Rust AppState on startup
   // Otherwise AppState defaults to "webcam" even if user configured "canon"
@@ -107,35 +110,78 @@ function App() {
     }
   }, []);
 
-  const initMachine = useCallback(async (machineId: string) => {
-    try {
-      await invoke("set_machine_config", {
-        machineId,
-        machinePort: localStorage.getItem("machinePort") || "44444",
-      });
-      const verifyResult: any = await invoke("verify_machine", { machineId });
-      if (verifyResult.success) {
-        const initResult: any = await invoke("init_machine");
-        if (initResult.success && initResult.data?.machine) {
-          setMachineData(initResult.data.machine);
-          setThemeData(initResult.data.theme || initResult.data.machine.theme);
-          setIsVerified(true);
+  const initMachine = useCallback(
+    async (machineId: string) => {
+      try {
+        await invoke("set_machine_config", {
+          machineId,
+          machinePort: localStorage.getItem("machinePort") || "44444",
+        });
+        const verifyResult: any = await invoke("verify_machine", { machineId });
+        if (verifyResult.success) {
+          const initResult: any = await invoke("init_machine");
+          if (initResult.success && initResult.data?.machine) {
+            setMachineData(initResult.data.machine);
+            setThemeData(
+              initResult.data.theme || initResult.data.machine.theme,
+            );
+            setIsVerified(true);
 
-          // Extract lineUrl from workspace/theme if available
-          if (initResult.data.machine?.lineUrl) {
-            setLineUrl(initResult.data.machine.lineUrl);
-          }
+            // Clear network error if previously set
+            if (maintenanceConfig === "network") {
+              setMaintenanceConfig(null);
+              setShowMaintenance(false);
+            }
 
-          // Check if backend set maintenance mode
-          if (initResult.data.machine?.isMaintenanceMode) {
-            setShowMaintenance(true);
+            // Extract lineUrl from workspace/theme if available
+            if (initResult.data.machine?.lineUrl) {
+              setLineUrl(initResult.data.machine.lineUrl);
+            }
+
+            // Check if backend set maintenance mode
+            if (initResult.data.machine?.isMaintenanceMode) {
+              setShowMaintenance(true);
+            }
+          } else {
+            throw new Error("init_machine returned unsuccessful response");
           }
+        } else {
+          throw new Error("verify_machine failed");
         }
+      } catch (err) {
+        console.error("Init error:", err);
+        // Backend or network failure
+        setShowMaintenance(true);
+        setMaintenanceConfig("network");
       }
-    } catch (err) {
-      console.error("Init error:", err);
+    },
+    [maintenanceConfig],
+  );
+
+  // Network retry logic when in network maintenance state
+  useEffect(() => {
+    if (maintenanceConfig === "network") {
+      const savedMachineId = localStorage.getItem("machineId");
+      if (savedMachineId) {
+        initRetryTimerRef.current = setInterval(() => {
+          console.log("[App] Retrying connection...");
+          initMachine(savedMachineId);
+        }, REFETCH_INTERVAL.SYSTEM_MAINTENANCE * 1000);
+      }
+    } else {
+      if (initRetryTimerRef.current) {
+        clearInterval(initRetryTimerRef.current);
+        initRetryTimerRef.current = null;
+      }
     }
-  }, []);
+
+    return () => {
+      if (initRetryTimerRef.current) {
+        clearInterval(initRetryTimerRef.current);
+        initRetryTimerRef.current = null;
+      }
+    };
+  }, [maintenanceConfig, initMachine]);
 
   // SSE connection - receive events from backend
   // Shutdown events are handled directly in Rust backend (shutdown manager)
@@ -144,14 +190,17 @@ function App() {
     setShowMaintenance(enabled);
   }, []);
 
-  const handleConfigUpdated = useCallback((configType: string) => {
-    console.log("[App] Config updated via SSE:", configType);
-    // Re-fetch machine & theme data from backend
-    const savedMachineId = localStorage.getItem("machineId");
-    if (savedMachineId) {
-      initMachine(savedMachineId);
-    }
-  }, [initMachine]);
+  const handleConfigUpdated = useCallback(
+    (configType: string) => {
+      console.log("[App] Config updated via SSE:", configType);
+      // Re-fetch machine & theme data from backend
+      const savedMachineId = localStorage.getItem("machineId");
+      if (savedMachineId) {
+        initMachine(savedMachineId);
+      }
+    },
+    [initMachine],
+  );
 
   const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
@@ -183,37 +232,40 @@ function App() {
   // Timer Auto-Shutdown — polls backend every 30s to check operating hours
   // When outside operating hours, starts a 2-minute shutdown countdown
   // Only refresh machineData if it actually changed (prevent unnecessary re-renders)
-  const handleMachineDataRefreshed = useCallback((data: any) => {
-    if (data.machine) {
-      // Only update if machineId changed or if critical fields changed
-      const currentMachineId = machineData?._id;
-      const newMachineId = data.machine._id;
-      
-      if (currentMachineId !== newMachineId) {
-        // Machine changed, update everything
-        setMachineData(data.machine);
-        if (data.theme) setThemeData(data.theme);
-        if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
-      } else {
-        // Same machine, only update if critical fields changed
-        const currentPaperLevel = machineData?.paperLevel;
-        const newPaperLevel = data.machine.paperLevel;
-        const currentMaintenanceMode = machineData?.isMaintenanceMode;
-        const newMaintenanceMode = data.machine.isMaintenanceMode;
-        
-        if (
-          currentPaperLevel !== newPaperLevel ||
-          currentMaintenanceMode !== newMaintenanceMode ||
-          machineData?.lineUrl !== data.machine?.lineUrl ||
-          machineData?.cameraCountdown !== data.machine?.cameraCountdown
-        ) {
+  const handleMachineDataRefreshed = useCallback(
+    (data: any) => {
+      if (data.machine) {
+        // Only update if machineId changed or if critical fields changed
+        const currentMachineId = machineData?._id;
+        const newMachineId = data.machine._id;
+
+        if (currentMachineId !== newMachineId) {
+          // Machine changed, update everything
           setMachineData(data.machine);
           if (data.theme) setThemeData(data.theme);
           if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+        } else {
+          // Same machine, only update if critical fields changed
+          const currentPaperLevel = machineData?.paperLevel;
+          const newPaperLevel = data.machine.paperLevel;
+          const currentMaintenanceMode = machineData?.isMaintenanceMode;
+          const newMaintenanceMode = data.machine.isMaintenanceMode;
+
+          if (
+            currentPaperLevel !== newPaperLevel ||
+            currentMaintenanceMode !== newMaintenanceMode ||
+            machineData?.lineUrl !== data.machine?.lineUrl ||
+            machineData?.cameraCountdown !== data.machine?.cameraCountdown
+          ) {
+            setMachineData(data.machine);
+            if (data.theme) setThemeData(data.theme);
+            if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+          }
         }
       }
-    }
-  }, [machineData]);
+    },
+    [machineData],
+  );
 
   useTimerShutdown({
     enabled: isVerified,
@@ -272,6 +324,7 @@ function App() {
               onOpenConfig={(type) => setMaintenanceConfig(type)}
               lineUrl={lineUrl}
               backgroundSecond={themeData?.backgroundSecond}
+              isNetworkError={maintenanceConfig === "network"}
             />
           )}
         </>

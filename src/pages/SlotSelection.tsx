@@ -260,7 +260,6 @@ export default function SlotSelection({ theme }: Props) {
                     cursor: "pointer",
                     transition: "0.2s",
                     position: "relative",
-                    opacity: isSelected ? 0.6 : 1,
                     boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
                   }}
                 >
@@ -271,6 +270,8 @@ export default function SlotSelection({ theme }: Props) {
                       width: "100%",
                       height: "100%",
                       objectFit: "cover",
+                      opacity: isSelected ? 0.7 : 1,
+                      filter: isSelected ? "brightness(0.7)" : "brightness(1)",
                     }}
                   />
                   {isSelected && (
@@ -290,7 +291,7 @@ export default function SlotSelection({ theme }: Props) {
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: theme.primaryColor,
+                          color: "white",
                           fontSize: "32px",
                           fontWeight: "bold",
                           textShadow: "0 1px 3px rgba(0,0,0,0.5)",
