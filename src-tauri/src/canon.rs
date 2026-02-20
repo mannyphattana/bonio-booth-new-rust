@@ -17,10 +17,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Max pixel dimension (width or height) for captured photos.
-/// 3000px is enough for 600 DPI 4×6 prints while vastly reducing file size.
-const CAPTURE_MAX_DIMENSION: u32 = 3000;
+/// 3600px is enough for 600 DPI 4×6 prints while vastly reducing file size.
+const CAPTURE_MAX_DIMENSION: u32 = 3600;
 /// JPEG quality for re-encoded captures (1–100).
-const CAPTURE_JPEG_QUALITY: u8 = 92;
+const CAPTURE_JPEG_QUALITY: u8 = 95;
 
 #[cfg(target_os = "windows")]
 use crate::edsdk_sys::dynamic::*;
@@ -232,6 +232,18 @@ fn resize_captured_jpeg(raw_bytes: &[u8], max_dim: u32, quality: u8) -> Result<V
         .write_with_encoder(encoder)
         .map_err(|e| format!("JPEG encode error: {}", e))?;
 
+    // Patch JFIF header to set DPI to 350
+    if buf.len() >= 18 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF && buf[3] == 0xE0 {
+        if buf[6] == b'J' && buf[7] == b'F' && buf[8] == b'I' && buf[9] == b'F' && buf[10] == 0x00 {
+            let dpi: u16 = 350;
+            buf[13] = 1; // 1 = dots per inch
+            buf[14] = (dpi >> 8) as u8;
+            buf[15] = (dpi & 0xFF) as u8;
+            buf[16] = (dpi >> 8) as u8;
+            buf[17] = (dpi & 0xFF) as u8;
+        }
+    }
+
     info!(
         "[Canon] Resized capture: {}x{} -> {}x{}, {:.1} MB -> {:.1} MB",
         w, h,
@@ -373,6 +385,23 @@ unsafe extern "system" fn object_event_handler(
     }
 
     let file_size = dir_info.size;
+
+    // Reject RAW files — the image crate cannot decode CR2/CR3
+    // (this is a safety net; ImageQuality is forced to JPEG on connect and before each capture)
+    let filename = cstr_to_string(&dir_info.szFileName);
+    let ext = filename.rsplit('.').next().unwrap_or("").to_uppercase();
+    if matches!(ext.as_str(), "CR2" | "CR3" | "CR" | "NEF" | "ARW" | "RAF" | "RW2") {
+        warn!("[Canon] Received RAW file ({}), cancelling — please ensure camera is set to JPEG", filename);
+        if let Ok(mut cd) = capture_data.lock() {
+            cd.capture_error = Some(format!(
+                "Camera sent a RAW file ({}) — please change camera Image Quality to JPEG",
+                filename
+            ));
+            cd.capture_complete = true;
+        }
+        EdsDownloadCancel(dir_item);
+        return EDS_ERR_OK;
+    }
 
     // Create memory stream
     let mut stream: EdsStreamRef = ptr::null_mut();
@@ -723,6 +752,17 @@ pub fn canon_open_session() -> Result<bool, String> {
                 &save_to as *const _ as *const c_void,
             );
 
+            // Force JPEG Large Fine — prevents RAW files from being sent to host
+            // (overrides whatever the camera's physical dial is set to)
+            let img_quality: EdsUInt32 = kEdsImageQuality_LJF;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_ImageQuality,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &img_quality as *const _ as *const c_void,
+            );
+
             // Set capacity
             let capacity = EdsCapacity {
                 numberOfFreeClusters: 0x7FFFFFFF,
@@ -917,8 +957,9 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
             cd.capture_error = None;
         }
 
-        // Safety guard: ensure SaveTo=Host before every photo capture
-        // (prevents photos going to SD card if movie recording restore failed)
+        // Safety guard: ensure SaveTo=Host and JPEG quality before every photo capture
+        // (prevents photos going to SD card if movie recording restore failed;
+        //  also prevents RAW files if user changed the camera dial mid-session)
         unsafe {
             let save_to: EdsUInt32 = kEdsSaveTo_Host;
             let _ = EdsSetPropertyData(
@@ -927,6 +968,14 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
                 0,
                 std::mem::size_of::<EdsUInt32>() as u32,
                 &save_to as *const _ as *const c_void,
+            );
+            let img_quality: EdsUInt32 = kEdsImageQuality_LJF;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_ImageQuality,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &img_quality as *const _ as *const c_void,
             );
             let capacity = EdsCapacity {
                 numberOfFreeClusters: 0x7FFFFFFF,
@@ -1111,6 +1160,32 @@ pub fn canon_send_shutter() -> Result<CaptureResult, String> {
             cd.capture_error = None;
         }
 
+        // Force JPEG Large Fine before every shutter
+        unsafe {
+            let save_to: EdsUInt32 = kEdsSaveTo_Host;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_SaveTo,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &save_to as *const _ as *const c_void,
+            );
+            let img_quality: EdsUInt32 = kEdsImageQuality_LJF;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_ImageQuality,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &img_quality as *const _ as *const c_void,
+            );
+            let capacity = EdsCapacity {
+                numberOfFreeClusters: 0x7FFFFFFF,
+                bytesPerSector: 512,
+                reset: 1,
+            };
+            let _ = EdsSetCapacity(camera_ref, capacity);
+        }
+
         let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
 
         if take_error != EDS_ERR_OK {
@@ -1179,7 +1254,18 @@ pub fn canon_get_capture_result() -> Result<CaptureResult, String> {
             match image_data {
                 Some(data) => {
                     use base64::Engine;
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                    let processed = resize_captured_jpeg(
+                        &data, CAPTURE_MAX_DIMENSION, CAPTURE_JPEG_QUALITY,
+                    ).unwrap_or_else(|e| {
+                        warn!("[Canon] Resize failed in get_capture_result ({}), using original", e);
+                        data.clone()
+                    });
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&processed);
+                    info!(
+                        "[Canon] get_capture_result: original {:.1} MB -> resized {:.1} MB",
+                        data.len() as f64 / 1_048_576.0,
+                        processed.len() as f64 / 1_048_576.0,
+                    );
                     Ok(CaptureResult {
                         success: true,
                         error: None,

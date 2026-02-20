@@ -123,6 +123,9 @@ pub const kEdsSaveTo_Camera: EdsSaveTo = 1;
 pub const kEdsSaveTo_Host: EdsSaveTo = 2;
 pub const kEdsSaveTo_Both: EdsSaveTo = 3;
 
+// Image Quality values (EdsImageQuality enum)
+pub const kEdsImageQuality_LJF: EdsUInt32 = 0x0013ff0f; // JPEG Large Fine (forces JPEG even if camera dial is set to RAW)
+
 // =============================================================================
 // Constants - EVF Output Device
 // =============================================================================

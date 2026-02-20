@@ -196,6 +196,18 @@ pub async fn apply_lut_filter(
         .write_with_encoder(encoder)
         .map_err(|e| format!("Encode error: {}", e))?;
 
+    // Patch JFIF header to set DPI to 350
+    if buf.len() >= 18 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF && buf[3] == 0xE0 {
+        if buf[6] == b'J' && buf[7] == b'F' && buf[8] == b'I' && buf[9] == b'F' && buf[10] == 0x00 {
+            let dpi: u16 = 350;
+            buf[13] = 1; // 1 = dots per inch
+            buf[14] = (dpi >> 8) as u8;
+            buf[15] = (dpi & 0xFF) as u8;
+            buf[16] = (dpi >> 8) as u8;
+            buf[17] = (dpi & 0xFF) as u8;
+        }
+    }
+
     let result = format!("data:image/jpeg;base64,{}", STANDARD.encode(&buf));
     Ok(result)
 }
@@ -313,6 +325,20 @@ pub async fn compose_frame(
     let (orig_w, orig_h) = frame_img.dimensions();
     println!("[compose_frame] frame original: {}x{}, grid target: {}x{}", orig_w, orig_h, frame_width, frame_height);
 
+    // Upscale frame image to at least 3600px on the longer dimension for print quality
+    const MIN_OUTPUT_DIMENSION: u32 = 3600;
+    let max_dim = orig_w.max(orig_h);
+    let frame_img = if max_dim < MIN_OUTPUT_DIMENSION {
+        let scale = MIN_OUTPUT_DIMENSION as f64 / max_dim as f64;
+        let new_w = (orig_w as f64 * scale).round() as u32;
+        let new_h = (orig_h as f64 * scale).round() as u32;
+        println!("[compose_frame] upscaling frame to {}x{}", new_w, new_h);
+        frame_img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3)
+    } else {
+        frame_img
+    };
+    let (orig_w, orig_h) = frame_img.dimensions();
+
     // Use the frame image's natural dimensions as canvas size (matches reference project)
     // Slots are in grid coordinates — scale them to match the actual frame image size
     let scale_x = orig_w as f64 / frame_width as f64;
@@ -356,6 +382,18 @@ pub async fn compose_frame(
     DynamicImage::ImageRgba8(canvas)
         .write_with_encoder(encoder)
         .map_err(|e| format!("Encode error: {}", e))?;
+
+    // Patch JFIF header to set DPI to 350
+    if buf.len() >= 18 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF && buf[3] == 0xE0 {
+        if buf[6] == b'J' && buf[7] == b'F' && buf[8] == b'I' && buf[9] == b'F' && buf[10] == 0x00 {
+            let dpi: u16 = 350;
+            buf[13] = 1; // 1 = dots per inch
+            buf[14] = (dpi >> 8) as u8;
+            buf[15] = (dpi & 0xFF) as u8;
+            buf[16] = (dpi >> 8) as u8;
+            buf[17] = (dpi & 0xFF) as u8;
+        }
+    }
 
     Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&buf)))
 }

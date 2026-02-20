@@ -1,0 +1,1 @@
+﻿use image::codecs::jpeg::JpegEncoder; fn main() { let mut buf = Vec::new(); let img = image::RgbImage::new(10, 10); let mut encoder = JpegEncoder::new_with_quality(&mut buf, 90); encoder.encode_image(&img).unwrap(); println!("Header: {:02X?}", &buf[0..20]); }
