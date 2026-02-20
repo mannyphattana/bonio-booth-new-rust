@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import CameraConfigModal from "./CameraConfigModal";
 import PrinterConfigModal from "./PrinterConfigModal";
 import PaperPositionModal from "./PaperPositionModal";
@@ -25,12 +26,16 @@ export default function ContextMenu({
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [cameraStatus, setCameraStatus] = useState("");
   const [printerStatus, setPrinterStatus] = useState("");
+  const [appVersion, setAppVersion] = useState("");
 
   // Load status summaries when menu opens
   useEffect(() => {
     if (!open) return;
     setActiveModal(null);
     setShowResetConfirm(false);
+
+    // Get app version
+    getVersion().then(v => setAppVersion(v)).catch(console.error);
 
     // Camera status
     const cameraType = localStorage.getItem("cameraType") || "webcam";
@@ -106,7 +111,14 @@ export default function ContextMenu({
       }}
     >
       <div className="context-menu" onClick={(e) => e.stopPropagation()}>
-        <h3>⚙️ Settings</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>⚙️ Settings</h3>
+          {appVersion && (
+            <span style={{ fontSize: 12, color: "#888", background: "#222", padding: "2px 8px", borderRadius: 12 }}>
+              v{appVersion}
+            </span>
+          )}
+        </div>
 
         {/* 1. Camera Config */}
         <button
