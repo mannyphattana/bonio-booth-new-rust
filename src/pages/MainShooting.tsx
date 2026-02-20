@@ -686,7 +686,7 @@ export default function MainShooting({ theme, machineData }: Props) {
       const captureIndex = i;
 
       if (cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback) {
-        // Canon real movie: show photo now, download + trim video in background
+        // Canon real movie: show photo now, download + trim video
         const newCapture: Capture = {
           photo: photoData,
           video: "",
@@ -696,14 +696,15 @@ export default function MainShooting({ theme, machineData }: Props) {
         setCurrentCapture(i + 1);
         setPhase("preview");
 
-        // Background: finalize movie download → trim → patch capture
-        (async () => {
+        // Wait for movie download and trim BEFORE continuing to next capture
+        // This prevents overlapping EDSDK commands and missing videos
+        const downloadPromise = (async () => {
           try {
             let moviePath = await canonCamera.finalizeMovieDownload();
             console.log(`[Canon] Movie file: ${moviePath}`);
 
-            // Trim to keep only the last 3 seconds if countdown > 3
-            if (moviePath && cameraCountdown > 3) {
+            // Trim to keep only the last 3 seconds (to match the countdown and expected slot duration)
+            if (moviePath) {
               try {
                 const trimmedPath: string = await invoke("trim_video_keep_last", {
                   inputPath: moviePath,
@@ -731,9 +732,15 @@ export default function MainShooting({ theme, machineData }: Props) {
               console.log(`[Canon] Video path patched for capture ${captureIndex + 1}`);
             }
           } catch (err) {
-            console.error(`[Canon] Background movie finalize failed:`, err);
+            console.error(`[Canon] Movie finalize failed:`, err);
           }
         })();
+        
+        // Ensure we wait at least 1.5s total for the preview phase, but also wait for download to finish
+        await Promise.all([
+          downloadPromise,
+          new Promise((r) => setTimeout(r, 1500))
+        ]);
       } else if (cameraTypeRef.current === "canon") {
         // Canon fallback (frame recording)
         const frames = (window as any).__lastCanonFrames as string[] || [];
@@ -742,8 +749,10 @@ export default function MainShooting({ theme, machineData }: Props) {
 
         if (frames.length > 0) {
           console.log(`[Canon] Fallback: creating video from ${frames.length} frames...`);
-          createVideoFromFrames(frames)
-            .then(async (result) => {
+          
+          const processFallbackVideo = async () => {
+            try {
+              const result = await createVideoFromFrames(frames);
               console.log(`[Canon] Background video ready for capture ${captureIndex + 1}`);
               if (result.blob) {
                 const path = await saveVideoToTemp(result.blob, captureIndex);
@@ -759,10 +768,18 @@ export default function MainShooting({ theme, machineData }: Props) {
                   return updated;
                 });
               }
-            })
-            .catch((err) => {
+            } catch (err) {
               console.error(`[Canon] Background video processing failed:`, err);
-            });
+            }
+          };
+          
+          // Wait for video processing and 1.5s preview time
+          await Promise.all([
+            processFallbackVideo(),
+            new Promise((r) => setTimeout(r, 1500))
+          ]);
+        } else {
+          await new Promise((r) => setTimeout(r, 1500));
         }
         (window as any).__lastCanonFrames = null;
 
@@ -789,6 +806,9 @@ export default function MainShooting({ theme, machineData }: Props) {
         setCaptures((prev) => [...prev, newCapture]);
         setCurrentCapture(i + 1);
         setPhase("preview");
+        
+        // Ensure we wait at least 1.5s total for the preview phase
+        await new Promise((r) => setTimeout(r, 1500));
       }
 
       console.log(`[Capture] Capture ${i + 1}/${totalCaptures} completed`);
@@ -799,9 +819,6 @@ export default function MainShooting({ theme, machineData }: Props) {
         sequenceRunningRef.current = false;
         break;
       }
-
-      // 7. Wait 1.5s before next capture (camera stabilization, matching old project)
-      await new Promise((r) => setTimeout(r, 1500));
     }
   }, [totalCaptures, cameraCountdown, startRecording, waitForVideo, takePhoto, saveVideoToTemp, createVideoFromFrames]);
 
