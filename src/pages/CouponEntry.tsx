@@ -59,7 +59,7 @@ export default function CouponEntry({ theme }: Props) {
       const checkResult: any = await invoke("check_coupon", { code });
 
       if (!checkResult.success) {
-        setError("คูปองไม่ถูกต้องหรือหมดอายุ");
+        setError("คูปองไม่สามารถใช้งานได้");
         setLoading(false);
         return;
       }
@@ -70,6 +70,13 @@ export default function CouponEntry({ theme }: Props) {
         checkResult.data?.data?.couponCodeId ||
         checkResult.data?.couponCode?._id ||
         "";
+
+      // Validate that couponCodeId exists
+      if (!couponCodeId || couponCodeId.trim() === "") {
+        setError("คูปองไม่สามารถใช้งานได้");
+        setLoading(false);
+        return;
+      }
 
       console.log(
         "🎟️ [CouponEntry] Coupon check passed, couponCodeId:",
@@ -135,7 +142,10 @@ export default function CouponEntry({ theme }: Props) {
         });
       }
     } catch (err: any) {
-      setError(err?.toString() || "เกิดข้อผิดพลาด");
+      console.error("🎟️ [CouponEntry] Error:", err);
+      setError("คูปองไม่สามารถใช้งานได้");
+      setLoading(false);
+      return;
     }
 
     setLoading(false);
