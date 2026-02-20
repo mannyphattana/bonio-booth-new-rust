@@ -22,7 +22,8 @@ function CropOverlay({
   containerWidth: number;
   containerHeight: number;
 }) {
-  if (!containerWidth || !containerHeight || !videoWidth || !videoHeight) return null;
+  if (!containerWidth || !containerHeight || !videoWidth || !videoHeight)
+    return null;
 
   const slotRatio = slotWidth / slotHeight;
   const videoRatio = videoWidth / videoHeight;
@@ -141,15 +142,23 @@ export default function MainShooting({ theme, machineData }: Props) {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [, setCurrentCapture] = useState(0);
   const [countdown, setCountdown] = useState(-1);
-  const [phase, setPhase] = useState<"ready" | "countdown" | "flash" | "preview" | "done" | "preparing">("ready");
+  const [phase, setPhase] = useState<
+    "ready" | "countdown" | "flash" | "preview" | "done" | "preparing"
+  >("ready");
   const [isRecording, setIsRecording] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
   const [showGetReady, setShowGetReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraType, setCameraType] = useState("webcam");
   const [cameraReady, setCameraReady] = useState(false);
-  const [videoDimensions, setVideoDimensions] = useState({ width: 1920, height: 1080 });
-  const [containerDimensions, setContainerDimensions] = useState({ width: 800, height: 600 });
+  const [videoDimensions, setVideoDimensions] = useState({
+    width: 1920,
+    height: 1080,
+  });
+  const [containerDimensions, setContainerDimensions] = useState({
+    width: 800,
+    height: 600,
+  });
   const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
   useIdleTimeout();
 
@@ -163,7 +172,8 @@ export default function MainShooting({ theme, machineData }: Props) {
     };
     updateContainerDimensions();
     window.addEventListener("resize", updateContainerDimensions);
-    return () => window.removeEventListener("resize", updateContainerDimensions);
+    return () =>
+      window.removeEventListener("resize", updateContainerDimensions);
   }, []);
 
   // Initialize camera
@@ -223,11 +233,15 @@ export default function MainShooting({ theme, machineData }: Props) {
       lvOk = await canonCamera.startLiveView();
       if (lvOk) break;
       // Wait before retry — camera may need time after session open
-      console.warn(`[Canon] Live view attempt ${attempt} failed, retrying in ${attempt * 500}ms...`);
+      console.warn(
+        `[Canon] Live view attempt ${attempt} failed, retrying in ${attempt * 500}ms...`,
+      );
       await new Promise((r) => setTimeout(r, attempt * 500));
     }
     if (!lvOk) {
-      console.error("[Canon] Cannot start live view after 3 attempts — cleaning up");
+      console.error(
+        "[Canon] Cannot start live view after 3 attempts — cleaning up",
+      );
       // Cleanup so the camera isn't left in a half-open state
       await canonCamera.cleanup();
       setCameraError("Cannot start Canon live view");
@@ -339,7 +353,9 @@ export default function MainShooting({ theme, machineData }: Props) {
           console.log("[Canon] Movie recording started via EDSDK");
         } else {
           // Fallback: accumulate live view frames
-          console.warn("[Canon] Movie recording failed, falling back to frame capture");
+          console.warn(
+            "[Canon] Movie recording failed, falling back to frame capture",
+          );
           canonCamera.startFrameRecording();
           setIsRecording(true);
           (window as any).__canonMovieFallback = true;
@@ -367,7 +383,7 @@ export default function MainShooting({ theme, machineData }: Props) {
     (window as any).__lastVideoReady = false;
     (window as any).__lastVideoUrl = "";
     (window as any).__lastVideoBlob = null;
-    
+
     recorder.startRecording();
     mediaRecorderRef.current = recorder;
     isRecordingRef.current = true;
@@ -375,7 +391,10 @@ export default function MainShooting({ theme, machineData }: Props) {
   }, []);
 
   // Wait for video blob to be ready after stopping recording
-  const waitForVideo = useCallback((): Promise<{ url: string; blob: Blob | null }> => {
+  const waitForVideo = useCallback((): Promise<{
+    url: string;
+    blob: Blob | null;
+  }> => {
     if (cameraTypeRef.current === "canon") {
       // Canon: stop frame recording and create video from accumulated frames
       const recording = canonCamera.stopFrameRecording();
@@ -391,14 +410,17 @@ export default function MainShooting({ theme, machineData }: Props) {
 
     // Webcam: standard RecordRTC flow
     return new Promise((resolve) => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.getState() !== "inactive") {
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.getState() !== "inactive"
+      ) {
         mediaRecorderRef.current.stopRecording(() => {
           const blob = mediaRecorderRef.current!.getBlob();
           const url = URL.createObjectURL(blob);
-          
+
           isRecordingRef.current = false;
           setIsRecording(false);
-          
+
           resolve({ url, blob });
         });
       } else {
@@ -446,13 +468,21 @@ export default function MainShooting({ theme, machineData }: Props) {
   // e.g. 60 frames → 20fps × 3s, 45 frames → 15fps × 3s, 20 frames → 6.67fps × 3s
   // This guarantees every slot has identical video duration for clean looping.
   const createVideoFromFrames = useCallback(
-    async (frames: string[], targetDurationSec: number = 3): Promise<{ url: string; blob: Blob | null }> => {
+    async (
+      frames: string[],
+      targetDurationSec: number = 3,
+    ): Promise<{ url: string; blob: Blob | null }> => {
       if (frames.length === 0) return { url: "", blob: null };
 
       // Calculate fps dynamically: frames / target duration
       // Clamp between 5 (minimum smooth) and 30 (maximum practical)
-      const dynamicFps = Math.max(5, Math.min(30, frames.length / targetDurationSec));
-      console.log(`[createVideoFromFrames] ${frames.length} frames / ${targetDurationSec}s = ${dynamicFps.toFixed(2)}fps`);
+      const dynamicFps = Math.max(
+        5,
+        Math.min(30, frames.length / targetDurationSec),
+      );
+      console.log(
+        `[createVideoFromFrames] ${frames.length} frames / ${targetDurationSec}s = ${dynamicFps.toFixed(2)}fps`,
+      );
 
       return new Promise((resolve) => {
         const offCanvas = document.createElement("canvas");
@@ -460,7 +490,10 @@ export default function MainShooting({ theme, machineData }: Props) {
         offCanvas.height = 1280;
         // alpha:false → opaque canvas, avoids premultiplied-alpha color shift
         // colorSpace:'srgb' → ensures consistent sRGB color matching the source JPEGs
-        const ctx = offCanvas.getContext("2d", { alpha: false, colorSpace: "srgb" });
+        const ctx = offCanvas.getContext("2d", {
+          alpha: false,
+          colorSpace: "srgb",
+        });
         if (!ctx) {
           resolve({ url: "", blob: null });
           return;
@@ -470,7 +503,10 @@ export default function MainShooting({ theme, machineData }: Props) {
         const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
           ? "video/webm;codecs=vp9"
           : "video/webm";
-        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 8000000,
+        });
         const chunks: Blob[] = [];
 
         recorder.ondataavailable = (e) => {
@@ -502,27 +538,33 @@ export default function MainShooting({ theme, machineData }: Props) {
         }, 1000 / dynamicFps);
       });
     },
-    []
+    [],
   );
 
   // Save video blob to temp file for FFmpeg processing
-  const saveVideoToTemp = useCallback(async (blob: Blob, index: number): Promise<string> => {
-    try {
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      const base64 = btoa(
-        uint8Array.reduce((data, byte) => data + String.fromCharCode(byte), "")
-      );
-      const path: string = await invoke("save_temp_video", {
-        videoDataBase64: base64,
-        filename: `capture_${index}.webm`,
-      });
-      return path;
-    } catch (err) {
-      console.error("Failed to save video to temp:", err);
-      return "";
-    }
-  }, []);
+  const saveVideoToTemp = useCallback(
+    async (blob: Blob, index: number): Promise<string> => {
+      try {
+        const arrayBuffer = await blob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        const base64 = btoa(
+          uint8Array.reduce(
+            (data, byte) => data + String.fromCharCode(byte),
+            "",
+          ),
+        );
+        const path: string = await invoke("save_temp_video", {
+          videoDataBase64: base64,
+          filename: `capture_${index}.webm`,
+        });
+        return path;
+      } catch (err) {
+        console.error("Failed to save video to temp:", err);
+        return "";
+      }
+    },
+    [],
+  );
 
   // Start shooting sequence - optimized flow matching old project
   // Flow: Get Ready → [countdown → stopRecording → takePhoto → flash → bg video → 1.5s wait] × N
@@ -554,7 +596,9 @@ export default function MainShooting({ theme, machineData }: Props) {
           if (fp !== lastFingerprint) {
             freshCount++;
             lastFingerprint = fp;
-            console.log(`[Canon] Fresh frame ${freshCount}/${REQUIRED_FRESH} after ${elapsed}ms`);
+            console.log(
+              `[Canon] Fresh frame ${freshCount}/${REQUIRED_FRESH} after ${elapsed}ms`,
+            );
           }
         }
         await new Promise((r) => setTimeout(r, POLL_MS));
@@ -563,9 +607,13 @@ export default function MainShooting({ theme, machineData }: Props) {
 
       setShowGetReady(false);
       if (freshCount >= REQUIRED_FRESH) {
-        console.log(`[Canon] Camera ready — ${freshCount} fresh frames in ${elapsed}ms`);
+        console.log(
+          `[Canon] Camera ready — ${freshCount} fresh frames in ${elapsed}ms`,
+        );
       } else {
-        console.warn(`[Canon] Fresh frame timeout after ${elapsed}ms (got ${freshCount}/${REQUIRED_FRESH}) — proceeding anyway`);
+        console.warn(
+          `[Canon] Fresh frame timeout after ${elapsed}ms (got ${freshCount}/${REQUIRED_FRESH}) — proceeding anyway`,
+        );
       }
     } else {
       // Webcam: fixed warmup delay for exposure/white balance
@@ -585,12 +633,14 @@ export default function MainShooting({ theme, machineData }: Props) {
 
       // --- Canon: start recording BEFORE countdown ---
       if (cameraTypeRef.current === "canon") {
-        console.log(`[Canon] Starting recording before countdown for capture ${i + 1}`);
+        console.log(
+          `[Canon] Starting recording before countdown for capture ${i + 1}`,
+        );
         setPhase("preparing"); // show "Processing..." overlay
-        
+
         // Start recording
         const ok = await canonCamera.startMovieRecording();
-        
+
         // Wait 1.5s to ensure camera completely switches to video mode and settles
         // This prevents the "freeze" or mode-switch OSD from appearing at the start of countdown
         await new Promise((r) => setTimeout(r, 1500));
@@ -599,7 +649,9 @@ export default function MainShooting({ theme, machineData }: Props) {
           isRecordingRef.current = true;
           setIsRecording(true);
         } else {
-          console.warn("[Canon] Movie recording failed, falling back to frame capture");
+          console.warn(
+            "[Canon] Movie recording failed, falling back to frame capture",
+          );
           canonCamera.startFrameRecording();
           isRecordingRef.current = true;
           setIsRecording(true);
@@ -628,7 +680,11 @@ export default function MainShooting({ theme, machineData }: Props) {
           // Webcam only: start recording at 3 seconds remaining
           if (cameraTypeRef.current !== "canon") {
             const recordStartAt = Math.min(cameraCountdown, 3);
-            if (currentCount === recordStartAt && cameraCountdown > 3 && !isRecordingRef.current) {
+            if (
+              currentCount === recordStartAt &&
+              cameraCountdown > 3 &&
+              !isRecordingRef.current
+            ) {
               startRecording();
             }
           }
@@ -643,7 +699,10 @@ export default function MainShooting({ theme, machineData }: Props) {
       // --- Countdown reached 0 → capture immediately ---
 
       // 1. Stop recording
-      let recordingResult: { url: string; blob: Blob | null } = { url: "", blob: null };
+      let recordingResult: { url: string; blob: Blob | null } = {
+        url: "",
+        blob: null,
+      };
 
       if (cameraTypeRef.current === "canon") {
         if ((window as any).__canonMovieFallback) {
@@ -669,7 +728,10 @@ export default function MainShooting({ theme, machineData }: Props) {
       //    then stops recording internally — zero mode-switch delay)
       //    Fallback: normal takePhoto
       let photoData: string;
-      if (cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback) {
+      if (
+        cameraTypeRef.current === "canon" &&
+        !(window as any).__canonMovieFallback
+      ) {
         photoData = await canonCamera.takePhotoDuringRecording();
       } else {
         photoData = await takePhoto();
@@ -706,11 +768,14 @@ export default function MainShooting({ theme, machineData }: Props) {
             // Trim to keep only the last 3 seconds (to match the countdown and expected slot duration)
             if (moviePath) {
               try {
-                const trimmedPath: string = await invoke("trim_video_keep_last", {
-                  inputPath: moviePath,
-                  keepSeconds: 3,
-                  outputFilename: `trimmed_capture_${captureIndex}.mp4`,
-                });
+                const trimmedPath: string = await invoke(
+                  "trim_video_keep_last",
+                  {
+                    inputPath: moviePath,
+                    keepSeconds: 3,
+                    outputFilename: `trimmed_capture_${captureIndex}.mp4`,
+                  },
+                );
                 console.log(`[Canon] Trimmed to last 3s: ${trimmedPath}`);
                 moviePath = trimmedPath;
               } catch (err) {
@@ -729,7 +794,9 @@ export default function MainShooting({ theme, machineData }: Props) {
                 }
                 return updated;
               });
-              console.log(`[Canon] Video path patched for capture ${captureIndex + 1}`);
+              console.log(
+                `[Canon] Video path patched for capture ${captureIndex + 1}`,
+              );
             }
           } catch (err) {
             console.error(`[Canon] Movie finalize failed:`, err);
@@ -743,7 +810,7 @@ export default function MainShooting({ theme, machineData }: Props) {
         ]);
       } else if (cameraTypeRef.current === "canon") {
         // Canon fallback (frame recording)
-        const frames = (window as any).__lastCanonFrames as string[] || [];
+        const frames = ((window as any).__lastCanonFrames as string[]) || [];
         let videoUrl = "";
         let videoPath = "";
 
@@ -820,7 +887,15 @@ export default function MainShooting({ theme, machineData }: Props) {
         break;
       }
     }
-  }, [totalCaptures, cameraCountdown, startRecording, waitForVideo, takePhoto, saveVideoToTemp, createVideoFromFrames]);
+  }, [
+    totalCaptures,
+    cameraCountdown,
+    startRecording,
+    waitForVideo,
+    takePhoto,
+    saveVideoToTemp,
+    createVideoFromFrames,
+  ]);
 
   // Auto-start after camera is initialized (single trigger, no double-fire)
   // No artificial delay — Get Ready screen handles the camera warm-up
@@ -846,10 +921,11 @@ export default function MainShooting({ theme, machineData }: Props) {
     if (phase === "done" && captures.length >= totalCaptures) {
       // Check if we need to wait for videos
       const isCanonMovie =
-        cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback;
-      
+        cameraTypeRef.current === "canon" &&
+        !(window as any).__canonMovieFallback;
+
       const allVideosReady = captures.every(
-        (c) => c.videoPath && c.videoPath.length > 0
+        (c) => c.videoPath && c.videoPath.length > 0,
       );
 
       // If waiting for videos, show a persistent "Processing..." overlay
@@ -867,7 +943,9 @@ export default function MainShooting({ theme, machineData }: Props) {
         }, 500);
         return () => clearTimeout(delay);
       } else {
-        console.log(`[MainShooting] Waiting for videos... (${captures.filter(c => c.videoPath).length}/${totalCaptures})`);
+        console.log(
+          `[MainShooting] Waiting for videos... (${captures.filter((c) => c.videoPath).length}/${totalCaptures})`,
+        );
       }
     }
   }, [phase, captures, totalCaptures, videosReadyTimeout, navigate, state]);
@@ -901,14 +979,17 @@ export default function MainShooting({ theme, machineData }: Props) {
   const getCurrentSlot = (): FrameSlot | null => {
     if (!slots.length) return null;
     const currentIndex = captures.length;
-    // For extra captures (beyond slot count), use slot[0]
-    if (currentIndex >= slots.length) return slots[0];
+    // For extra captures (beyond slot count), use the last slot
+    if (currentIndex >= slots.length) return slots[slots.length - 1];
     return slots[currentIndex];
   };
 
   if (cameraError) {
     return (
-      <div className="page-container" style={{ backgroundImage: `url(${theme.backgroundSecond})` }}>
+      <div
+        className="page-container"
+        style={{ backgroundImage: `url(${theme.backgroundSecond})` }}
+      >
         <div className="error-modal-overlay">
           <div className="error-modal">
             <h2>⚠️ Camera Error</h2>
@@ -924,318 +1005,349 @@ export default function MainShooting({ theme, machineData }: Props) {
 
   return (
     <div
-      className="page-container"
+      className="page-container page-space-between"
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
-        justifyContent: "flex-start",
+        height: "100vh",
         overflow: "hidden",
       }}
     >
-      {/* Title */}
-      <div style={{ textAlign: "center", marginTop: "160px", zIndex: 5 }}>
-        <h1 style={{ fontSize: "2.5rem", fontWeight: 700, color: theme.fontColor, margin: "0 0 4px" }}>
-          มองกล้อง!
-        </h1>
-        <p style={{ fontSize: "1.2rem", fontWeight: 500, color: theme.fontColor, margin: 0, letterSpacing: 0.5, textTransform: "uppercase" }}>
-          LET'S TAKE A PHOTO
-        </p>
-      </div>
-
-      {/* Camera view */}
-      <div
-        style={{
-          flex: 1,
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "16px 24px",
-          minHeight: 0,
-        }}
-      >
-        <div
-          ref={cameraContainerRef}
-          style={{
-            position: "relative",
-            width: "85%",
-            maxHeight: "60vh",
-            borderRadius: 20,
-            overflow: "hidden",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-            background: "rgba(0,0,0,0.2)",
-            aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
-          }}
-        >
-          {/* Webcam: <video> element */}
-          {cameraType === "webcam" && (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: "scaleX(-1)", // Mirror
-                borderRadius: 20,
-              }}
-            />
-          )}
-
-          {/* Canon: <img> element with live view frames */}
-          {cameraType === "canon" && canonCamera.liveViewFrame && (
-            <img
-              ref={canonLiveViewRef}
-              src={canonCamera.liveViewFrame}
-              alt="Canon Live View"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: "scaleX(-1)", // Mirror
-                borderRadius: 20,
-              }}
-            />
-          )}
-
-          {/* Canon waiting state */}
-          {cameraType === "canon" && !canonCamera.liveViewFrame && cameraReady && (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "rgba(255,255,255,0.6)",
-                fontSize: 18,
-              }}
-            >
-              Waiting for Canon Live View...
-            </div>
-          )}
-
-          {/* Get Ready overlay — shown while waiting for camera to settle */}
-          {showGetReady && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0,0,0,0.4)",
-                zIndex: 25,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 48,
-                  fontWeight: 800,
-                  color: "#fff",
-                  textShadow: "0 4px 20px rgba(0,0,0,0.5)",
-                  marginBottom: 12,
-                }}
-              >
-                เตรียมตัว!
-              </div>
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 500,
-                  color: "rgba(255,255,255,0.8)",
-                  textShadow: "0 2px 10px rgba(0,0,0,0.4)",
-                  textTransform: "uppercase",
-                  letterSpacing: 2,
-                }}
-              >
-                GET READY
-              </div>
-            </div>
-          )}
-
-          {/* CropOverlay guideline */}
-          {currentSlot && cameraReady && (
-            <CropOverlay
-              slotWidth={currentSlot.width}
-              slotHeight={currentSlot.height}
-              videoWidth={videoDimensions.width}
-              videoHeight={videoDimensions.height}
-              containerWidth={containerDimensions.width}
-              containerHeight={containerDimensions.height}
-            />
-          )}
-
-          {/* Countdown overlay */}
-          {phase === "countdown" && countdown > 0 && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0,0,0,0.15)",
-                zIndex: 20,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 120,
-                  fontWeight: 900,
-                  color: "#fff",
-                  textShadow: "0 4px 20px rgba(0,0,0,0.5)",
-                  animation: "countdownPulse 1s ease-in-out infinite",
-                }}
-              >
-                {countdown}
-              </div>
-            </div>
-          )}
-          
-          {/* Preparing / Processing overlay */}
-          {phase === "preparing" && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0,0,0,0.7)",
-                zIndex: 40,
-                color: "white",
-              }}
-            >
-              <div className="loading-spinner" style={{ marginBottom: 20 }}></div>
-              <div style={{ fontSize: 24, fontWeight: 600 }}>กำลังประมวลผล...</div>
-              <div style={{ fontSize: 16, marginTop: 8, opacity: 0.8 }}>Starting Video Mode</div>
-            </div>
-          )}
-
-          {/* Recording indicator */}
-          {isRecording && (
-            <div
-              style={{
-                position: "absolute",
-                top: 16,
-                left: 16,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                background: "rgba(0,0,0,0.5)",
-                padding: "6px 12px",
-                borderRadius: 20,
-                zIndex: 15,
-              }}
-            >
-              <div
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  background: "#e94560",
-                  animation: "blink 1s infinite",
-                }}
-              />
-              <span style={{ fontSize: 12, color: "#fff" }}>REC</span>
-            </div>
-          )}
-
-          {/* Flash effect */}
-          {showFlash && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: "#fff",
-                animation: "flashAnim 0.3s ease-out forwards",
-                zIndex: 30,
-              }}
-            />
-          )}
-
-          {/* Capture count */}
-          <div
-            style={{
-              position: "absolute",
-              top: 16,
-              right: 16,
-              background: "rgba(0,0,0,0.6)",
-              padding: "8px 16px",
-              borderRadius: 20,
-              fontSize: 16,
-              fontWeight: 600,
-              color: "#fff",
-              zIndex: 15,
-            }}
-          >
-            {captures.length} / {totalCaptures}
+      <div className="page-main-content" style={{ marginTop: "60px" }}>
+        {/* Row 1: Title */}
+        <div className="page-row-top">
+          <div className="page-title-section">
+            <h1 className="title-thai" style={{ color: theme.fontColor }}>
+              มองกล้อง!
+            </h1>
+            <p className="title-english" style={{ color: theme.fontColor }}>
+              LET'S TAKE A PHOTO
+            </p>
           </div>
         </div>
-      </div>
 
-      {/* Preview thumbnails at bottom center */}
-      <div
-        style={{
-          width: "100%",
-          padding: "12px 24px 60px",
-          display: "flex",
-          justifyContent: "center",
-          flexShrink: 0,
-          zIndex: 5,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            overflowX: "auto",
-            padding: "4px 8px",
-            justifyContent: "center",
-            width: "100%",
-            maxWidth: 600,
-          }}
-        >
-          {Array.from({ length: totalCaptures }).map((_, idx) => {
-            const slot = slots[0];
-            const aspectRatio = slot ? `${slot.width} / ${slot.height}` : "3 / 4";
-            return (
+        {/* Row 2: Camera view */}
+        <div className="page-row-body">
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px 24px",
+            }}
+          >
+            <div
+              ref={cameraContainerRef}
+              style={{
+                position: "relative",
+                width: "100%",
+                maxHeight: "60vh",
+                borderRadius: 20,
+                overflow: "hidden",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+                background: "rgba(0,0,0,0.2)",
+                aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
+              }}
+            >
+              {/* Webcam: <video> element */}
+              {cameraType === "webcam" && (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    transform: "scaleX(-1)", // Mirror
+                    borderRadius: 20,
+                  }}
+                />
+              )}
+
+              {/* Canon: <img> element with live view frames */}
+              {cameraType === "canon" && canonCamera.liveViewFrame && (
+                <img
+                  ref={canonLiveViewRef}
+                  src={canonCamera.liveViewFrame}
+                  alt="Canon Live View"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    transform: "scaleX(-1)", // Mirror
+                    borderRadius: 20,
+                  }}
+                />
+              )}
+
+              {/* Canon waiting state */}
+              {cameraType === "canon" &&
+                !canonCamera.liveViewFrame &&
+                cameraReady && (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "rgba(255,255,255,0.6)",
+                      fontSize: 18,
+                    }}
+                  >
+                    Waiting for Canon Live View...
+                  </div>
+                )}
+
+              {/* Get Ready overlay — shown while waiting for camera to settle */}
+              {showGetReady && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(0,0,0,0.4)",
+                    zIndex: 25,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 48,
+                      fontWeight: 800,
+                      color: "#fff",
+                      textShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                      marginBottom: 12,
+                    }}
+                  >
+                    เตรียมตัว!
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 500,
+                      color: "rgba(255,255,255,0.8)",
+                      textShadow: "0 2px 10px rgba(0,0,0,0.4)",
+                      textTransform: "uppercase",
+                      letterSpacing: 2,
+                    }}
+                  >
+                    GET READY
+                  </div>
+                </div>
+              )}
+
+              {/* CropOverlay guideline */}
+              {currentSlot && cameraReady && (
+                <CropOverlay
+                  slotWidth={currentSlot.width}
+                  slotHeight={currentSlot.height}
+                  videoWidth={videoDimensions.width}
+                  videoHeight={videoDimensions.height}
+                  containerWidth={containerDimensions.width}
+                  containerHeight={containerDimensions.height}
+                />
+              )}
+
+              {/* Countdown overlay */}
+              {phase === "countdown" && countdown > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(0,0,0,0.15)",
+                    zIndex: 20,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 120,
+                      fontWeight: 900,
+                      color: "#fff",
+                      textShadow: "0 4px 20px rgba(0,0,0,0.5)",
+                      animation: "countdownPulse 1s ease-in-out infinite",
+                    }}
+                  >
+                    {countdown}
+                  </div>
+                </div>
+              )}
+
+              {/* Preparing / Processing overlay */}
+              {phase === "preparing" && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(0,0,0,0.7)",
+                    zIndex: 40,
+                    color: "white",
+                  }}
+                >
+                  <div
+                    className="loading-spinner"
+                    style={{ marginBottom: 20 }}
+                  ></div>
+                  <div style={{ fontSize: 24, fontWeight: 600 }}>
+                    กำลังประมวลผล...
+                  </div>
+                  <div style={{ fontSize: 16, marginTop: 8, opacity: 0.8 }}>
+                    Starting Video Mode
+                  </div>
+                </div>
+              )}
+
+              {/* Recording indicator */}
+              {isRecording && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 16,
+                    left: 16,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "rgba(0,0,0,0.5)",
+                    padding: "6px 12px",
+                    borderRadius: 20,
+                    zIndex: 15,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: "#e94560",
+                      animation: "blink 1s infinite",
+                    }}
+                  />
+                  <span style={{ fontSize: 12, color: "#fff" }}>REC</span>
+                </div>
+              )}
+
+              {/* Flash effect */}
+              {showFlash && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "#fff",
+                    animation: "flashAnim 0.3s ease-out forwards",
+                    zIndex: 30,
+                  }}
+                />
+              )}
+
+              {/* Capture count */}
               <div
-                key={idx}
                 style={{
-                  width: `calc(25% - 10px)`,
-                  maxWidth: 100,
-                  aspectRatio,
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  flexShrink: 0,
-                  border: captures[idx]
-                    ? "2px solid rgba(255,255,255,0.6)"
-                    : "2px dashed rgba(255,255,255,0.2)",
-                  background: captures[idx] ? "transparent" : "rgba(0,0,0,0.2)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  position: "absolute",
+                  top: 16,
+                  right: 16,
+                  background: "rgba(0,0,0,0.6)",
+                  padding: "8px 16px",
+                  borderRadius: 20,
+                  fontSize: 16,
+                  fontWeight: 600,
+                  color: "#fff",
+                  zIndex: 15,
                 }}
               >
-                {captures[idx] ? (
-                  <img
-                    src={captures[idx].photo}
-                    alt={`Capture ${idx + 1}`}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 18, fontWeight: 600 }}>
-                    {idx + 1}
-                  </span>
-                )}
+                {captures.length} / {totalCaptures}
               </div>
-            );
-          })}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: Preview thumbnails start */}
+        <div className="page-row-footer">
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              padding: "4px 8px",
+              justifyContent: "center",
+              width: "100%",
+            }}
+          >
+            {Array.from({ length: totalCaptures }).map((_, idx) => {
+              const slot =
+                idx >= slots.length ? slots[slots.length - 1] : slots[idx];
+              const maxDim = 160;
+              let tw = 0;
+              let th = 0;
+              if (slot) {
+                if (slot.width >= slot.height) {
+                  tw = maxDim;
+                  th = (slot.height / slot.width) * maxDim;
+                } else {
+                  th = maxDim;
+                  tw = (slot.width / slot.height) * maxDim;
+                }
+              } else {
+                th = maxDim;
+                tw = (3 / 4) * maxDim;
+              }
+
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    width: tw,
+                    height: th,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    flexShrink: 0,
+                    border: captures[idx]
+                      ? "2px solid rgba(255,255,255,0.6)"
+                      : "2px dashed rgba(255,255,255,0.2)",
+                    background: captures[idx]
+                      ? "transparent"
+                      : "rgba(0,0,0,0.2)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {captures[idx] ? (
+                    <img
+                      src={captures[idx].photo}
+                      alt={`Capture ${idx + 1}`}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        color: "rgba(255,255,255,0.3)",
+                        fontSize: 18,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {idx + 1}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

@@ -200,11 +200,15 @@ export default function FrameSelection({ theme }: Props) {
                           cursor: "pointer",
                           overflow: "hidden",
                           transition: "all 0.2s",
-                          backgroundColor: "white",
+                          backgroundColor: "#EEE",
                           boxShadow: isSelected
-                            ? "0 8px 20px rgba(0,0,0,0.25)"
-                            : "0 4px 12px rgba(0,0,0,0.1)",
+                            ? "0 8px 10px rgba(0,0,0,0.25)"
+                            : "0 4px 5px rgba(0,0,0,0.1)",
                           lineHeight: 0, // ป้องกัน inline gap ใต้รูป
+                          border: isSelected
+                            ? `3px solid ${theme.primaryColor}`
+                            : "3px solid transparent",
+                          borderRadius: "5px",
                         }}
                       >
                         <img
@@ -267,7 +271,7 @@ export default function FrameSelection({ theme }: Props) {
                   <div
                     style={{
                       display: "inline-block",
-                      backgroundColor: "white",
+                      backgroundColor: "#EEE",
                       overflow: "hidden",
                       lineHeight: 0,
                       boxShadow: "0 10px 30px rgba(0,0,0,0.2)",

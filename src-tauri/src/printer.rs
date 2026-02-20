@@ -342,6 +342,24 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
 
         SetStretchBltMode(hdc, HALFTONE);
 
+        // Preserve image aspect ratio: fit image inside page and center (no stretch distortion).
+        // Previously we stretched to (page_w, page_h) which distorted ratio when page aspect != image aspect.
+        let page_w_f = page_w as f64;
+        let page_h_f = page_h as f64;
+        let img_w_f = img_w as f64;
+        let img_h_f = img_h as f64;
+        let scale_w = page_w_f / img_w_f;
+        let scale_h = page_h_f / img_h_f;
+        let scale = scale_w.min(scale_h); // same scale on both axes → ratio preserved
+        let dst_w = (img_w_f * scale).round() as i32;
+        let dst_h = (img_h_f * scale).round() as i32;
+        let dst_x = (page_w - dst_w) / 2;
+        let dst_y = (page_h - dst_h) / 2;
+        log::info!(
+            "[Printer] Aspect-preserved fit: page {}x{}, image {}x{}, scale {:.4}, draw at ({},{}) size {}x{}",
+            page_w, page_h, img_w, img_h, scale, dst_x, dst_y, dst_w, dst_h
+        );
+
         let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -361,7 +379,7 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
 
         StretchDIBits(
             hdc,
-            0, 0, page_w, page_h,
+            dst_x, dst_y, dst_w, dst_h,
             0, 0, img_w as i32, img_h as i32,
             Some(bgra.as_ptr() as *const _),
             &bmi,
@@ -674,7 +692,7 @@ pub async fn print_photo(
 
     // Load original image (auto-detect format from content, not extension)
     let img = {
-        let reader = image::io::Reader::open(&image_path)
+        let reader = image::ImageReader::open(&image_path)
             .map_err(|e| format!("Failed to open image file: {}", e))?
             .with_guessed_format()
             .map_err(|e| format!("Failed to guess image format: {}", e))?;

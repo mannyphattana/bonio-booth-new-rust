@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import type { ThemeData, MachineData, Capture, FrameData } from "../App";
+import type { ThemeData, MachineData, Capture } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { FILTERS, type FilterConfig } from "../config/filters";
 import Countdown from "../components/Countdown";
@@ -19,22 +19,6 @@ export default function ApplyFilter({ theme }: Props) {
 
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const firstPhoto = frameCaptures[0]?.photo || "";
-
-  const selectedFrame: FrameData = state.selectedFrame;
-
-  const getFrameDimensions = () => {
-    if (selectedFrame?.imageSize) {
-      const parts = selectedFrame.imageSize.split("x");
-      if (parts.length === 2) {
-        const w = parseInt(parts[0], 10);
-        const h = parseInt(parts[1], 10);
-        if (w > 0 && h > 0) return { w, h };
-      }
-    }
-    return { w: 3, h: 4 };
-  };
-  const { w: frameW, h: frameH } = getFrameDimensions();
-  const frameAspectRatioCSS = `${frameW} / ${frameH}`;
 
   const [selectedFilter, setSelectedFilter] = useState<FilterConfig>(
     FILTERS[0],
@@ -370,7 +354,6 @@ export default function ApplyFilter({ theme }: Props) {
                       style={{
                         boxSizing: "border-box", // สำคัญ: รวม border และ padding ในขนาด
                         width: "110px",
-                        aspectRatio: frameAspectRatioCSS,
                         borderRadius: "12px",
                         overflow: "hidden",
                         position: "relative",
@@ -398,8 +381,8 @@ export default function ApplyFilter({ theme }: Props) {
                       {/* ส่วนรูปภาพ */}
                       <div
                         style={{
-                          flex: 1,
                           width: "100%",
+                          aspectRatio: "1 / 1",
                           position: "relative",
                           backgroundColor: "#f0f0f0",
                           borderRadius: "6px",

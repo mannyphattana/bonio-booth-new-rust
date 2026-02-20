@@ -7,7 +7,13 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build": "tauri build",
+    "tauri:build:debug": "tauri build --debug",
+    "build:only": "npm run build && tauri build -- --no-bundle",
+    "build:app": "npm run build && npm run tauri:build",
+    "run:release": "node scripts/run-release.js",
+    "release": "npm run build && npm run tauri:build"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
