@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
@@ -19,6 +19,27 @@ export default function TermsAndServices({ theme }: Props) {
   const handleCountdownComplete = useCallback(() => {
     handleBack();
   }, [handleBack]);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startY, setStartY] = useState(0);
+  const [scrollTopPos, setScrollTopPos] = useState(0);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (!scrollContainerRef.current) return;
+    setIsDragging(true);
+    setStartY(e.pageY - scrollContainerRef.current.offsetTop);
+    setScrollTopPos(scrollContainerRef.current.scrollTop);
+  };
+  const onMouseLeave = () => setIsDragging(false);
+  const onMouseUp = () => setIsDragging(false);
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !scrollContainerRef.current) return;
+    e.preventDefault();
+    const y = e.pageY - scrollContainerRef.current.offsetTop;
+    const walk = (y - startY) * 2;
+    scrollContainerRef.current.scrollTop = scrollTopPos - walk;
+  };
 
   // Inline styles based on legacy CSS but using theme props
   const containerStyle: React.CSSProperties = {
@@ -118,7 +139,19 @@ export default function TermsAndServices({ theme }: Props) {
         visible={COUNTDOWN.TERMS_AND_SERVICES.VISIBLE}
       />
 
-      <div style={contentWrapperStyle}>
+      <div
+        style={{
+          ...contentWrapperStyle,
+          cursor: isDragging ? "grabbing" : "grab",
+          userSelect: "none",
+        }}
+        ref={scrollContainerRef}
+        onMouseDown={onMouseDown}
+        onMouseLeave={onMouseLeave}
+        onMouseUp={onMouseUp}
+        onMouseMove={onMouseMove}
+        className="hide-scrollbar"
+      >
         <div style={contentStyle}>
           <h1 style={titleStyle}>
             ข้อกําหนดและเงื่อนไขการใช้บริการแอปพลิเคชัน “ตู้ถ่ายรูป Bonio Booth”
@@ -647,6 +680,10 @@ export default function TermsAndServices({ theme }: Props) {
           </div>
         </div>
       </div>
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
     </div>
   );
 }

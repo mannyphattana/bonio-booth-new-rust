@@ -969,8 +969,8 @@ export default function MainShooting({ theme, machineData }: Props) {
   const getCurrentSlot = (): FrameSlot | null => {
     if (!slots.length) return null;
     const currentIndex = captures.length;
-    // For extra captures (beyond slot count), use slot[0]
-    if (currentIndex >= slots.length) return slots[0];
+    // For extra captures (beyond slot count), use the last slot
+    if (currentIndex >= slots.length) return slots[slots.length - 1];
     return slots[currentIndex];
   };
 
@@ -1275,17 +1275,30 @@ export default function MainShooting({ theme, machineData }: Props) {
             }}
           >
             {Array.from({ length: totalCaptures }).map((_, idx) => {
-              const slot = slots[0];
-              const aspectRatio = slot
-                ? `${slot.width} / ${slot.height}`
-                : "3 / 4";
+              const slot =
+                idx >= slots.length ? slots[slots.length - 1] : slots[idx];
+              const maxDim = 160;
+              let tw = 0;
+              let th = 0;
+              if (slot) {
+                if (slot.width >= slot.height) {
+                  tw = maxDim;
+                  th = (slot.height / slot.width) * maxDim;
+                } else {
+                  th = maxDim;
+                  tw = (slot.width / slot.height) * maxDim;
+                }
+              } else {
+                th = maxDim;
+                tw = (3 / 4) * maxDim;
+              }
+
               return (
                 <div
                   key={idx}
                   style={{
-                    width: `calc(25% - 10px)`,
-                    maxWidth: 100,
-                    aspectRatio,
+                    width: tw,
+                    height: th,
                     borderRadius: 8,
                     overflow: "hidden",
                     flexShrink: 0,
