@@ -385,9 +385,13 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
 
 /// Create a Command that hides the console window on Windows
 fn hidden_command(program: &str) -> Command {
-    let mut cmd = Command::new(program);
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    let cmd = {
+        #[allow(unused_mut)]
+        let mut c = Command::new(program);
+        #[cfg(target_os = "windows")]
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    };
     cmd
 }
 

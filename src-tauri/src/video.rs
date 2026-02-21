@@ -11,9 +11,13 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Create a Command that hides the console window on Windows
 fn hidden_command(program: &str) -> std::process::Command {
-    let mut cmd = std::process::Command::new(program);
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    let cmd = {
+        #[allow(unused_mut)]
+        let mut c = std::process::Command::new(program);
+        #[cfg(target_os = "windows")]
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    };
     cmd
 }
 

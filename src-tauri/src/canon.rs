@@ -9,9 +9,11 @@
 //! - Camera properties (ISO, aperture, shutter speed, etc.)
 //! - Event polling
 
+#[cfg(target_os = "windows")]
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::os::raw::c_void;
+#[cfg(target_os = "windows")]
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -1585,16 +1587,30 @@ pub fn canon_set_property(property_id: u32, value: u32) -> Result<bool, String> 
     }
 }
 
-/// Get battery level
+/// Get battery level (EDSDK; Windows only)
+#[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn canon_get_battery_level() -> Result<Option<u32>, String> {
     canon_get_property(kEdsPropID_BatteryLevel)
 }
 
-/// Get available shots
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub fn canon_get_battery_level() -> Result<Option<u32>, String> {
+    Ok(None)
+}
+
+/// Get available shots (EDSDK; Windows only)
+#[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn canon_get_available_shots() -> Result<Option<u32>, String> {
     canon_get_property(kEdsPropID_AvailableShots)
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub fn canon_get_available_shots() -> Result<Option<u32>, String> {
+    Ok(None)
 }
 
 // =============================================================================
