@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import BackButton from "../components/BackButton";
@@ -24,13 +24,6 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [imageError, setImageError] = useState<string>("");
   const [imageLoaded, setImageLoaded] = useState<boolean>(false);
-  const [printerName, setPrinterName] = useState<string>("");
-
-  // โหลดเครื่องปริ้นจากแหล่งเดียวกับปริ้นเทส (localStorage) เพื่อให้ตรงกับ config ที่ตั้งไว้
-  useEffect(() => {
-    const name = localStorage.getItem("selectedPrinter") || "";
-    setPrinterName(name);
-  }, []);
 
   const handleCountdownComplete = useCallback(() => {
     console.log("[RequestImage] Countdown completed, auto-navigating to home");
@@ -55,20 +48,6 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
   const handleImageError = () => {
     setImageLoaded(false);
     setImageError("ไม่สามารถโหลดรูปภาพได้ กรุณาตรวจสอบ URL");
-  };
-
-  const convertImageUrlToBase64 = async (url: string): Promise<string> => {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
   };
 
   const handlePrint = async () => {
