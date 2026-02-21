@@ -186,7 +186,10 @@ export default function SlotSelection({ theme }: Props) {
           >
             <div style={{
               position: "relative",
-              height: "100%",
+              height: frameAspectRatio <= 1 ? "100%" : "auto",
+              width: frameAspectRatio > 1 ? "100%" : "auto",
+              maxHeight: "100%",
+              maxWidth: "100%",
               aspectRatio: `${frameAspectRatio}`,
             }}>
               <img
