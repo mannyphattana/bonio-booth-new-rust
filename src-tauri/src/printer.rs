@@ -226,32 +226,20 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
             log::info!("[Printer]   id={} name=\"{}\"", id, name);
         }
 
-        let selected = if needs_cut {
-            // First try: exact match for "2x6" or "cut"
-            let first = paper_sizes.iter().find(|(_, n)| {
-                let lower = n.to_lowercase();
-                lower.contains("cut") || lower.contains("2x6")
-            });
-            if first.is_some() {
-                log::info!("[Printer] Cut paper found via primary match (cut/2x6)");
-                first
-            } else {
-                // Fallback: any paper with "cut" in the name
-                let fallback = paper_sizes.iter().find(|(_, n)| {
-                    n.to_lowercase().contains("cut")
-                });
-                if fallback.is_some() {
-                    log::info!("[Printer] Cut paper found via fallback match (any 'cut')");
-                }
-                fallback
-            }
-        } else {
+        // Always select 4x6 (or 6x4) paper size — even for cut frames.
+        // The CUT driver handles cutting automatically; we just need to
+        // print the full 4x6 sheet and let the printer cut it.
+        let selected = paper_sizes.iter().find(|(_, n)| {
+            let lower = n.to_lowercase();
+            (lower.contains("4x6") || lower.contains("6x4"))
+                && !lower.contains("cut") && !lower.contains("2x6")
+        }).or_else(|| {
+            // Fallback: if no explicit 4x6 name, try any paper without "cut" keyword
             paper_sizes.iter().find(|(_, n)| {
                 let lower = n.to_lowercase();
-                (lower.contains("4x6") || lower.contains("6x4"))
-                    && !lower.contains("cut") && !lower.contains("2x6")
+                !lower.contains("cut") && !lower.contains("2x6")
             })
-        };
+        });
 
         let dm = &mut *dm_ptr;
 
@@ -760,10 +748,11 @@ pub async fn print_photo(
     };
 
     // For cut frames: duplicate image to fill the full 4x6 paper so the printer can cut
-    // 2x6 (portrait-cut): place two copies side-by-side → 4x6 paper
-    // 6x2 (landscape-cut): place two copies top-to-bottom → 6x4 paper
+    // 2x6 (portrait-cut): place two copies side-by-side → 4x6 paper (portrait orientation)
+    // 6x2 (landscape-cut): place two copies top-to-bottom → 6x4 paper (landscape orientation)
     let final_image: image::DynamicImage = match frame_type.as_str() {
         "2x6" => {
+            // Place two copies side-by-side → portrait 4x6 paper, cut vertically
             let w = processed.width();
             let h = processed.height();
             let mut canvas = image::RgbaImage::from_pixel(w * 2, h, image::Rgba([255, 255, 255, 255]));
@@ -772,6 +761,7 @@ pub async fn print_photo(
             image::DynamicImage::ImageRgba8(canvas)
         }
         "6x2" => {
+            // Place two copies top-to-bottom → landscape 6x4 paper, cut horizontally
             let w = processed.width();
             let h = processed.height();
             let mut canvas = image::RgbaImage::from_pixel(w, h * 2, image::Rgba([255, 255, 255, 255]));
