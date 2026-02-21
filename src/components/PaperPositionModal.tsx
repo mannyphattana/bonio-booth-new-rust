@@ -248,7 +248,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 className="config-pm-btn"
-                onClick={() => updateValue("scale", Math.max(50, currentConfig.scale - 1))}
+                onClick={() => updateValue("scale", Math.max(50, Math.round((currentConfig.scale - 0.5) * 10) / 10))}
                 style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
               >
                 −
@@ -257,7 +257,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
                 type="range"
                 min={50}
                 max={150}
-                step={1}
+                step={0.5}
                 value={currentConfig.scale}
                 onChange={(e) => updateValue("scale", Number(e.target.value))}
                 className="config-slider"
@@ -265,7 +265,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
               />
               <button
                 className="config-pm-btn"
-                onClick={() => updateValue("scale", Math.min(150, currentConfig.scale + 1))}
+                onClick={() => updateValue("scale", Math.min(150, Math.round((currentConfig.scale + 0.5) * 10) / 10))}
                 style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #666", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
               >
                 +
