@@ -24,6 +24,10 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [imageError, setImageError] = useState<string>("");
   const [imageLoaded, setImageLoaded] = useState<boolean>(false);
+  const [imageDimensions, setImageDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
 
   const handleCountdownComplete = useCallback(() => {
     console.log("[RequestImage] Countdown completed, auto-navigating to home");
@@ -38,11 +42,26 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
     setImageUrl(url);
     setImageError("");
     setImageLoaded(false);
+    setImageDimensions(null);
   };
 
-  const handleImageLoad = () => {
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
     setImageLoaded(true);
     setImageError("");
+    setImageDimensions({ width: w, height: h });
+
+    // ตั้ง default orientation ตามอัตราส่วนรูป (config ตามขนาดรูปที่ paste/โหลดมา)
+    const ratio = w / h;
+    if (ratio > 1) {
+      setOrientation(ratio >= 2 ? "landscape-cut" : "landscape");
+    } else if (ratio < 1) {
+      setOrientation(ratio <= 0.5 ? "portrait-cut" : "portrait");
+    } else {
+      setOrientation("portrait");
+    }
   };
 
   const handleImageError = () => {
@@ -407,7 +426,17 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
             </div>
           </div>
 
-          {/* Orientation */}
+          {/* ขนาดรูป + Orientation */}
+          {imageDimensions && (
+            <div
+              style={{
+                fontSize: "0.9rem",
+                color: "#666",
+              }}
+            >
+              ขนาดรูป: {imageDimensions.width} × {imageDimensions.height} px
+            </div>
+          )}
           <div
             style={{
               display: "flex",
@@ -426,7 +455,11 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
               value={orientation}
               onChange={(e) =>
                 setOrientation(
-                  e.target.value as "portrait" | "landscape" | "portrait-cut",
+                  e.target.value as
+                    | "portrait"
+                    | "landscape"
+                    | "portrait-cut"
+                    | "landscape-cut",
                 )
               }
               disabled={isPrinting}
