@@ -498,8 +498,20 @@ pub async fn compose_frame_video(
 
     for i in 0..num_videos {
         let slot = &slots[i];
-        let sw = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).ceil() as i64;
-        let sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).ceil() as i64;
+        let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
+        let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
+        let orig_sw = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).ceil() as i64;
+        let orig_sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).ceil() as i64;
+        
+        let mut sx = orig_sx;
+        let mut sy = orig_sy;
+        if sx % 2 != 0 { sx -= 1; }
+        if sy % 2 != 0 { sy -= 1; }
+        
+        let mut sw = orig_sx + orig_sw - sx;
+        let mut sh = orig_sy + orig_sh - sy;
+        if sw % 2 != 0 { sw += 1; }
+        if sh % 2 != 0 { sh += 1; }
 
         // Chain: trim to exactly 9s → reset pts → scale to cover → crop to exact slot → optional LUT → format
         // trim=duration=9 ensures all slots have identical duration
@@ -534,8 +546,14 @@ pub async fn compose_frame_video(
     // Background slots (zIndex < 0)
     for i in 0..num_videos {
         let slot = &slots[i];
-        let sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
-        let sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
+        let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
+        let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
+        
+        let mut sx = orig_sx;
+        let mut sy = orig_sy;
+        if sx % 2 != 0 { sx -= 1; }
+        if sy % 2 != 0 { sy -= 1; }
+
         let z_index = slot.get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
         if z_index < 0 {
             let out = format!("b{}", i);
@@ -551,8 +569,14 @@ pub async fn compose_frame_video(
     // Foreground slots (zIndex >= 0)
     for i in 0..num_videos {
         let slot = &slots[i];
-        let sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
-        let sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
+        let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
+        let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
+        
+        let mut sx = orig_sx;
+        let mut sy = orig_sy;
+        if sx % 2 != 0 { sx -= 1; }
+        if sy % 2 != 0 { sy -= 1; }
+
         let z_index = slot.get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
         if z_index >= 0 {
             let out = format!("f{}", i);
