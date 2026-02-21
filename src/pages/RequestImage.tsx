@@ -26,17 +26,10 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
   const [imageLoaded, setImageLoaded] = useState<boolean>(false);
   const [printerName, setPrinterName] = useState<string>("");
 
-  // Load selected printer from Rust AppState
+  // โหลดเครื่องปริ้นจากแหล่งเดียวกับปริ้นเทส (localStorage) เพื่อให้ตรงกับ config ที่ตั้งไว้
   useEffect(() => {
-    const loadPrinter = async () => {
-      try {
-        const name: string = await invoke("get_selected_printer");
-        if (name) setPrinterName(name);
-      } catch (err) {
-        console.error("[RequestImage] Failed to get printer:", err);
-      }
-    };
-    loadPrinter();
+    const name = localStorage.getItem("selectedPrinter") || "";
+    setPrinterName(name);
   }, []);
 
   const handleCountdownComplete = useCallback(() => {
@@ -93,7 +86,9 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
       return;
     }
 
-    if (!printerName) {
+    // ดึงเครื่องปริ้นจากแหล่งเดียวกับปริ้นเทส (localStorage) — ไม่ใช้แค่ state เพื่อให้ได้ค่าที่ตั้งไว้แล้ว
+    const selectedPrinter = localStorage.getItem("selectedPrinter") || "";
+    if (!selectedPrinter) {
       setPrintStatus("error");
       setErrorMessage("ไม่พบเครื่องพิมพ์ กรุณาตั้งค่าเครื่องพิมพ์ก่อน");
       return;
@@ -104,9 +99,6 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
     setErrorMessage("");
 
     try {
-      console.log("[RequestImage] Converting image URL to base64...");
-      let imageBase64 = await convertImageUrlToBase64(imageUrl);
-
       const isPortraitCut = orientation === "portrait-cut";
       const isLandscapeCut = orientation === "landscape-cut";
 
@@ -123,13 +115,30 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
         isLandscape = true;
       }
 
-      // Save base64 image to temp file via Rust
-      console.log("[RequestImage] Saving image to temp file...");
-      const tempPath: string = await invoke("save_temp_image", {
-        imageDataBase64: imageBase64,
-        filename: "request-image-print.jpg",
-      });
-      console.log("[RequestImage] Temp file saved:", tempPath);
+      // ดึงการตั้งค่าการปริ้นจาก config เหมือนปริ้นเทส/PhotoResult
+      let scale = 100;
+      let verticalOffset = 0;
+      let horizontalOffset = 0;
+      try {
+        const configKey = isLandscape ? "paperConfigLandscape" : "paperConfigPortrait";
+        const saved = localStorage.getItem(configKey);
+        if (saved) {
+          const config = JSON.parse(saved);
+          const s = Number(config.scale);
+          const v = Number(config.vertical);
+          const h = Number(config.horizontal);
+          if (!Number.isNaN(s)) scale = s;
+          if (!Number.isNaN(v)) verticalOffset = v;
+          if (!Number.isNaN(h)) horizontalOffset = h;
+        }
+      } catch {
+        /* use defaults */
+      }
+
+      // โหลดรูปจาก URL ทาง Rust (ไม่มี CORS — แก้ "Failed to fetch" จาก fetch ในเบราว์เซอร์)
+      console.log("[RequestImage] Downloading image from URL via Rust...");
+      const tempPath: string = await invoke("download_image_from_url", { url: imageUrl });
+      console.log("[RequestImage] Image saved:", tempPath);
 
       // Set printing state BEFORE printing to prevent device check notifications
       // Calculate timeout: 30 seconds per copy + 30 seconds buffer
@@ -146,11 +155,11 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
           console.log(`[RequestImage] Printing copy ${i + 1}/${copies}...`);
           await invoke("print_photo", {
             imagePath: tempPath,
-            printerName,
+            printerName: selectedPrinter,
             frameType,
-            scale: 100.0,
-            verticalOffset: 0.0,
-            horizontalOffset: 0.0,
+            scale,
+            verticalOffset,
+            horizontalOffset,
             isLandscape,
           });
         }
