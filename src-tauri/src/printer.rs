@@ -144,25 +144,47 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
     let needs_cut = frame_type == "2x6" || frame_type == "6x2";
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
-    // Auto-switch drivers: if needs_cut, try "{name} (CUT)" variant
-    // If no-cut, use base name (strip " (CUT)" suffix if present)
+    // Auto-switch drivers: if needs_cut, try various CUT driver name patterns
+    // If no-cut, use base name (strip CUT suffix if present)
     let actual_printer = if needs_cut {
-        let cut_name = if printer_name.to_uppercase().contains("(CUT)") {
+        let upper = printer_name.to_uppercase();
+        if upper.contains("CUT") {
+            // Already a CUT driver name
             printer_name.to_string()
         } else {
-            format!("{} (CUT)", printer_name)
-        };
-        // Verify CUT printer exists by trying to open it
-        if win32_printer_exists(&cut_name) {
-            log::info!("[Printer] Auto-switching to CUT driver: '{}'", cut_name);
-            cut_name
-        } else {
-            log::info!("[Printer] CUT driver '{}' not found, using '{}'", cut_name, printer_name);
-            printer_name.to_string()
+            // Try common CUT driver naming patterns seen on customer machines:
+            // "DS-RX1 (CUT)", "DS-RX1 (Cut)", "DS-RX1 CUT", "DS-RX1 Cut"
+            let candidates = [
+                format!("{} (CUT)", printer_name),
+                format!("{} (Cut)", printer_name),
+                format!("{} CUT", printer_name),
+                format!("{} Cut", printer_name),
+            ];
+            let mut found: Option<String> = None;
+            for candidate in &candidates {
+                if win32_printer_exists(candidate) {
+                    log::info!("[Printer] Auto-switching to CUT driver: '{}'", candidate);
+                    found = Some(candidate.clone());
+                    break;
+                }
+            }
+            if let Some(cut_name) = found {
+                cut_name
+            } else {
+                log::info!("[Printer] No CUT driver variant found for '{}', using as-is", printer_name);
+                printer_name.to_string()
+            }
         }
     } else {
-        // For no-cut: use base name (without " (CUT)")
-        let base_name = printer_name.replace(" (CUT)", "").replace(" (cut)", "");
+        // For no-cut: strip any CUT suffix to get base driver name
+        let upper = printer_name.to_uppercase();
+        let base_name = if upper.ends_with(" (CUT)") || upper.ends_with(" (CUT)") {
+            printer_name[..printer_name.len() - 6].to_string()
+        } else if upper.ends_with(" CUT") {
+            printer_name[..printer_name.len() - 4].to_string()
+        } else {
+            printer_name.to_string()
+        };
         if base_name != printer_name && win32_printer_exists(&base_name) {
             log::info!("[Printer] Using base (no-cut) driver: '{}'", base_name);
             base_name
