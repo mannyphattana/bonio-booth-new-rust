@@ -28,7 +28,7 @@ export default function BackButton({
 
   const baseStyle: React.CSSProperties = {
     position: "absolute",
-    top: "3rem",
+    top: "8rem",
     left: "3rem",
     zIndex: 1000,
     background: "none",

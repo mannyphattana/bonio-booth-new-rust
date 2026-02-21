@@ -1273,12 +1273,12 @@ export default function MainShooting({ theme, machineData }: Props) {
         </div>
 
         {/* Row 3: Preview thumbnails start */}
-        <div className="page-row-footer">
+        <div className="page-row-footer" style={{ paddingBottom: "20px" }}>
           <div
             style={{
               display: "flex",
               flexWrap: "wrap",
-              gap: 12,
+              gap: 8, // ลด gap ลงนิดหน่อย
               padding: "4px 8px",
               justifyContent: "center",
               width: "100%",
@@ -1287,7 +1287,7 @@ export default function MainShooting({ theme, machineData }: Props) {
             {Array.from({ length: totalCaptures }).map((_, idx) => {
               const slot =
                 idx >= slots.length ? slots[slots.length - 1] : slots[idx];
-              const maxDim = 160;
+              const maxDim = 100; // ลดขนาดจาก 160 เป็น 100 เพื่อให้เล็กลง
               let tw = 0;
               let th = 0;
               if (slot) {

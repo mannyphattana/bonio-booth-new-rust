@@ -58,8 +58,12 @@ export default function SlotSelection({ theme }: Props) {
     const container = containerRef.current;
     if (!container || !selectedFrame) return;
 
-    const containerWidth = container.offsetWidth;
-    const containerHeight = container.offsetHeight;
+    // Use the inner wrapper div for calculations to ensure aspect ratio is respected
+    const wrapper = container.firstElementChild as HTMLDivElement;
+    if (!wrapper) return;
+
+    const containerWidth = wrapper.offsetWidth;
+    const containerHeight = wrapper.offsetHeight;
 
     const imgAspect = frameWidth / frameHeight;
     const containerAspect = containerWidth / containerHeight;
@@ -149,9 +153,9 @@ export default function SlotSelection({ theme }: Props) {
         onComplete={() => navigate("/")}
       />
 
-      <div className="page-main-content" style={{ marginTop: "60px" }}>
+      <div className="page-main-content" style={{ marginTop: "60px", height: "calc(100vh - 60px)", display: "flex", flexDirection: "column", padding: "10px 20px" }}>
         {/* Row 1: Title */}
-        <div className="page-row-top">
+        <div className="page-row-top" style={{ flex: "0 0 auto", marginBottom: "8px", padding: "40px 0" }}>
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
               เลือกรูปของคุณ
@@ -165,69 +169,77 @@ export default function SlotSelection({ theme }: Props) {
         {/* Row 2: Body – frame + thumbnails */}
         <div
           className="page-row-body"
-          style={{ flexDirection: "column", gap: "40px" }}
+          style={{ flexDirection: "column", gap: "20px", flex: 1, overflow: "hidden" }}
         >
           {/* Frame */}
           <div
             ref={containerRef}
             style={{
               position: "relative",
-              width: "85%",
-              height: "35vh",
-              aspectRatio: `${frameAspectRatio}`,
+              width: "100%",
+              height: "52vh",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
               isolation: "isolate",
             }}
           >
-            <img
-              ref={frameImgRef}
-              src={selectedFrame.imageUrl}
-              alt=""
-              onLoad={calculateScaleFactor}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                zIndex: 10,
-                pointerEvents: "none",
-              }}
-            />
+            <div style={{
+              position: "relative",
+              height: "100%",
+              aspectRatio: `${frameAspectRatio}`,
+            }}>
+              <img
+                ref={frameImgRef}
+                src={selectedFrame.imageUrl}
+                alt=""
+                onLoad={calculateScaleFactor}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain",
+                  zIndex: 10,
+                  pointerEvents: "none",
+                }}
+              />
 
-            {slots.map((slot, i) => {
-              const captureIdx = photoAssignments[i];
-              const slotX = slot.x * scaleFactor.x + imageOffset.x;
-              const slotY = slot.y * scaleFactor.y + imageOffset.y;
-              return (
-                <div
-                  key={i}
-                  style={{
-                    position: "absolute",
-                    zIndex: 5,
-                    overflow: "hidden",
-                    left: `${slotX}px`,
-                    top: `${slotY}px`,
-                    width: `${slot.width * scaleFactor.x}px`,
-                    height: `${slot.height * scaleFactor.y}px`,
-                    borderRadius: `${slot.radius * scaleFactor.x}px`,
-                    background: "rgba(0,0,0,0.05)",
-                  }}
-                >
-                  {captureIdx !== undefined && (
-                    <img
-                      src={captures[captureIdx].photo}
-                      alt=""
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
+              {slots.map((slot, i) => {
+                const captureIdx = photoAssignments[i];
+                const slotX = slot.x * scaleFactor.x + imageOffset.x;
+                const slotY = slot.y * scaleFactor.y + imageOffset.y;
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      zIndex: 5,
+                      overflow: "hidden",
+                      left: `${slotX}px`,
+                      top: `${slotY}px`,
+                      width: `${slot.width * scaleFactor.x}px`,
+                      height: `${slot.height * scaleFactor.y}px`,
+                      borderRadius: `${slot.radius * scaleFactor.x}px`,
+                      background: "rgba(0,0,0,0.05)",
+                    }}
+                  >
+                    {captureIdx !== undefined && (
+                      <img
+                        src={captures[captureIdx].photo}
+                        alt=""
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* 3. Thumbnails */}
@@ -235,9 +247,15 @@ export default function SlotSelection({ theme }: Props) {
             style={{
               display: "flex",
               flexWrap: "wrap",
-              gap: "16px",
+              gap: "12px",
               justifyContent: "center",
+              alignItems: "flex-start", // เปลี่ยนจาก center เป็น flex-start เพื่อให้รูปชิดบน
+              alignContent: "flex-start", // จัดกลุ่มบรรทัดให้ชิดบน
               zIndex: 20,
+              width: "90%",
+              flex: 1, // ให้ขยายเต็มพื้นที่ที่เหลือ
+              overflow: "hidden", // ซ่อน scrollbar
+              padding: "10px",
             }}
           >
             {captures.map((cap, idx) => {
@@ -250,9 +268,9 @@ export default function SlotSelection({ theme }: Props) {
                   key={idx}
                   onClick={() => handlePhotoClick(idx)}
                   style={{
-                    width: "110px",
-                    height: "110px",
-                    borderRadius: "15px",
+                    width: "80px",
+                    height: "80px",
+                    borderRadius: "12px",
                     overflow: "hidden",
                     border: isSelected
                       ? `3px solid ${theme.primaryColor}`
@@ -261,6 +279,7 @@ export default function SlotSelection({ theme }: Props) {
                     transition: "0.2s",
                     position: "relative",
                     boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
+                    flexShrink: 0,
                   }}
                 >
                   <img
@@ -270,6 +289,7 @@ export default function SlotSelection({ theme }: Props) {
                       width: "100%",
                       height: "100%",
                       objectFit: "cover",
+                      display: "block",
                       opacity: isSelected ? 0.7 : 1,
                       filter: isSelected ? "brightness(0.7)" : "brightness(1)",
                     }}
@@ -341,7 +361,7 @@ export default function SlotSelection({ theme }: Props) {
         {/* end page-row-body */}
 
         {/* Row 3: Footer */}
-        <div className="page-row-footer">
+        <div className="page-row-footer" style={{ flex: "0 0 auto", paddingBottom: "50px", paddingTop: "10px", width: "60%" }}>
           <button
             onClick={handleNext}
             disabled={selectedPhotos.length < slots.length}
@@ -352,6 +372,9 @@ export default function SlotSelection({ theme }: Props) {
                   ? theme.primaryColor
                   : "gray",
               color: theme.textButtonColor,
+              padding: "12px 40px", // ลดขนาดปุ่มลง
+              fontSize: "20px", // ลดขนาดตัวอักษรลง
+              borderRadius: "30px",
             }}
           >
             Next
@@ -360,30 +383,6 @@ export default function SlotSelection({ theme }: Props) {
         {/* end page-row-footer */}
       </div>
       {/* end page-main-content */}
-
-      {/* Logo มุมขวาล่าง */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: "30px",
-          right: "40px",
-          opacity: 0.8,
-        }}
-      >
-        <span style={{ fontSize: "24px", fontWeight: "bold", color: "white" }}>
-          timelab
-        </span>
-        <span
-          style={{
-            fontSize: "10px",
-            display: "block",
-            textAlign: "right",
-            color: "white",
-          }}
-        >
-          PHOTO BOOTH
-        </span>
-      </div>
     </div>
   );
 }

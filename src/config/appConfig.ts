@@ -67,5 +67,5 @@ export const REFETCH_INTERVAL = {
  */
 export const DEVICE_CHECK = {
   /** true = ข้าม maintenance เมื่อไม่เจอกล้อง/ปริ้น (สำหรับเทส) */
-  ALLOW_TEST_WITHOUT_DEVICES: true,
+  ALLOW_TEST_WITHOUT_DEVICES: false,
 };
