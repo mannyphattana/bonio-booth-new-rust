@@ -913,6 +913,7 @@ pub async fn print_test_photo(
     .await
 }
 
+/// ลด paper level ที่หลังบ้าน ใช้เส้นเดียวกับ bonio-booth: POST /api/machines-public/paper-level/reduce
 #[tauri::command]
 pub async fn reduce_paper_level(
     state: tauri::State<'_, crate::api::AppState>,
@@ -921,18 +922,14 @@ pub async fn reduce_paper_level(
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = format!(
-        "https://api-booth.boniolabs.com/api/machines/{}",
-        machine_id
-    );
+    let url = "https://api-booth.boniolabs.com/api/machines-public/paper-level/reduce";
 
     let res = client
-        .patch(&url)
+        .post(url)
         .header("X-Machine-Id", &machine_id)
         .header("X-Machine-Port", &machine_port)
-        .json(&serde_json::json!({
-            "reducePaper": copies
-        }))
+        .query(&[("machineId", &machine_id)])
+        .json(&serde_json::json!({ "reduceBy": copies }))
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;

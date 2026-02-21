@@ -155,6 +155,13 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
           });
         }
 
+        // ลด paper level ที่หลังบ้าน (เส้นเดียวกับ bonio-booth: POST paper-level/reduce)
+        try {
+          await invoke("reduce_paper_level", { copies });
+        } catch (e) {
+          console.warn("[RequestImage] reduce_paper_level failed (non-blocking):", e);
+        }
+
         console.log("[RequestImage] Print successful!");
         setPrintStatus("success");
       } catch (error) {
