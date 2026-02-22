@@ -283,9 +283,17 @@ function App() {
     [machineData],
   );
 
+  // เมื่อโพล์หลังบ้าน (init_machine) ไม่ได้ — แสดง maintenance เชื่อมต่อระบบไม่ได้ แล้ว retry ทุก 10s จนเชื่อมได้
+  const handleConnectionLost = useCallback(() => {
+    setShowMaintenance(true);
+    setMaintenanceConfig("network");
+    setMaintenanceFromBackend(false);
+  }, []);
+
   useTimerShutdown({
     enabled: isVerified,
     onMachineDataRefreshed: handleMachineDataRefreshed,
+    onConnectionLost: handleConnectionLost,
   });
 
   const handleMaintenanceResolved = useCallback(() => {
