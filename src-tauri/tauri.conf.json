@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Bonio Booth",
-  "version": "0.4.0-25",
+  "version": "0.4.0-30",
   "identifier": "com.boniolabs.booth",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -40,7 +40,8 @@
       "../public/Print test 4x6.png": "Print test 4x6.png",
       "../public/Print test 2x6.png": "Print test 2x6.png",
       "../public/Print test 6x4.png": "Print test 6x4.png",
-      "../public/Print test 6x2.png": "Print test 6x2.png"
+      "../public/Print test 6x2.png": "Print test 6x2.png",
+      "../check_printable_area.ps1": "check_printable_area.ps1"
     },
     "windows": {
       "nsis": {
