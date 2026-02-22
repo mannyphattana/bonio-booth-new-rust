@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import CameraConfigModal from "./CameraConfigModal";
 import PrinterConfigModal from "./PrinterConfigModal";
 import PaperPositionModal from "./PaperPositionModal";
+import { CLOSE_APP_PIN } from "../config/appConfig";
 
 interface Props {
   open: boolean;
@@ -24,6 +25,9 @@ export default function ContextMenu({
     "camera" | "printer" | "paper" | null
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState(false);
   const [cameraStatus, setCameraStatus] = useState("");
   const [printerStatus, setPrinterStatus] = useState("");
   const [appVersion, setAppVersion] = useState("");
@@ -33,6 +37,9 @@ export default function ContextMenu({
     if (!open) return;
     setActiveModal(null);
     setShowResetConfirm(false);
+    setShowPinModal(false);
+    setPinInput("");
+    setPinError(false);
 
     // Get app version
     getVersion().then(v => setAppVersion(v)).catch(console.error);
@@ -81,7 +88,117 @@ export default function ContextMenu({
     }
   };
 
+  const handlePinKey = (key: string) => {
+    if (key === "del") {
+      setPinInput((p) => p.slice(0, -1));
+      setPinError(false);
+      return;
+    }
+    if (pinInput.length >= 6) return;
+    const next = pinInput + key;
+    setPinInput(next);
+    if (next.length === CLOSE_APP_PIN.length) {
+      if (next === CLOSE_APP_PIN) {
+        setShowPinModal(false);
+        setPinInput("");
+        setPinError(false);
+        handleCloseApp();
+      } else {
+        setPinError(true);
+        setTimeout(() => {
+          setPinInput("");
+          setPinError(false);
+        }, 800);
+      }
+    }
+  };
+
+  // Keyboard support for PIN modal
+  useEffect(() => {
+    if (!showPinModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key >= "0" && e.key <= "9") {
+        handlePinKey(e.key);
+      } else if (e.key === "Backspace") {
+        handlePinKey("del");
+      } else if (e.key === "Escape") {
+        setShowPinModal(false);
+        setPinInput("");
+        setPinError(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showPinModal, pinInput, pinError]);
+
   if (!open) return null;
+
+  // PIN modal for closing the app
+  if (showPinModal) {
+    const PAD = [["1","2","3"],["4","5","6"],["7","8","9"],["del","0",""]];
+    return (
+      <div
+        className="context-menu-overlay"
+        onClick={(e) => { e.stopPropagation(); setShowPinModal(false); setPinInput(""); setPinError(false); }}
+      >
+        <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 320, textAlign: "center" }}>
+          <h3 style={{ margin: "0 0 8px" }}>🔒 ยืนยันรหัสก่อนปิดแอป</h3>
+          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>Enter PIN to close the app</p>
+
+          {/* Dots */}
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
+            {Array.from({ length: CLOSE_APP_PIN.length }).map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  width: 18, height: 18, borderRadius: "50%",
+                  background: i < pinInput.length
+                    ? (pinError ? "#ff4444" : "#fff")
+                    : "#555",
+                  transition: "background 0.15s",
+                }}
+              />
+            ))}
+          </div>
+
+          {pinError && (
+            <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>รหัสไม่ถูกต้อง</p>
+          )}
+
+          {/* Numpad */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            {PAD.flat().map((key, i) => (
+              key === "" ? <div key={i} /> :
+              <button
+                key={i}
+                onClick={() => handlePinKey(key)}
+                style={{
+                  padding: "16px 0",
+                  fontSize: key === "del" ? 18 : 24,
+                  fontWeight: 600,
+                  borderRadius: 12,
+                  border: "none",
+                  background: key === "del" ? "#444" : "#2a2a2a",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                {key === "del" ? "⌫" : key}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="context-menu-item"
+            style={{ marginTop: 16, justifyContent: "center", background: "#333" }}
+            onClick={() => { setShowPinModal(false); setPinInput(""); setPinError(false); }}
+          >
+            ยกเลิก
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // If a sub-modal is active, show it instead
   if (activeModal === "camera") {
@@ -224,7 +341,7 @@ export default function ContextMenu({
         <button
           className="context-menu-item"
           style={{ justifyContent: "center", color: "#ff4444" }}
-          onClick={handleCloseApp}
+          onClick={() => { setShowPinModal(true); setPinInput(""); setPinError(false); }}
         >
           ❌ ปิดแอป / Close App
         </button>

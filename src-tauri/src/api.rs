@@ -902,3 +902,28 @@ pub async fn get_paper_config(
     };
     serde_json::to_value(&config).map_err(|e| e.to_string())
 }
+
+/// โหลดรูปจาก URL ทาง Rust (ไม่มี CORS) แล้วบันทึกเป็นไฟล์ชั่วคราว สำหรับปริ้นย้อนหลัง
+#[tauri::command]
+pub async fn download_image_from_url(
+    state: tauri::State<'_, AppState>,
+    url: String,
+) -> Result<String, String> {
+    let client = &state.http_client;
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch: {}", e))?;
+    if !res.status().is_success() {
+        return Err(format!("HTTP {}", res.status()));
+    }
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    let temp_dir = std::env::temp_dir();
+    let path = temp_dir.join("request-image-print.jpg");
+    std::fs::write(&path, &bytes).map_err(|e| format!("Failed to save image: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}

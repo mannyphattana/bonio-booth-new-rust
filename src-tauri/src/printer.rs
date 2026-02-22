@@ -144,25 +144,47 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
     let needs_cut = frame_type == "2x6" || frame_type == "6x2";
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
-    // Auto-switch drivers: if needs_cut, try "{name} (CUT)" variant
-    // If no-cut, use base name (strip " (CUT)" suffix if present)
+    // Auto-switch drivers: if needs_cut, try various CUT driver name patterns
+    // If no-cut, use base name (strip CUT suffix if present)
     let actual_printer = if needs_cut {
-        let cut_name = if printer_name.to_uppercase().contains("(CUT)") {
+        let upper = printer_name.to_uppercase();
+        if upper.contains("CUT") {
+            // Already a CUT driver name
             printer_name.to_string()
         } else {
-            format!("{} (CUT)", printer_name)
-        };
-        // Verify CUT printer exists by trying to open it
-        if win32_printer_exists(&cut_name) {
-            log::info!("[Printer] Auto-switching to CUT driver: '{}'", cut_name);
-            cut_name
-        } else {
-            log::info!("[Printer] CUT driver '{}' not found, using '{}'", cut_name, printer_name);
-            printer_name.to_string()
+            // Try common CUT driver naming patterns seen on customer machines:
+            // "DS-RX1 (CUT)", "DS-RX1 (Cut)", "DS-RX1 CUT", "DS-RX1 Cut"
+            let candidates = [
+                format!("{} (CUT)", printer_name),
+                format!("{} (Cut)", printer_name),
+                format!("{} CUT", printer_name),
+                format!("{} Cut", printer_name),
+            ];
+            let mut found: Option<String> = None;
+            for candidate in &candidates {
+                if win32_printer_exists(candidate) {
+                    log::info!("[Printer] Auto-switching to CUT driver: '{}'", candidate);
+                    found = Some(candidate.clone());
+                    break;
+                }
+            }
+            if let Some(cut_name) = found {
+                cut_name
+            } else {
+                log::info!("[Printer] No CUT driver variant found for '{}', using as-is", printer_name);
+                printer_name.to_string()
+            }
         }
     } else {
-        // For no-cut: use base name (without " (CUT)")
-        let base_name = printer_name.replace(" (CUT)", "").replace(" (cut)", "");
+        // For no-cut: strip any CUT suffix to get base driver name
+        let upper = printer_name.to_uppercase();
+        let base_name = if upper.ends_with(" (CUT)") || upper.ends_with(" (CUT)") {
+            printer_name[..printer_name.len() - 6].to_string()
+        } else if upper.ends_with(" CUT") {
+            printer_name[..printer_name.len() - 4].to_string()
+        } else {
+            printer_name.to_string()
+        };
         if base_name != printer_name && win32_printer_exists(&base_name) {
             log::info!("[Printer] Using base (no-cut) driver: '{}'", base_name);
             base_name
@@ -330,22 +352,21 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
 
         SetStretchBltMode(hdc, HALFTONE);
 
-        // Preserve image aspect ratio: fit image inside page and center (no stretch distortion).
-        // Previously we stretched to (page_w, page_h) which distorted ratio when page aspect != image aspect.
+        // Fit image to page preserving aspect ratio, centered.
         let page_w_f = page_w as f64;
         let page_h_f = page_h as f64;
         let img_w_f = img_w as f64;
         let img_h_f = img_h as f64;
         let scale_w = page_w_f / img_w_f;
         let scale_h = page_h_f / img_h_f;
-        let scale = scale_w.min(scale_h); // same scale on both axes → ratio preserved
+        let scale = scale_w.min(scale_h);
         let dst_w = (img_w_f * scale).round() as i32;
         let dst_h = (img_h_f * scale).round() as i32;
         let dst_x = (page_w - dst_w) / 2;
         let dst_y = (page_h - dst_h) / 2;
         log::info!(
-            "[Printer] Aspect-preserved fit: page {}x{}, image {}x{}, scale {:.4}, draw at ({},{}) size {}x{}",
-            page_w, page_h, img_w, img_h, scale, dst_x, dst_y, dst_w, dst_h
+            "[Printer] Scale mode (needs_cut={}): page {}x{}, image {}x{}, scale {:.4}, draw at ({},{}) size {}x{}",
+            needs_cut, page_w, page_h, img_w, img_h, scale, dst_x, dst_y, dst_w, dst_h
         );
 
         let bmi = BITMAPINFO {
@@ -683,13 +704,39 @@ pub async fn print_photo(
     let horiz_val = horizontal_offset.unwrap_or(0.0);
 
     // Load original image (auto-detect format from content, not extension)
-    let img = {
+    let mut img = {
         let reader = image::ImageReader::open(&image_path)
             .map_err(|e| format!("Failed to open image file: {}", e))?
             .with_guessed_format()
             .map_err(|e| format!("Failed to guess image format: {}", e))?;
         reader.decode()
             .map_err(|e| format!("Failed to decode image: {}", e))?
+    };
+
+    // For cut frames: duplicate image onto full 4x6 paper BEFORE applying scale/offset.
+    // This matches the old app's behavior where duplication happened in the frontend.
+    img = match frame_type.as_str() {
+        "2x6" => {
+            let w = img.width();
+            let h = img.height();
+            let canvas_w = w * 2;
+            log::info!("[Printer] 2x6 dup: img {}x{}, canvas {}x{}", w, h, canvas_w, h);
+            let mut canvas = image::RgbaImage::from_pixel(canvas_w, h, image::Rgba([255, 255, 255, 255]));
+            image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, 0);
+            image::imageops::overlay(&mut canvas, &img.to_rgba8(), w as i64, 0);
+            image::DynamicImage::ImageRgba8(canvas)
+        }
+        "6x2" => {
+            let w = img.width();
+            let h = img.height();
+            let canvas_h = h * 2;
+            log::info!("[Printer] 6x2 dup: img {}x{}, canvas {}x{}", w, h, w, canvas_h);
+            let mut canvas = image::RgbaImage::from_pixel(w, canvas_h, image::Rgba([255, 255, 255, 255]));
+            image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, 0);
+            image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, h as i64);
+            image::DynamicImage::ImageRgba8(canvas)
+        }
+        _ => img,
     };
 
     let original_width = img.width();
@@ -751,30 +798,7 @@ pub async fn print_photo(
         }
     };
 
-    // For cut frames: duplicate image to fill the full 4x6 paper so the printer can cut
-    // 2x6 (portrait-cut): place two copies side-by-side → 4x6 paper (portrait orientation)
-    // 6x2 (landscape-cut): place two copies top-to-bottom → 6x4 paper (landscape orientation)
-    let final_image: image::DynamicImage = match frame_type.as_str() {
-        "2x6" => {
-            // Place two copies side-by-side → portrait 4x6 paper, cut vertically
-            let w = processed.width();
-            let h = processed.height();
-            let mut canvas = image::RgbaImage::from_pixel(w * 2, h, image::Rgba([255, 255, 255, 255]));
-            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), 0, 0);
-            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), w as i64, 0);
-            image::DynamicImage::ImageRgba8(canvas)
-        }
-        "6x2" => {
-            // Place two copies top-to-bottom → landscape 6x4 paper, cut horizontally
-            let w = processed.width();
-            let h = processed.height();
-            let mut canvas = image::RgbaImage::from_pixel(w, h * 2, image::Rgba([255, 255, 255, 255]));
-            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), 0, 0);
-            image::imageops::overlay(&mut canvas, &processed.to_rgba8(), 0, h as i64);
-            image::DynamicImage::ImageRgba8(canvas)
-        }
-        _ => processed,
-    };
+    let final_image = processed;
 
     // Save final image to temp PNG
     let temp_dir = std::env::temp_dir().join("bonio-booth");
@@ -895,6 +919,7 @@ pub async fn print_test_photo(
     .await
 }
 
+/// ลด paper level ที่หลังบ้าน ใช้เส้นเดียวกับ bonio-booth: POST /api/machines-public/paper-level/reduce
 #[tauri::command]
 pub async fn reduce_paper_level(
     state: tauri::State<'_, crate::api::AppState>,
@@ -903,18 +928,14 @@ pub async fn reduce_paper_level(
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = format!(
-        "https://api-booth.boniolabs.com/api/machines/{}",
-        machine_id
-    );
+    let url = "https://api-booth.boniolabs.com/api/machines-public/paper-level/reduce";
 
     let res = client
-        .patch(&url)
+        .post(url)
         .header("X-Machine-Id", &machine_id)
         .header("X-Machine-Port", &machine_port)
-        .json(&serde_json::json!({
-            "reducePaper": copies
-        }))
+        .query(&[("machineId", &machine_id)])
+        .json(&serde_json::json!({ "reduceBy": copies }))
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;

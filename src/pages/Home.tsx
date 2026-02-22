@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import ContextMenu from "../components/ContextMenu";
@@ -18,6 +18,10 @@ export default function Home({
 }: Props) {
   const navigate = useNavigate();
   const [showContextMenu, setShowContextMenu] = useState(false);
+  // Track whether the last interaction was a touch — used to block
+  // touch-triggered contextmenu (two-finger tap / long-press) on touchscreens
+  // while still allowing mouse right-click from AnyDesk / physical mouse.
+  const touchActiveRef = useRef(false);
 
   const handleStart = useCallback(() => {
     if (showContextMenu) return;
@@ -26,7 +30,15 @@ export default function Home({
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    // If the contextmenu event was triggered by touch, ignore it
+    if (touchActiveRef.current) return;
     setShowContextMenu(true);
+  }, []);
+
+  const handleTouchStart = useCallback(() => {
+    touchActiveRef.current = true;
+    // Reset after a short delay so mouse events are never permanently blocked
+    setTimeout(() => { touchActiveRef.current = false; }, 800);
   }, []);
 
   return (
@@ -38,6 +50,7 @@ export default function Home({
       }}
       onClick={handleStart}
       onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       {/* Machine info badge */}
       <div

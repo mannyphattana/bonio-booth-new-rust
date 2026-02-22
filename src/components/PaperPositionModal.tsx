@@ -113,6 +113,12 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         horizontalOffset: currentConfig.horizontal,
         frameType,
       });
+      // ลด paper level ที่หลังบ้าน 1 แผ่น (เส้นเดียวกับ bonio-booth: POST paper-level/reduce)
+      try {
+        await invoke("reduce_paper_level", { copies: 1 });
+      } catch (e) {
+        console.warn("[PaperPositionModal] reduce_paper_level failed (non-blocking):", e);
+      }
       setSavedMessage("✅ Test Print สำเร็จ!");
     } catch (err: any) {
       setSavedMessage(`❌ Print Error: ${err?.toString()?.slice(0, 60)}`);

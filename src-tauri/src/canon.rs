@@ -1591,7 +1591,10 @@ pub fn canon_set_property(property_id: u32, value: u32) -> Result<bool, String> 
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn canon_get_battery_level() -> Result<Option<u32>, String> {
-    canon_get_property(kEdsPropID_BatteryLevel)
+    #[cfg(not(target_os = "windows"))]
+    return Err("Canon EDSDK is only supported on Windows".to_string());
+    #[cfg(target_os = "windows")]
+    canon_get_property(crate::edsdk_sys::kEdsPropID_BatteryLevel)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1604,7 +1607,10 @@ pub fn canon_get_battery_level() -> Result<Option<u32>, String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn canon_get_available_shots() -> Result<Option<u32>, String> {
-    canon_get_property(kEdsPropID_AvailableShots)
+    #[cfg(not(target_os = "windows"))]
+    return Err("Canon EDSDK is only supported on Windows".to_string());
+    #[cfg(target_os = "windows")]
+    canon_get_property(crate::edsdk_sys::kEdsPropID_AvailableShots)
 }
 
 #[cfg(not(target_os = "windows"))]

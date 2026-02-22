@@ -194,6 +194,35 @@ pub fn run() {
                 window.open_devtools();
             }
 
+            // Prevent Windows from putting the display to sleep.
+            // ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+            #[cfg(target_os = "windows")]
+            {
+                use windows::Win32::System::Power::SetThreadExecutionState;
+                use windows::Win32::System::Power::{
+                    ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED,
+                };
+                unsafe {
+                    SetThreadExecutionState(
+                        ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED,
+                    );
+                }
+                log::info!("[App] SetThreadExecutionState: display sleep prevented");
+            }
+
+            // Borderless maximize: cover the full screen without using exclusive
+            // fullscreen mode. Exclusive fullscreen causes the graphics driver to
+            // switch display modes, which on Duplicate-mode setups (laptop + external
+            // touchscreen) makes the external monitor disconnect/reconnect repeatedly.
+            // Instead we just maximize the borderless window (decorations: false in
+            // tauri.conf.json) which looks identical to fullscreen but does not
+            // trigger a display mode switch.
+            {
+                let window = app.get_webview_window("main").unwrap();
+                let _ = window.maximize();
+                log::info!("[App] Window maximized (borderless)");
+            }
+
             // Give shutdown manager an app handle
             if let Some(shutdown_mgr) = app.try_state::<Arc<ShutdownManager>>() {
                 shutdown_mgr.set_app_handle(app.handle().clone());
@@ -277,6 +306,7 @@ pub fn run() {
             api::get_selected_printer,
             api::set_paper_config,
             api::get_paper_config,
+            api::download_image_from_url,
             // Image processing
             image_processing::get_available_filters,
             image_processing::apply_lut_filter,
