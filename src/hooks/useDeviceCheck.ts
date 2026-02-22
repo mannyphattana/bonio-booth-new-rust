@@ -253,6 +253,16 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
       }
     }
 
+    // เมื่ออุปกรณ์ที่ตั้งค่าไว้ยังหลุดอยู่ ให้แจ้ง maintenance (รวมกรณี dashboard ปิด maintenance แล้ว overlay หาย — จะได้โชว์แจ้งเตือนกล้อง/เครื่องปริ้นอีกครั้ง)
+    if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES) {
+      if (
+        (isConfiguredCamera && !cameraConnected) ||
+        (isConfiguredPrinter && !printerConnected)
+      ) {
+        if (onMaintenanceNeeded) onMaintenanceNeeded();
+      }
+    }
+
     prevStateRef.current = currentState;
   }, [enabled, intervalMs, onMaintenanceNeeded, sendStartupReport]);
 
