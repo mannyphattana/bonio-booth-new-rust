@@ -180,8 +180,8 @@ export default function Maintenance({
               : "กรุณาตรวจสอบอุปกรณ์ ด้านล่าง หรือติดต่อพนักงาน"}
         </p>
 
-        {/* Device status cards - hide during network errors since we can't reliably get status */}
-        {!isNetworkError && (
+        {/* Device status cards - hide during network errors; hide when maintenance from backend (รอปิดจากศูนย์ควบคุมเท่านั้น ไม่ต้องแสดง config กล้อง/เครื่องปริ้น) */}
+        {!isNetworkError && !isMaintenanceFromBackend && (
           <div style={styles.deviceCards}>
             {/* Camera status */}
             <div
