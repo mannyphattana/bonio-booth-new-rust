@@ -493,7 +493,16 @@ pub async fn compose_frame_video(
     // Frame image as last input
     final_args.extend(vec!["-i".to_string(), frame_path.to_string_lossy().to_string()]);
 
-    // Build filter_complex: scale → [lut] → crop → format → overlay
+    // Build filter_complex: all compositing happens in RGBA space.
+    // Only ONE RGB→YUV conversion happens at the H.264 encode step at the very end.
+    // This eliminates all YUV colour matrix / range ambiguity for the frame PNG.
+    //
+    // Pipeline:
+    //   webcam WebM  → scale/crop → [lut3d] → format=rgba  [v0..vN]
+    //   frame PNG    → format=rgba → scale                  [frame_img]
+    //   white bg     → format=rgba                          [bg]
+    //   overlays all use format=auto  → stay in RGBA throughout
+    //   final output → format=yuv420p (single conversion, done by the encoder)
     let mut filter_parts: Vec<String> = Vec::new();
 
     for i in 0..num_videos {
@@ -502,45 +511,40 @@ pub async fn compose_frame_video(
         let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
         let orig_sw = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).ceil() as i64;
         let orig_sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).ceil() as i64;
-        
+
         let mut sx = orig_sx;
         let mut sy = orig_sy;
         if sx % 2 != 0 { sx -= 1; }
         if sy % 2 != 0 { sy -= 1; }
-        
+
         let mut sw = orig_sx + orig_sw - sx;
         let mut sh = orig_sy + orig_sh - sy;
         if sw % 2 != 0 { sw += 1; }
         if sh % 2 != 0 { sh += 1; }
 
-        // Chain: trim to exactly 9s → reset pts → scale to cover → crop to exact slot → optional LUT → format
-        // trim=duration=9 ensures all slots have identical duration
-        // scaling: add 2 extra pixels (+2) to width/height to ensure it covers the slot fully
-        // this prevents single-pixel white gaps due to rounding errors
+        // trim → scale (cover) → crop → [lut] → rgba
+        // +2px on scale to prevent single-pixel gaps at slot edges
         let mut chain = format!(
-            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase,crop={}:{}",
+            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},format=rgba",
             i, sw+2, sh+2, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));
         }
-        chain.push_str(&format!(",format=yuv420p[v{}]", i));
+        chain.push_str(&format!("[v{}]", i));
         filter_parts.push(chain);
     }
 
-    // Frame image scaled to output size (with alpha)
-    // Use explicit color range (in_range=pc for full-range PNG, out_range=tv for limited-range video)
-    // and BT.709 color matrix to prevent color shift during RGB→YUV conversion.
-    // Without these, #cf3337 in the PNG would appear as ~#dd4135 in the video.
+    // Frame PNG: de-palettise then scale — stays in RGBA, no YUV involved at all
     filter_parts.push(format!(
-        "[{}:v]scale={}:{}:in_range=pc:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuva420p[frame_img]",
+        "[{}:v]format=rgba,scale={}:{}:flags=accurate_rnd+full_chroma_int[frame_img]",
         num_videos, out_w, out_h
     ));
 
-    // White background
-    filter_parts.push(format!("color=c=white:s={}x{}:d=9:r=30[bg]", out_w, out_h));
+    // White background in RGBA
+    filter_parts.push(format!("color=c=white:s={}x{}:d=9:r=30,format=rgba[bg]", out_w, out_h));
 
-    // Chain overlays: bg → background videos → frame → foreground videos
+    // Chain overlays — format=auto keeps everything in RGBA
     let mut prev = "bg".to_string();
 
     // Background slots (zIndex < 0)
@@ -548,7 +552,7 @@ pub async fn compose_frame_video(
         let slot = &slots[i];
         let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
         let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
-        
+
         let mut sx = orig_sx;
         let mut sy = orig_sy;
         if sx % 2 != 0 { sx -= 1; }
@@ -557,13 +561,13 @@ pub async fn compose_frame_video(
         let z_index = slot.get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
         if z_index < 0 {
             let out = format!("b{}", i);
-            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat[{}]", prev, i, sx, sy, out));
+            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat:format=auto[{}]", prev, i, sx, sy, out));
             prev = out;
         }
     }
 
-    // Frame overlay (eof_action=repeat so the single-frame PNG repeats for full duration)
-    filter_parts.push(format!("[{}][frame_img]overlay=0:0:eof_action=repeat[af]", prev));
+    // Frame overlay — RGBA PNG blends over RGBA bg (alpha channel used for slot holes)
+    filter_parts.push(format!("[{}][frame_img]overlay=0:0:eof_action=repeat:format=auto[af]", prev));
     prev = "af".to_string();
 
     // Foreground slots (zIndex >= 0)
@@ -571,7 +575,7 @@ pub async fn compose_frame_video(
         let slot = &slots[i];
         let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
         let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
-        
+
         let mut sx = orig_sx;
         let mut sy = orig_sy;
         if sx % 2 != 0 { sx -= 1; }
@@ -580,21 +584,37 @@ pub async fn compose_frame_video(
         let z_index = slot.get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
         if z_index >= 0 {
             let out = format!("f{}", i);
-            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat[{}]", prev, i, sx, sy, out));
+            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat:format=auto[{}]", prev, i, sx, sy, out));
             prev = out;
         }
     }
+
+    // Single RGB→YUV conversion at the very end.
+    // scale=iw:ih:out_color_matrix=bt709 forces BT.709 matrix during the RGB→YUV step.
+    // Old FFmpeg (2018) defaults to BT.601 for format=yuv420p on RGBA input, but modern
+    // players decode with BT.709 → hue shift (encode BT.601 R160→R171, G30→G43, B32→B30).
+    // Explicitly specifying bt709 here + tagging output (-colorspace bt709 below) makes
+    // encode and decode use the same matrix.
+    let final_label = format!("{}out", prev);
+    filter_parts.push(format!(
+        "[{}]scale=iw:ih:out_color_matrix=bt709,format=yuv420p[{}]",
+        prev, final_label
+    ));
 
     let filter_complex = filter_parts.join(";");
     println!("[compose_frame_video] filter: {}", filter_complex);
 
     final_args.extend(vec![
         "-filter_complex".to_string(), filter_complex,
-        "-map".to_string(), format!("[{}]", prev),
+        "-map".to_string(), format!("[{}]", final_label),
         "-c:v".to_string(), "libx264".to_string(),
         "-pix_fmt".to_string(), "yuv420p".to_string(),
         "-preset".to_string(), "fast".to_string(),
         "-crf".to_string(), "23".to_string(),
+        // Tag output as BT.709 — must match the out_color_matrix=bt709 used above
+        "-colorspace".to_string(), "bt709".to_string(),
+        "-color_primaries".to_string(), "bt709".to_string(),
+        "-color_trc".to_string(), "bt709".to_string(),
         "-t".to_string(), "9".to_string(),
         "-an".to_string(),
         "-movflags".to_string(), "+faststart".to_string(),
