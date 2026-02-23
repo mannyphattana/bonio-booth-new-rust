@@ -3,20 +3,24 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function FrameSelection({ theme }: Props) {
+export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   useIdleTimeout();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [selectedFrame, setSelectedFrame] = useState<FrameData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,6 +95,8 @@ export default function FrameSelection({ theme }: Props) {
         height: "100vh",
         overflow: "hidden",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <Countdown
         seconds={COUNTDOWN.FRAME_SELECTION.DURATION}
@@ -319,6 +325,12 @@ export default function FrameSelection({ theme }: Props) {
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         * { outline: none !important; -webkit-tap-highlight-color: transparent !important; }
       `}</style>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

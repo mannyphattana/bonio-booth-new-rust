@@ -4,13 +4,18 @@ import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import type { ThemeData } from "../App";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function TermsAndServices({ theme }: Props) {
+export default function TermsAndServices({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const handleBack = useCallback(() => {
     navigate("/");
@@ -131,7 +136,7 @@ export default function TermsAndServices({ theme }: Props) {
   };
 
   return (
-    <div style={containerStyle}>
+    <div style={containerStyle} onContextMenu={handleContextMenu} onTouchStart={handleTouchStart}>
       <BackButton onBackClick={handleBack} />
       <Countdown
         seconds={COUNTDOWN.TERMS_AND_SERVICES.DURATION}
@@ -684,6 +689,12 @@ export default function TermsAndServices({ theme }: Props) {
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

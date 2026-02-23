@@ -7,16 +7,22 @@ import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { setPrinting } from "../utils/printingState";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function PhotoResult({ theme }: Props) {
+export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
+
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const selectedFrame = state.selectedFrame;
@@ -550,6 +556,8 @@ export default function PhotoResult({ theme }: Props) {
         justifyContent: "flex-start",
         padding: "120px 0",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <Countdown
         seconds={COUNTDOWN.PHOTO_RESULT.DURATION}
@@ -729,6 +737,12 @@ export default function PhotoResult({ theme }: Props) {
       >
         กลับหน้าหลัก / HOME
       </button>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

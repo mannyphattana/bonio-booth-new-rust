@@ -6,17 +6,22 @@ import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import qrIcon from "../assets/icons/svg/qrcode.svg";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function PaymentSelection({ theme, machineData }: Props) {
+export default function PaymentSelection({ theme, machineData, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   useIdleTimeout();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const selectedQuantity = state.quantity || 1;
 
@@ -73,6 +78,8 @@ export default function PaymentSelection({ theme, machineData }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <BackButton onBackClick={handleBack} />
 
@@ -192,6 +199,12 @@ export default function PaymentSelection({ theme, machineData }: Props) {
           </button>
         </div>
       </div>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

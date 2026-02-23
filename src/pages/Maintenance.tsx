@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface DeviceStatus {
   cameraOk: boolean;
@@ -10,19 +12,23 @@ interface DeviceStatus {
 
 interface Props {
   onResolved: () => void;
-  onOpenConfig: (type: "camera" | "printer") => void;
+  onOpenConfig?: (type: "camera" | "printer") => void;
   lineUrl?: string;
   backgroundSecond?: string;
   isNetworkError?: boolean;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
 export default function Maintenance({
   onResolved,
-  onOpenConfig,
   lineUrl,
   backgroundSecond,
   isNetworkError = false,
+  onFormatReset,
+  onBeforeClose,
 }: Props) {
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
     cameraOk: false,
     printerOk: false,
@@ -136,6 +142,8 @@ export default function Maintenance({
             }
           : {}),
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <div style={styles.content}>
         {/* Warning icon */}
@@ -200,12 +208,6 @@ export default function Maintenance({
                 </span>
               </div>
               <div style={styles.deviceDetail}>{deviceStatus.cameraName}</div>
-              <button
-                style={styles.configButton}
-                onClick={() => onOpenConfig("camera")}
-              >
-                ตั้งค่ากล้องใหม่
-              </button>
             </div>
 
             {/* Printer status */}
@@ -232,12 +234,6 @@ export default function Maintenance({
                 </span>
               </div>
               <div style={styles.deviceDetail}>{deviceStatus.printerName}</div>
-              <button
-                style={styles.configButton}
-                onClick={() => onOpenConfig("printer")}
-              >
-                ตั้งค่าเครื่องปริ้นใหม่
-              </button>
             </div>
           </div>
         )}
@@ -266,6 +262,12 @@ export default function Maintenance({
               : "⏳ ระบบกำลังตรวจสอบอุปกรณ์อัตโนมัติ..."}
         </p>
       </div>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

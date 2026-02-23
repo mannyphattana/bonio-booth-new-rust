@@ -3,15 +3,19 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
 const POLL_INTERVAL = 3000; // 3 seconds
 
-export default function PaymentQR({ theme }: Props) {
+export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
@@ -25,6 +29,7 @@ export default function PaymentQR({ theme }: Props) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useIdleTimeout();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const createPayment = useCallback(async () => {
     // If payment was already created (e.g. from coupon flow), reuse it
@@ -163,6 +168,8 @@ export default function PaymentQR({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <div className="page-content" style={{ gap: 24, padding: "0 40px" }}>
         {/* Title */}
@@ -563,6 +570,12 @@ export default function PaymentQR({ theme }: Props) {
           100% { transform: rotate(360deg); }
         }
       `}</style>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

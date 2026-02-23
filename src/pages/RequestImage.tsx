@@ -5,13 +5,18 @@ import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import type { ThemeData } from "../App";
 import { setPrinting } from "../utils/printingState";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function RequestImage({ theme }: Props): React.JSX.Element {
+export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Props): React.JSX.Element {
   const navigate = useNavigate();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [imageUrl, setImageUrl] = useState<string>("");
   const [copies, setCopies] = useState<number>(1);
   const [orientation, setOrientation] = useState<
@@ -210,6 +215,8 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
         backgroundPosition: "center",
         color: theme?.fontColor || "#2c2c2c",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       {/* Back button */}
       <BackButton onBackClick={handleBack} disabled={isPrinting} />
@@ -536,6 +543,12 @@ export default function RequestImage({ theme }: Props): React.JSX.Element {
           </button>
         </div>
       </div>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

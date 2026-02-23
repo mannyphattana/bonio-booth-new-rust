@@ -8,20 +8,24 @@ import type {
   FrameData,
 } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
-
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function SlotSelection({ theme }: Props) {
+export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   useIdleTimeout();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const captures: Capture[] = state.captures || [];
   const selectedFrame: FrameData = state.selectedFrame;
@@ -146,6 +150,8 @@ export default function SlotSelection({ theme }: Props) {
         position: "relative",
         overflow: "hidden",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       {/* Countdown */}
       <Countdown
@@ -386,6 +392,12 @@ export default function SlotSelection({ theme }: Props) {
         {/* end page-row-footer */}
       </div>
       {/* end page-main-content */}
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

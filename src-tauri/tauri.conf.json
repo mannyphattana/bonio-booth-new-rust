@@ -62,7 +62,7 @@
       "endpoints": [
         "https://github.com/mannyphattana/bonio-booth-new-rust/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIyNTY4MTQ0RTRDMDJBQUQKUldTdEtzRGtSSUZXc2djOGdrVmFvL2pTc2dlRWpnR3MzcnQwZGdHcC8xaWZNc3hRbHczZkw3YmcK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4QjU5MjYxOUI2MzdGRDMKUldUVGYyT2JZWksxbUhXQTl4NThzQ1ZVL3lZRmk3aHNTVGRPVUlTeGpITnB0cm5WRnliZUpLMUQK"
     }
   }
 }

@@ -6,10 +6,14 @@ import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
 const KEYBOARD_ROWS = [
@@ -19,11 +23,12 @@ const KEYBOARD_ROWS = [
   ["Z", "X", "C", "V", "B", "N", "M"],
 ];
 
-export default function CouponEntry({ theme }: Props) {
+export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   useIdleTimeout();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -161,6 +166,8 @@ export default function CouponEntry({ theme }: Props) {
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <BackButton onBackClick={handleBack} />
 
@@ -448,6 +455,12 @@ export default function CouponEntry({ theme }: Props) {
           </div>
         </div>
       )}
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

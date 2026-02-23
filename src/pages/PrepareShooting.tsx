@@ -4,17 +4,22 @@ import type { ThemeData, MachineData } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function PrepareShooting({ theme, machineData }: Props) {
+export default function PrepareShooting({ theme, machineData, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   useIdleTimeout();
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   // const [countdown, setCountdown] = useState(PREPARE_DURATION); // Removed custom state
   const cameraCountdown = machineData.cameraCountdown || 5;
 
@@ -47,6 +52,8 @@ export default function PrepareShooting({ theme, machineData }: Props) {
         height: "100vh", // บังคับเต็มจอ
         overflow: "hidden", // ห้ามเลื่อน
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       {/* 1. Header Bar: แสดง Countdown (ไม่มี BackButton ตาม Legacy) */}
       <Countdown
@@ -339,6 +346,12 @@ export default function PrepareShooting({ theme, machineData }: Props) {
           </button>
         </div>
       </div>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

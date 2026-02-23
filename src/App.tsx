@@ -321,10 +321,11 @@ function App() {
           ) : (
             <Maintenance
               onResolved={handleMaintenanceResolved}
-              onOpenConfig={(type) => setMaintenanceConfig(type)}
               lineUrl={lineUrl}
               backgroundSecond={themeData?.backgroundSecond}
               isNetworkError={maintenanceConfig === "network"}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
             />
           )}
         </>
@@ -344,74 +345,145 @@ function App() {
         />
         <Route
           path="/terms-and-services"
-          element={<TermsAndServices theme={themeData!} />}
+          element={
+            <TermsAndServices
+              theme={themeData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
+          }
         />
         <Route
           path="/get-help"
           element={
-            <GetHelp theme={themeData!} lineUrl={lineUrl || ""} /> // Pass lineUrl from state
+            <GetHelp
+              theme={themeData!}
+              lineUrl={lineUrl || ""}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
 
         <Route
           path="/payment-selection"
           element={
-            <PaymentSelection theme={themeData!} machineData={machineData!} />
+            <PaymentSelection
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/coupon-entry"
           element={
-            <CouponEntry theme={themeData!} machineData={machineData!} />
+            <CouponEntry
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/payment-qr"
-          element={<PaymentQR theme={themeData!} machineData={machineData!} />}
+          element={
+            <PaymentQR
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
+          }
         />
         <Route
           path="/frame-selection"
           element={
-            <FrameSelection theme={themeData!} machineData={machineData!} />
+            <FrameSelection
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/prepare-shooting"
           element={
-            <PrepareShooting theme={themeData!} machineData={machineData!} />
+            <PrepareShooting
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/main-shooting"
           element={
-            <MainShooting theme={themeData!} machineData={machineData!} />
+            <MainShooting
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/slot-selection"
           element={
-            <SlotSelection theme={themeData!} machineData={machineData!} />
+            <SlotSelection
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/apply-filter"
           element={
-            <ApplyFilter theme={themeData!} machineData={machineData!} />
+            <ApplyFilter
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/photo-result"
           element={
-            <PhotoResult theme={themeData!} machineData={machineData!} />
+            <PhotoResult
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
           }
         />
         <Route
           path="/out-of-paper"
-          element={<OutOfPaper theme={themeData!} lineUrl={lineUrl || ""} />}
+          element={
+            <OutOfPaper
+              theme={themeData!}
+              lineUrl={lineUrl || ""}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
+          }
         />
         <Route
           path="/request-image"
-          element={<RequestImage theme={themeData!} />}
+          element={
+            <RequestImage
+              theme={themeData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
+          }
         />
       </Routes>
     </Router>

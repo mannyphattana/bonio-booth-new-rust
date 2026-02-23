@@ -6,16 +6,22 @@ import BackButton from "../components/BackButton";
 import outOfPaperImg from "../assets/images/out-of-paper.png";
 import { REFETCH_INTERVAL } from "../config/appConfig";
 import type { ThemeData } from "../App";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   lineUrl: string;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function OutOfPaper({ theme, lineUrl }: Props) {
+export default function OutOfPaper({ theme, lineUrl, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const isMaintenanceMode = location.state?.maintenance;
+
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const handleBack = useCallback(() => {
     navigate("/");
@@ -60,6 +66,8 @@ export default function OutOfPaper({ theme, lineUrl }: Props) {
         backgroundPosition: "center",
         color: theme?.fontColor || "#2c2c2c",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       {/* Back button — hidden in maintenance/auto-redirect mode */}
       {!isMaintenanceMode && <BackButton onBackClick={handleBack} />}
@@ -150,6 +158,12 @@ export default function OutOfPaper({ theme, lineUrl }: Props) {
           </div>
         )}
       </div>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

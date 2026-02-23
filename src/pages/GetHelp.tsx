@@ -6,16 +6,21 @@ import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import getHelpImage from "../assets/images/get-help.png";
 import type { ThemeData } from "../App";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   lineUrl: string;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function GetHelp({ theme, lineUrl }: Props) {
+export default function GetHelp({ theme, lineUrl, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const isMaintenanceMode = location.state?.maintenance;
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const handleBack = useCallback(() => {
     navigate("/");
@@ -104,7 +109,7 @@ export default function GetHelp({ theme, lineUrl }: Props) {
   };
 
   return (
-    <div style={containerStyle}>
+    <div style={containerStyle} onContextMenu={handleContextMenu} onTouchStart={handleTouchStart}>
       {!isMaintenanceMode && <BackButton onBackClick={handleBack} />}
 
       {!isMaintenanceMode && (
@@ -154,6 +159,12 @@ export default function GetHelp({ theme, lineUrl }: Props) {
           </div>
         </div>
       </div>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

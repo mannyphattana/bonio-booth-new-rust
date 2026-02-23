@@ -6,19 +6,25 @@ import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { FILTERS, type FilterConfig } from "../config/filters";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function ApplyFilter({ theme }: Props) {
+export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
 
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const firstPhoto = frameCaptures[0]?.photo || "";
+
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const [selectedFilter, setSelectedFilter] = useState<FilterConfig>(
     FILTERS[0],
@@ -215,6 +221,8 @@ export default function ApplyFilter({ theme }: Props) {
         overflow: "hidden",
         userSelect: "none",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <style>
         {`
@@ -550,6 +558,12 @@ export default function ApplyFilter({ theme }: Props) {
         {/* end page-row-footer */}
       </div>
       {/* end page-main-content */}
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

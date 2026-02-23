@@ -5,6 +5,8 @@ import RecordRTC from "recordrtc";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { useCanon } from "../hooks/useCanon";
+import { useContextMenu } from "../hooks/useContextMenu";
+import ContextMenu from "../components/ContextMenu";
 
 // CropOverlay: shows SVG mask overlay to indicate the crop area based on slot dimensions
 function CropOverlay({
@@ -114,9 +116,11 @@ function CropOverlay({
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
+  onFormatReset: () => void;
+  onBeforeClose?: () => void;
 }
 
-export default function MainShooting({ theme, machineData }: Props) {
+export default function MainShooting({ theme, machineData, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
@@ -126,6 +130,8 @@ export default function MainShooting({ theme, machineData }: Props) {
   const cameraCountdown = machineData.cameraCountdown || 5;
   const totalSlots = slots.length || 4;
   const totalCaptures = totalSlots + 2; // slots + 2 extra
+
+  const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1011,6 +1017,8 @@ export default function MainShooting({ theme, machineData }: Props) {
         height: "100vh",
         overflow: "hidden",
       }}
+      onContextMenu={handleContextMenu}
+      onTouchStart={handleTouchStart}
     >
       <div className="page-main-content" style={{ marginTop: "60px" }}>
         {/* Row 1: Title */}
@@ -1369,6 +1377,12 @@ export default function MainShooting({ theme, machineData }: Props) {
           100% { opacity: 0; }
         }
       `}</style>
+      <ContextMenu
+        open={showContextMenu}
+        onClose={() => setShowContextMenu(false)}
+        onFormatReset={onFormatReset}
+        onBeforeClose={onBeforeClose}
+      />
     </div>
   );
 }

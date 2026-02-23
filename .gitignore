@@ -25,3 +25,7 @@ dist-ssr
 
 # EDSDK (Canon SDK - proprietary, do not commit)
 /EDSDK/
+
+# Build instructions (contains sensitive info)
+BUILD.md
+build.md
