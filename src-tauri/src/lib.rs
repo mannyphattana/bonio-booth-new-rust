@@ -195,19 +195,25 @@ pub fn run() {
             }
 
             // Prevent Windows from putting the display to sleep.
-            // ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+            //
+            // IMPORTANT: Do NOT use ES_SYSTEM_REQUIRED here.
+            // ES_SYSTEM_REQUIRED wakes all USB devices out of selective suspend
+            // (including USB-C Alt Mode displays like ViewSonic touchscreens),
+            // causing a disconnect/reconnect when the flag is applied on startup
+            // and again when the process exits and Windows reverts the state.
+            //
+            // ES_CONTINUOUS | ES_DISPLAY_REQUIRED is sufficient to keep the
+            // display on without touching USB power management at all.
             #[cfg(target_os = "windows")]
             {
                 use windows::Win32::System::Power::SetThreadExecutionState;
                 use windows::Win32::System::Power::{
-                    ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED,
+                    ES_CONTINUOUS, ES_DISPLAY_REQUIRED,
                 };
                 unsafe {
-                    SetThreadExecutionState(
-                        ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED,
-                    );
+                    SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED);
                 }
-                log::info!("[App] SetThreadExecutionState: display sleep prevented");
+                log::info!("[App] SetThreadExecutionState: display sleep prevented (no ES_SYSTEM_REQUIRED to avoid USB wake)");
             }
 
             // Borderless maximize: cover the full screen without using exclusive
