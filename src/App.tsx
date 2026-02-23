@@ -85,6 +85,8 @@ function App() {
   const [themeData, setThemeData] = useState<ThemeData | null>(null);
   const [isVerified, setIsVerified] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
+  /** true = เปิด maintenance จาก dashboard (isMaintenanceMode) — priority หลัก, ไม่ให้ device-check ปิด overlay เอง */
+  const [maintenanceFromBackend, setMaintenanceFromBackend] = useState(false);
   const [maintenanceConfig, setMaintenanceConfig] = useState<
     "camera" | "printer" | "network" | null
   >(null);
@@ -138,9 +140,11 @@ function App() {
               setLineUrl(initResult.data.machine.lineUrl);
             }
 
-            // Check if backend set maintenance mode
+            // Check if backend set maintenance mode (dashboard) — priority หลัก
             if (initResult.data.machine?.isMaintenanceMode) {
               setShowMaintenance(true);
+              setMaintenanceFromBackend(true);
+              setMaintenanceConfig(null);
             }
           } else {
             throw new Error("init_machine returned unsuccessful response");
@@ -150,9 +154,10 @@ function App() {
         }
       } catch (err) {
         console.error("Init error:", err);
-        // Backend or network failure
+        // Backend or network failure — แจ้งเน็ต ไม่ใช่ maintenance จาก dashboard
         setShowMaintenance(true);
         setMaintenanceConfig("network");
+        setMaintenanceFromBackend(false);
       }
     },
     [maintenanceConfig],
@@ -188,6 +193,8 @@ function App() {
   // Use stable callbacks to prevent unnecessary reconnects
   const handleMaintenanceMode = useCallback((enabled: boolean) => {
     setShowMaintenance(enabled);
+    setMaintenanceFromBackend(enabled);
+    if (enabled) setMaintenanceConfig(null); // แสดง UI แจ้งเตือนจาก dashboard เป็นหลัก ไม่ค้างที่ modal กล้อง/ปริ้น
   }, []);
 
   const handleConfigUpdated = useCallback(
@@ -244,6 +251,11 @@ function App() {
           setMachineData(data.machine);
           if (data.theme) setThemeData(data.theme);
           if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+          // Sync maintenance from backend (เปิด/ปิดจาก dashboard — priority หลัก)
+          const backendMaintenance = !!data.machine?.isMaintenanceMode;
+          setShowMaintenance(backendMaintenance);
+          setMaintenanceFromBackend(backendMaintenance);
+          if (backendMaintenance) setMaintenanceConfig(null);
         } else {
           // Same machine, only update if critical fields changed
           const currentPaperLevel = machineData?.paperLevel;
@@ -260,6 +272,10 @@ function App() {
             setMachineData(data.machine);
             if (data.theme) setThemeData(data.theme);
             if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+            // Sync maintenance from backend (เปิด/ปิดจาก dashboard — priority หลัก)
+            setShowMaintenance(!!newMaintenanceMode);
+            setMaintenanceFromBackend(!!newMaintenanceMode);
+            if (newMaintenanceMode) setMaintenanceConfig(null);
           }
         }
       }
@@ -267,13 +283,22 @@ function App() {
     [machineData],
   );
 
+  // เมื่อโพล์หลังบ้าน (init_machine) ไม่ได้ — แสดง maintenance เชื่อมต่อระบบไม่ได้ แล้ว retry ทุก 10s จนเชื่อมได้
+  const handleConnectionLost = useCallback(() => {
+    setShowMaintenance(true);
+    setMaintenanceConfig("network");
+    setMaintenanceFromBackend(false);
+  }, []);
+
   useTimerShutdown({
     enabled: isVerified,
     onMachineDataRefreshed: handleMachineDataRefreshed,
+    onConnectionLost: handleConnectionLost,
   });
 
   const handleMaintenanceResolved = useCallback(() => {
     setShowMaintenance(false);
+    setMaintenanceFromBackend(false);
     setMaintenanceConfig(null);
   }, []);
 
@@ -326,6 +351,7 @@ function App() {
               isNetworkError={maintenanceConfig === "network"}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
+              isMaintenanceFromBackend={maintenanceFromBackend}
             />
           )}
         </>

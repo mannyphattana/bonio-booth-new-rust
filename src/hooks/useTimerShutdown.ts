@@ -23,11 +23,14 @@ interface UseTimerShutdownOptions {
   enabled: boolean;
   /** Callback when machine data is refreshed from poll */
   onMachineDataRefreshed?: (data: any) => void;
+  /** Callback when backend unreachable (init_machine failed / network error) — แสดง maintenance เชื่อมต่อระบบไม่ได้ */
+  onConnectionLost?: () => void;
 }
 
 export function useTimerShutdown({
   enabled,
   onMachineDataRefreshed,
+  onConnectionLost,
 }: UseTimerShutdownOptions) {
   const lastShutdownReadyRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -38,6 +41,7 @@ export function useTimerShutdown({
 
       if (!result?.success || !result?.data) {
         console.log("[TimerShutdown] init_machine failed or no data:", result);
+        onConnectionLost?.();
         return;
       }
 
@@ -91,8 +95,9 @@ export function useTimerShutdown({
       lastShutdownReadyRef.current = isAnyReady;
     } catch (err) {
       console.error("[TimerShutdown] Check failed:", err);
+      onConnectionLost?.();
     }
-  }, [onMachineDataRefreshed]);
+  }, [onMachineDataRefreshed, onConnectionLost]);
 
   useEffect(() => {
     if (!enabled) {

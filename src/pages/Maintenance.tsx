@@ -18,6 +18,8 @@ interface Props {
   isNetworkError?: boolean;
   onFormatReset: () => void;
   onBeforeClose?: () => void;
+  /** true = เปิดจาก dashboard (isMaintenanceMode) — ไม่ auto-resolve เมื่ออุปกรณ์ OK, รอปิดจากหลังบ้านเท่านั้น */
+  isMaintenanceFromBackend?: boolean;
 }
 
 export default function Maintenance({
@@ -27,6 +29,7 @@ export default function Maintenance({
   isNetworkError = false,
   onFormatReset,
   onBeforeClose,
+  isMaintenanceFromBackend = false,
 }: Props) {
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
@@ -117,11 +120,11 @@ export default function Maintenance({
     setDeviceStatus({ cameraOk, printerOk, cameraName, printerName });
     setChecking(false);
 
-    // If both are OK, auto-resolve
-    if (cameraOk && printerOk) {
+    // Auto-resolve only when maintenance is from device (กล้อง/เครื่องปริ้น) — ไม่ปิดเองถ้าเปิดจาก dashboard
+    if (!isMaintenanceFromBackend && cameraOk && printerOk) {
       onResolved();
     }
-  }, [onResolved]);
+  }, [onResolved, isMaintenanceFromBackend]);
 
   // Poll every 3 seconds
   useEffect(() => {
@@ -172,17 +175,21 @@ export default function Maintenance({
         <p style={styles.subtitle}>
           {isNetworkError
             ? "กำลังเชื่อมต่อกับเซิร์ฟเวอร์..."
-            : "ระบบอยู่ระหว่างการซ่อมบำรุง"}
+            : isMaintenanceFromBackend
+              ? "เปิดโหมดซ่อมบำรุงจากศูนย์ควบคุม"
+              : "ระบบอยู่ระหว่างการซ่อมบำรุง"}
         </p>
 
         <p style={styles.instruction}>
           {isNetworkError
-            ? "กรุณารอสักครู่ ระบบกำลังพยายามเชื่อมต่อเครือข่ายเชื่อมต่ออีกครั้ง"
-            : "กรุณาตรวจสอบอุปกรณ์ ด้านล่าง หรือติดต่อพนักงาน"}
+            ? "กรุณารอสักครู่ ระบบกำลังพยายามเชื่อมต่อเซิร์ฟเวอร์อีกครั้ง"
+            : isMaintenanceFromBackend
+              ? "กรุณารอจนกว่าศูนย์ควบคุมจะปิดโหมดซ่อมบำรุง"
+              : "กรุณาตรวจสอบอุปกรณ์ ด้านล่าง หรือติดต่อพนักงาน"}
         </p>
 
-        {/* Device status cards - hide during network errors since we can't reliably get status */}
-        {!isNetworkError && (
+        {/* Device status cards - hide during network errors; hide when maintenance from backend (รอปิดจากศูนย์ควบคุมเท่านั้น ไม่ต้องแสดง config กล้อง/เครื่องปริ้น) */}
+        {!isNetworkError && !isMaintenanceFromBackend && (
           <div style={styles.deviceCards}>
             {/* Camera status */}
             <div
@@ -257,9 +264,11 @@ export default function Maintenance({
         <p style={styles.footerNote}>
           {isNetworkError
             ? "⏳ กำลังเชื่อมต่อเครือข่าย..."
-            : deviceStatus.cameraOk && deviceStatus.printerOk
-              ? "✅ อุปกรณ์พร้อมใช้งานแล้ว กำลังกลับหน้าหลัก..."
-              : "⏳ ระบบกำลังตรวจสอบอุปกรณ์อัตโนมัติ..."}
+            : isMaintenanceFromBackend
+              ? "⏳ รอศูนย์ควบคุมปิดโหมดซ่อมบำรุง"
+              : deviceStatus.cameraOk && deviceStatus.printerOk
+                ? "✅ อุปกรณ์พร้อมใช้งานแล้ว กำลังกลับหน้าหลัก..."
+                : "⏳ ระบบกำลังตรวจสอบอุปกรณ์อัตโนมัติ..."}
         </p>
       </div>
       <ContextMenu
