@@ -865,21 +865,32 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         setCurrentCapture(i + 1);
         setPhase("preview");
       } else {
-        // Webcam: video is already ready
-        let videoUrl = recordingResult.url;
-        let videoPath = "";
-        if (recordingResult.blob) {
-          videoPath = await saveVideoToTemp(recordingResult.blob, i);
-        }
+        // Webcam: show photo preview immediately, convert video in background
         const newCapture: Capture = {
           photo: photoData,
-          video: videoUrl,
-          videoPath: videoPath,
+          video: recordingResult.url,
+          videoPath: "", // will be patched after conversion
         };
         setCaptures((prev) => [...prev, newCapture]);
         setCurrentCapture(i + 1);
         setPhase("preview");
-        
+
+        // Convert WebM → MP4 in background while user sees preview
+        if (recordingResult.blob) {
+          const blobCopy = recordingResult.blob;
+          const captureIdx = captureIndex;
+          (async () => {
+            const path = await saveVideoToTemp(blobCopy, captureIdx);
+            if (path) {
+              setCaptures((prev) =>
+                prev.map((c, idx) =>
+                  idx === captureIdx ? { ...c, videoPath: path } : c,
+                ),
+              );
+            }
+          })();
+        }
+
         // Ensure we wait at least 1.5s total for the preview phase
         await new Promise((r) => setTimeout(r, 1500));
       }
@@ -925,19 +936,14 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   // Navigate when done AND videos ready (or timed out)
   useEffect(() => {
     if (phase === "done" && captures.length >= totalCaptures) {
-      // Check if we need to wait for videos
-      const isCanonMovie =
-        cameraTypeRef.current === "canon" &&
-        !(window as any).__canonMovieFallback;
-
       const allVideosReady = captures.every(
         (c) => c.videoPath && c.videoPath.length > 0,
       );
 
-      // If waiting for videos, show a persistent "Processing..." overlay
-      // (This is implicitly handled by not navigating away yet)
+      // Wait for videos for both Canon movie and webcam (background conversion)
+      const needWaitVideos = !allVideosReady && !videosReadyTimeout;
 
-      if (!isCanonMovie || allVideosReady || videosReadyTimeout) {
+      if (!needWaitVideos) {
         // Proceed to next page
         const delay = setTimeout(() => {
           navigate("/slot-selection", {
@@ -1213,6 +1219,33 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                   </div>
                   <div style={{ fontSize: 16, marginTop: 8, opacity: 0.8 }}>
                     Starting Video Mode
+                  </div>
+                </div>
+              )}
+
+              {/* Waiting for video processing overlay (shown after last capture) */}
+              {phase === "done" &&
+                !captures.every((c) => c.videoPath && c.videoPath.length > 0) &&
+                !videosReadyTimeout && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "rgba(0,0,0,0.75)",
+                    zIndex: 40,
+                    color: "white",
+                  }}
+                >
+                  <div
+                    className="loading-spinner"
+                    style={{ marginBottom: 20 }}
+                  ></div>
+                  <div style={{ fontSize: 24, fontWeight: 600 }}>
+                    ขอระบบเช็ครูปซักครู่นะคะ
                   </div>
                 </div>
               )}
