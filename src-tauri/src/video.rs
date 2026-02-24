@@ -139,27 +139,37 @@ pub async fn save_temp_video(
 
     fs::write(&raw_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
 
-    // Trim to exactly 3 seconds using FFmpeg to guarantee consistent duration
+    // Convert WebM → MP4 (H.264, BT.709) and trim to exactly 3 seconds.
+    // Re-encoding (not copy) normalises the colour space so WebM and Canon MP4
+    // both enter compose_frame_video with identical colour metadata.
     let ffmpeg = get_ffmpeg_path();
     let trim_status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
             "-i", &raw_path.to_string_lossy(),
             "-t", "3",
-            "-c", "copy",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-colorspace", "bt709",
+            "-color_primaries", "bt709",
+            "-color_trc", "bt709",
+            "-movflags", "+faststart",
+            "-an",
             &file_path.to_string_lossy(),
         ])
         .output();
 
     match trim_status {
         Ok(output) if output.status.success() => {
-            // Trimmed successfully — remove raw file
+            // Converted + trimmed successfully — remove raw file
             let _ = fs::remove_file(&raw_path);
-            println!("[save_temp_video] trimmed to 3s: {}", file_path.display());
+            println!("[save_temp_video] converted to MP4 (BT.709, 3s): {}", file_path.display());
         }
         _ => {
-            // FFmpeg trim failed — fall back to raw file
-            println!("[save_temp_video] trim failed, using raw file");
+            // FFmpeg failed — fall back to raw file
+            println!("[save_temp_video] convert failed, using raw file");
             let _ = fs::rename(&raw_path, &file_path);
         }
     }

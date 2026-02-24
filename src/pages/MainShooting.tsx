@@ -561,7 +561,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         );
         const path: string = await invoke("save_temp_video", {
           videoDataBase64: base64,
-          filename: `capture_${index}.webm`,
+          filename: `capture_${index}.mp4`,
         });
         return path;
       } catch (err) {
