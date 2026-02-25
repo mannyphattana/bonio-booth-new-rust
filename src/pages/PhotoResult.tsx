@@ -27,6 +27,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const frameCaptures: Capture[] = state.frameCaptures || [];
   const selectedFrame = state.selectedFrame;
   const selectedFilter = state.selectedFilter;
+  const quantity: number = state.quantity || 1;
   const slots: FrameSlot[] = selectedFrame?.grid?.slots || [];
   // Slot coordinates are in imageSize space (matching old project)
   // imageSize = frame pixel dimensions (e.g. "2400x3600")
@@ -378,7 +379,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
 
   // Print the composed frame
   const printFrame = useCallback(
-    async (composedImg: string) => {
+    async (composedImg: string, printQuantity: number = 1) => {
       try {
         setPrintStatus("printing");
 
@@ -443,25 +444,29 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         if (printerName) {
           // Set printing state BEFORE checking printer status to prevent false notifications
           // This must be done synchronously before any async operations
-          setPrinting(true, 45000); // 45 second timeout (longer than print operation)
-          console.log("[PhotoResult] Printing state set to true before print");
+          const printTimeout = printQuantity * 45000; // 45 seconds per copy
+          setPrinting(true, printTimeout);
+          console.log(`[PhotoResult] Printing state set to true before print (${printQuantity} copies, timeout: ${printTimeout}ms)`);
           
           // Small delay to ensure printing state is set before device check runs
           await new Promise(resolve => setTimeout(resolve, 100));
 
           try {
-            await invoke("print_photo", {
-              imagePath: printPath,
-              printerName,
-              frameType,
-              scale,
-              verticalOffset,
-              horizontalOffset,
-              isLandscape,
-            });
+            for (let i = 0; i < printQuantity; i++) {
+              console.log(`[PhotoResult] Printing copy ${i + 1}/${printQuantity}...`);
+              await invoke("print_photo", {
+                imagePath: printPath,
+                printerName,
+                frameType,
+                scale,
+                verticalOffset,
+                horizontalOffset,
+                isLandscape,
+              });
+            }
 
-            // Reduce paper level
-            await invoke("reduce_paper_level", { copies: 1 });
+            // Reduce paper level by actual quantity
+            await invoke("reduce_paper_level", { copies: printQuantity });
             setPrintStatus("done");
           } finally {
             // Clear printing state after print completes (includes grace period)
@@ -494,7 +499,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       if (!composedImg) return;
 
       // Print immediately (doesn't need presign)
-      printFrame(composedImg);
+      printFrame(composedImg, quantity);
     };
 
     process();

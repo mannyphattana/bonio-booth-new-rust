@@ -2047,9 +2047,19 @@ pub fn canon_take_photo_during_recording() -> Result<CaptureResult, String> {
             manager.camera_ref.ok_or("No camera connected")?
         };
 
-        // 1. Set SaveTo = Both so photo goes to host while movie stays on SD
+        // 1. Set SaveTo = Host so the still photo goes ONLY to the host PC
+        //    (triggers DirItemRequestTransfer but NOT DirItemCreated).
+        //
+        //    IMPORTANT: Do NOT use kEdsSaveTo_Both here.
+        //    kEdsSaveTo_Both saves the photo to BOTH host AND the camera SD card.
+        //    Saving to camera SD card would fire an extra DirItemCreated event for
+        //    the JPEG, which the movie event handler (object_event_handler) would
+        //    mistakenly treat as the movie file — storing the JPEG path in MOVIE_DATA
+        //    before the real movie DirItemCreated arrives.  This caused
+        //    canon_finalize_movie_download to return the JPEG path instead of the
+        //    MP4 path, resulting in no video being uploaded to the session.
         unsafe {
-            let save_to: EdsUInt32 = kEdsSaveTo_Both;
+            let save_to: EdsUInt32 = kEdsSaveTo_Host;
             let _ = EdsSetPropertyData(
                 camera_ref,
                 kEdsPropID_SaveTo,
@@ -2177,12 +2187,12 @@ pub fn canon_take_photo_during_recording() -> Result<CaptureResult, String> {
                 &evf_output as *const _ as *const c_void,
             );
 
-            // NOTE: Do NOT restore SaveTo = Host yet!
-            // Wait until the movie file is downloaded in canon_finalize_movie_download.
-            // Switching too early might cancel the pending DirItemCreated event for the movie file.
+            // SaveTo is already Host (set at step 1 above) — no need to restore.
+            // The movie DirItemCreated event fires independently of the SaveTo setting
+            // and will be handled by canon_finalize_movie_download.
         }
         // IS_MOVIE_RECORDING stays true — movie download via finalizeMovieDownload later
-        info!("[Canon] Recording stopped, camera in photo mode (SaveTo kept for movie file integrity)");
+        info!("[Canon] Recording stopped, camera in photo mode — waiting for movie DirItemCreated");
 
         // 8. Process photo result
         let (image_data, error_msg) = if let Ok(mut cd) = capture_data.lock() {
@@ -2246,9 +2256,9 @@ pub fn canon_take_photo_during_recording() -> Result<CaptureResult, String> {
                         &evf_output as *const _ as *const c_void,
                     );
 
-                    // NOTE: Do NOT restore SaveTo = Host yet!
-                    // Wait until the movie file is downloaded in canon_finalize_movie_download.
-                    // If we restore it now, the movie file download (SaveTo=Camera) might fail or get confused.
+                    // SaveTo was already set to Host at step 1.  canon_take_picture()
+                    // will set it to Host again internally — that is fine.
+                    // The movie DirItemCreated is independent of the SaveTo setting.
                 }
 
                 canon_take_picture()
