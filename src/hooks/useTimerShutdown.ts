@@ -5,10 +5,14 @@
  * When the machine is outside its operating period, starts a 2-minute shutdown countdown.
  * When the machine re-enters operating hours, cancels any timer-based shutdown.
  *
- * Mirrors the old Electron system's behavior:
+ * อิง logic จาก app booth: countdown ทำที่หน้าแรกเท่านั้น
+ * - เมื่อไปหน้าอื่น → ยกเลิก countdown (cancel_timer_shutdown)
+ * - เมื่ออยู่หน้าแรกและ isShutdownReady → ensure 2-min countdown
+ *
+ * Mirrors the old Electron system's behavior (home-page-active / home-page-inactive):
  * - Poll every 30s
- * - If isShutdownReady → ensure 2-min countdown (idempotent, won't reset if already running)
- * - If isShutdownReady becomes false → cancel timer shutdown (but not manual shutdowns)
+ * - If isOnHomePage && isShutdownReady → ensure 2-min countdown (idempotent)
+ * - If !isOnHomePage → cancel timer shutdown (countdown ยกเลิกเมื่อออกจากหน้าแรก)
  * - User can tap the ShutdownOverlay to cancel and use the machine
  */
 
@@ -21,6 +25,8 @@ const COUNTDOWN_MINUTES = 2;
 interface UseTimerShutdownOptions {
   /** Only enable when app is verified and has machine data */
   enabled: boolean;
+  /** อยู่หน้าแรกเท่านั้นถึงจะรัน countdown — อิงจาก app booth (home-page-active / home-page-inactive) */
+  isOnHomePage?: boolean;
   /** Callback when machine data is refreshed from poll */
   onMachineDataRefreshed?: (data: any) => void;
   /** Callback when backend unreachable (init_machine failed / network error) — แสดง maintenance เชื่อมต่อระบบไม่ได้ */
@@ -29,6 +35,7 @@ interface UseTimerShutdownOptions {
 
 export function useTimerShutdown({
   enabled,
+  isOnHomePage = true,
   onMachineDataRefreshed,
   onConnectionLost,
 }: UseTimerShutdownOptions) {
@@ -51,8 +58,8 @@ export function useTimerShutdown({
         hasMachine: !!result.data.machine,
         isShutdownReady: result.data.isShutdownReady,
         isClosedAppReady: result.data.isClosedAppReady,
+        isOnHomePage,
         machineId: result.data.machine?._id,
-        fullData: result.data,
       });
 
       // Refresh machine/theme data if callback provided
@@ -64,13 +71,25 @@ export function useTimerShutdown({
       const isClosedAppReady = result.data.isClosedAppReady || false;
       const isAnyReady = isShutdownReady || isClosedAppReady;
 
-      // Determine shutdown type
+      // อิง app booth: countdown ทำที่หน้าแรกเท่านั้น — ไปหน้าอื่นให้ยกเลิก
+      if (!isOnHomePage) {
+        if (lastShutdownReadyRef.current) {
+          console.log(
+            "[TimerShutdown] Left home page, cancelling timer shutdown",
+          );
+          await invoke("cancel_timer_shutdown");
+          lastShutdownReadyRef.current = false;
+        }
+        return;
+      }
+
+      // อยู่หน้าแรก — ใช้ logic เดิม
       const shutdownType = isClosedAppReady ? "close-app" : isShutdownReady ? "shutdown" : null;
 
       if (isAnyReady && !lastShutdownReadyRef.current) {
         // Transition: operating hours → outside operating hours
         console.log(
-          `[TimerShutdown] Outside operating hours, starting countdown (type: ${shutdownType})`,
+          `[TimerShutdown] Outside operating hours (on home), starting countdown (type: ${shutdownType})`,
         );
         await invoke("ensure_shutdown_countdown", {
           minutes: COUNTDOWN_MINUTES,
@@ -97,7 +116,15 @@ export function useTimerShutdown({
       console.error("[TimerShutdown] Check failed:", err);
       onConnectionLost?.();
     }
-  }, [onMachineDataRefreshed, onConnectionLost]);
+  }, [onMachineDataRefreshed, onConnectionLost, isOnHomePage]);
+
+  // เมื่อออกจากหน้าแรก → ยกเลิก timer shutdown ทันที
+  useEffect(() => {
+    if (enabled && !isOnHomePage) {
+      invoke("cancel_timer_shutdown").catch(() => {});
+      lastShutdownReadyRef.current = false;
+    }
+  }, [enabled, isOnHomePage]);
 
   useEffect(() => {
     if (!enabled) {
@@ -109,8 +136,10 @@ export function useTimerShutdown({
       return;
     }
 
-    // Check immediately on mount
-    checkTimerShutdown();
+    // Check immediately on mount (เมื่ออยู่หน้าแรก)
+    if (isOnHomePage) {
+      checkTimerShutdown();
+    }
 
     // Then poll periodically
     intervalRef.current = setInterval(checkTimerShutdown, POLL_INTERVAL_MS);
@@ -121,5 +150,5 @@ export function useTimerShutdown({
         intervalRef.current = null;
       }
     };
-  }, [enabled, checkTimerShutdown]);
+  }, [enabled, isOnHomePage, checkTimerShutdown]);
 }

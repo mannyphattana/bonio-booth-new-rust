@@ -1,4 +1,4 @@
-import { MemoryRouter as Router, Routes, Route } from "react-router-dom";
+import { MemoryRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Home from "./pages/Home";
@@ -80,6 +80,19 @@ export interface Capture {
   videoPath?: string;
 }
 
+/** ส่ง pathname ไปให้ parent (ใช้ใน Router) — อิง logic จาก app booth: countdown ทำที่หน้าแรกเท่านั้น */
+function RouteSync({
+  onRouteChange,
+}: {
+  onRouteChange: (pathname: string) => void;
+}) {
+  const location = useLocation();
+  useEffect(() => {
+    onRouteChange(location.pathname);
+  }, [location.pathname, onRouteChange]);
+  return null;
+}
+
 function App() {
   const [machineData, setMachineData] = useState<MachineData | null>(null);
   const [themeData, setThemeData] = useState<ThemeData | null>(null);
@@ -91,6 +104,8 @@ function App() {
     "camera" | "printer" | "network" | "paper" | null
   >(null);
   const [lineUrl, setLineUrl] = useState<string>("");
+  /** อยู่หน้าแรกเท่านั้นถึงจะรัน shutdown countdown (อิงจาก app booth: home-page-active / home-page-inactive) */
+  const [isOnHomePage, setIsOnHomePage] = useState(true);
 
   const initRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -314,6 +329,7 @@ function App() {
 
   useTimerShutdown({
     enabled: isVerified,
+    isOnHomePage,
     onMachineDataRefreshed: handleMachineDataRefreshed,
     onConnectionLost: handleConnectionLost,
   });
@@ -346,6 +362,7 @@ function App() {
 
   return (
     <Router>
+      <RouteSync onRouteChange={(path) => setIsOnHomePage(path === "/")} />
       {/* Shutdown countdown overlay */}
       <ShutdownOverlay
         state={shutdownState}
