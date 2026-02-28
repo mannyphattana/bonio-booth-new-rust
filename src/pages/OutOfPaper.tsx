@@ -14,12 +14,23 @@ interface Props {
   lineUrl: string;
   onFormatReset: () => void;
   onBeforeClose?: () => void;
+  /** โหมด overlay จาก App (maintenance กระดาษหมด) — ซ่อนปุ่มกลับ และโพลแล้วเรียก onPaperRefilled เมื่อกระดาษเติม */
+  isOverlay?: boolean;
+  onPaperRefilled?: () => void;
 }
 
-export default function OutOfPaper({ theme, lineUrl, onFormatReset, onBeforeClose }: Props) {
+export default function OutOfPaper({
+  theme,
+  lineUrl,
+  onFormatReset,
+  onBeforeClose,
+  isOverlay = false,
+  onPaperRefilled,
+}: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const isMaintenanceMode = location.state?.maintenance;
+  const shouldHideBackAndPoll = isOverlay || isMaintenanceMode;
 
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
@@ -27,20 +38,26 @@ export default function OutOfPaper({ theme, lineUrl, onFormatReset, onBeforeClos
     navigate("/");
   }, [navigate]);
 
-  // Poll machine data when auto-redirected (maintenance/out-of-paper mode)
+  // Poll machine data when auto-redirected (maintenance/out-of-paper) or overlay (กระดาษหมดจาก init)
   useEffect(() => {
-    if (!isMaintenanceMode) return;
+    if (!shouldHideBackAndPoll) return;
 
     const interval = setInterval(async () => {
       try {
         const res: any = await invoke("init_machine");
-        if (res.success && res.data?.machine) {
-          if (res.data.machine.isMaintenanceMode) {
+        if (res.success && res.data) {
+          const paperLevel = res.data.paperLevel ?? res.data.machine?.paperLevel;
+          const isMaintenanceModeBackend = res.data.machine?.isMaintenanceMode;
+          if (isMaintenanceMode && isMaintenanceModeBackend) {
             // Maintenance turned on — redirect to maintenance
             navigate("/", { state: { maintenance: true } });
-          } else if (res.data.machine.paperLevel !== 0) {
-            // Paper refilled — go home
-            navigate("/");
+          } else if (paperLevel !== 0 && paperLevel !== undefined) {
+            // Paper refilled
+            if (isOverlay && onPaperRefilled) {
+              onPaperRefilled();
+            } else {
+              navigate("/");
+            }
           }
         }
       } catch (error) {
@@ -49,7 +66,7 @@ export default function OutOfPaper({ theme, lineUrl, onFormatReset, onBeforeClos
     }, REFETCH_INTERVAL.OUT_OF_PAPER * 1000);
 
     return () => clearInterval(interval);
-  }, [isMaintenanceMode, navigate]);
+  }, [shouldHideBackAndPoll, isOverlay, isMaintenanceMode, onPaperRefilled, navigate]);
 
   return (
     <div
@@ -69,8 +86,8 @@ export default function OutOfPaper({ theme, lineUrl, onFormatReset, onBeforeClos
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
     >
-      {/* Back button — hidden in maintenance/auto-redirect mode */}
-      {!isMaintenanceMode && <BackButton onBackClick={handleBack} />}
+      {/* Back button — hidden in overlay mode or maintenance/auto-redirect */}
+      {!shouldHideBackAndPoll && <BackButton onBackClick={handleBack} />}
 
       {/* Main content */}
       <div

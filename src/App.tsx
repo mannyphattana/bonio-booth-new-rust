@@ -88,7 +88,7 @@ function App() {
   /** true = เปิด maintenance จาก dashboard (isMaintenanceMode) — priority หลัก, ไม่ให้ device-check ปิด overlay เอง */
   const [maintenanceFromBackend, setMaintenanceFromBackend] = useState(false);
   const [maintenanceConfig, setMaintenanceConfig] = useState<
-    "camera" | "printer" | "network" | null
+    "camera" | "printer" | "network" | "paper" | null
   >(null);
   const [lineUrl, setLineUrl] = useState<string>("");
 
@@ -145,6 +145,17 @@ function App() {
               setShowMaintenance(true);
               setMaintenanceFromBackend(true);
               setMaintenanceConfig(null);
+            } else {
+              // กระดาษหมดจาก API — แสดง maintenance กระดาษหมด
+              const paperLevel =
+                initResult.data.paperLevel ??
+                initResult.data.machine?.paperLevel ??
+                -1;
+              if (paperLevel === 0) {
+                setShowMaintenance(true);
+                setMaintenanceFromBackend(false);
+                setMaintenanceConfig("paper");
+              }
             }
           } else {
             throw new Error("init_machine returned unsuccessful response");
@@ -273,9 +284,20 @@ function App() {
             if (data.theme) setThemeData(data.theme);
             if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
             // Sync maintenance from backend (เปิด/ปิดจาก dashboard — priority หลัก)
-            setShowMaintenance(!!newMaintenanceMode);
-            setMaintenanceFromBackend(!!newMaintenanceMode);
-            if (newMaintenanceMode) setMaintenanceConfig(null);
+            if (newMaintenanceMode) {
+              setShowMaintenance(true);
+              setMaintenanceFromBackend(true);
+              setMaintenanceConfig(null);
+            } else if (newPaperLevel === 0) {
+              // กระดาษหมด — แสดง maintenance กระดาษหมด
+              setShowMaintenance(true);
+              setMaintenanceFromBackend(false);
+              setMaintenanceConfig("paper");
+            } else {
+              setShowMaintenance(!!newMaintenanceMode);
+              setMaintenanceFromBackend(!!newMaintenanceMode);
+              if (newMaintenanceMode) setMaintenanceConfig(null);
+            }
           }
         }
       }
@@ -342,6 +364,15 @@ function App() {
             <PrinterConfigModal
               open={true}
               onClose={() => setMaintenanceConfig(null)}
+            />
+          ) : maintenanceConfig === "paper" ? (
+            <OutOfPaper
+              theme={themeData!}
+              lineUrl={lineUrl || ""}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+              isOverlay
+              onPaperRefilled={handleMaintenanceResolved}
             />
           ) : (
             <Maintenance
