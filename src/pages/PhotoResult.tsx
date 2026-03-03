@@ -553,6 +553,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     navigate("/");
   };
 
+  // ✅ เพิ่มตัวแปรสำหรับเช็คว่ากำลังอัปโหลดอยู่หรือไม่ 
+  // (ถ้ากำลังอัปโหลด หรือกำลังประมวลผลอยู่ จะเป็น true)
+  const isUploading = uploadStatus === "processing" || uploadStatus === "uploading";
+
   return (
     <div
       className="page-container"
@@ -730,17 +734,21 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         </p>
       )}
 
-      {/* Home button */}
+      {/* ✅ ปรับปรุงปุ่ม Home เพื่อล็อกและแสดงสถานะระหว่างการอัปโหลด */}
       <button
         className="primary-button"
         onClick={handleHome}
+        disabled={isUploading}
         style={{
-          background: theme.primaryColor,
+          background: isUploading ? "#888888" : theme.primaryColor,
           color: theme.textButtonColor,
           marginBottom: 20,
+          cursor: isUploading ? "not-allowed" : "pointer",
+          opacity: isUploading ? 0.7 : 1,
+          transition: "all 0.3s ease" // เพิ่ม transition ให้สีเปลี่ยนนุ่มนวล
         }}
       >
-        กลับหน้าหลัก / HOME
+        {isUploading ? "⏳ กำลังอัปโหลดภาพและวิดีโอ..." : "กลับหน้าหลัก / HOME"}
       </button>
       <ContextMenu
         open={showContextMenu}

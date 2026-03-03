@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { setPrinting as setPrintingState } from "../utils/printingState";
 
+// ✅ นำเข้ารูปภาพทั้ง 4 แบบ จากโฟลเดอร์ assets
+import img4x6Port from "../assets/print_4x6_port.png";
+import img2x6Port from "../assets/print_2x6_port.png";
+import img6x4Land from "../assets/print_6x4_land.png";
+import img6x2Land from "../assets/print_6x2_land.png";
+
 interface PaperConfig {
   scale: number;
   vertical: number;
@@ -23,7 +29,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<"portrait" | "landscape">("portrait");
   const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
   const [landscapeConfig, setLandscapeConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
-  // Paper size selection per orientation
   const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6">("4x6");
   const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4">("6x4");
   const [saving, setSaving] = useState(false);
@@ -33,7 +38,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   const currentConfig = tab === "portrait" ? portraitConfig : landscapeConfig;
   const setCurrentConfig = tab === "portrait" ? setPortraitConfig : setLandscapeConfig;
 
-  // Load saved config from localStorage
   useEffect(() => {
     if (!open) return;
     try {
@@ -57,7 +61,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Save to backend state
       await invoke("set_paper_config", {
         orientation: "portrait",
         scale: portraitConfig.scale,
@@ -71,7 +74,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         horizontal: landscapeConfig.horizontal,
       });
 
-      // Save to localStorage for persistence
       localStorage.setItem("paperConfigPortrait", JSON.stringify(portraitConfig));
       localStorage.setItem("paperConfigLandscape", JSON.stringify(landscapeConfig));
       localStorage.setItem("paperSizePortrait", portraitPaperSize);
@@ -98,11 +100,9 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     setPrinting(true);
     setSavedMessage(`🖨️ กำลัง Test Print (${frameType})...`);
     
-    // Set printing state BEFORE printing to prevent device check notifications
-    setPrintingState(true, 45000); // 45 second timeout
+    setPrintingState(true, 45000); 
     console.log("[PaperPositionModal] Printing state set to true before test print");
     
-    // Small delay to ensure printing state is set before device check runs
     await new Promise(resolve => setTimeout(resolve, 100));
     
     try {
@@ -113,7 +113,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         horizontalOffset: currentConfig.horizontal,
         frameType,
       });
-      // ลด paper level ที่หลังบ้าน 1 แผ่น (เส้นเดียวกับ bonio-booth: POST paper-level/reduce)
       try {
         await invoke("reduce_paper_level", { copies: 1 });
       } catch (e) {
@@ -123,8 +122,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     } catch (err: any) {
       setSavedMessage(`❌ Print Error: ${err?.toString()?.slice(0, 60)}`);
     } finally {
-      setPrinting(false); // Clear local printing state
-      // Clear printing state after print completes (includes grace period)
+      setPrinting(false); 
       console.log("[PaperPositionModal] Test print completed, clearing printing state");
       setPrintingState(false);
       setTimeout(() => setSavedMessage(""), 4000);
@@ -168,7 +166,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
           <button className="config-close-btn" onClick={onClose}>✕</button>
         </div>
 
-        {/* Tab selector */}
         <div className="config-tabs">
           <button
             className={`config-tab ${tab === "portrait" ? "active" : ""}`}
@@ -184,7 +181,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
           </button>
         </div>
 
-        {/* Paper size selector */}
         <div style={{ display: "flex", gap: 8, padding: "10px 20px 0" }}>
           {tab === "portrait" ? (
             <>
@@ -244,7 +240,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         </div>
 
         <div className="config-body">
-          {/* Scale */}
+          {/* ================= Sliders ================= */}
           <div className="config-slider-group">
             <div className="config-slider-header">
               <label className="config-label">Scale (ขนาด)</label>
@@ -284,7 +280,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             </div>
           </div>
 
-          {/* Vertical */}
           <div className="config-slider-group">
             <div className="config-slider-header">
               <label className="config-label">Vertical (แนวตั้ง)</label>
@@ -329,7 +324,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             </div>
           </div>
 
-          {/* Horizontal */}
           <div className="config-slider-group">
             <div className="config-slider-header">
               <label className="config-label">Horizontal (แนวนอน)</label>
@@ -371,36 +365,70 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             </div>
           </div>
 
-          {/* Paper Preview */}
-          <div className="config-paper-preview">
+          {/* ================= Paper Preview Area ================= */}
+          <div className="config-paper-preview" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '10px' }}>
+            
+            {/* กล่องกระดาษจำลอง (เส้นประขาว) ฟิกซ์สัดส่วน 4:6 หรือ 6:4 */}
             <div
-              className="config-paper"
               style={{
-                width: tab === "portrait"
-                  ? (portraitPaperSize === "2x6" ? 60 : 120)
-                  : (landscapePaperSize === "6x2" ? 180 : 180),
-                height: tab === "portrait"
-                  ? 180
-                  : (landscapePaperSize === "6x2" ? 60 : 120),
+                width: tab === "portrait" ? "160px" : "240px", 
+                height: tab === "portrait" ? "240px" : "160px",
+                border: "2px dashed rgba(255,255,255,0.7)", 
+                position: "relative",
+                // ✅ เปิด visible ให้รูปทะลุออกมากรอบได้ตอนเลื่อน offset หรือขยายเกิน 100%
+                overflow: "visible", 
+                transition: "width 0.3s ease, height 0.3s ease"
               }}
             >
+              {/* ชุดรูปภาพ (จะขยับตาม slider ทะลุเส้นประได้) */}
               <div
-                className="config-paper-image"
                 style={{
-                  width: `${currentConfig.scale}%`,
-                  height: `${currentConfig.scale}%`,
-                  transform: `translate(${currentConfig.horizontal * 0.3}px, ${currentConfig.vertical * 0.3}px)`,
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  // ถ้าเป็นแนวนอน 6x2 จะซ้อนบน-ล่าง / ถ้าแนวตั้ง 2x6 จะซ้อนซ้าย-ขวา
+                  flexDirection: tab === "portrait" ? "row" : "column", 
+                  // ✅ คำนวณ Scale % และ Offset (X,Y)
+                  transform: `translate(${currentConfig.horizontal}px, ${currentConfig.vertical}px) scale(${currentConfig.scale / 100})`,
+                  transformOrigin: "center center",
+                  transition: "transform 0.1s ease-out"
                 }}
               >
-                📷
+                {/* เงื่อนไขแสดงรูป: เช็คแท็บและขนาดที่เลือก */}
+                {tab === "portrait" ? (
+                  portraitPaperSize === "4x6" ? (
+                    // แนวตั้ง 4x6 (1 รูปเต็มกรอบ)
+                    <img src={img4x6Port} alt="4x6" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+                  ) : (
+                    // แนวตั้ง 2x6 (2 รูปประกบซ้าย-ขวา)
+                    <>
+                      <img src={img2x6Port} alt="2x6 left" style={{ width: "50%", height: "100%", objectFit: "fill", borderRight: "1px dashed rgba(255,255,255,0.2)" }} />
+                      <img src={img2x6Port} alt="2x6 right" style={{ width: "50%", height: "100%", objectFit: "fill" }} />
+                    </>
+                  )
+                ) : (
+                  landscapePaperSize === "6x4" ? (
+                    // แนวนอน 6x4 (1 รูปเต็มกรอบ)
+                    <img src={img6x4Land} alt="6x4" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+                  ) : (
+                    // แนวนอน 6x2 (2 รูปประกบบน-ล่าง)
+                    <>
+                      <img src={img6x2Land} alt="6x2 top" style={{ width: "100%", height: "50%", objectFit: "fill", borderBottom: "1px dashed rgba(255,255,255,0.2)" }} />
+                      <img src={img6x2Land} alt="6x2 bottom" style={{ width: "100%", height: "50%", objectFit: "fill" }} />
+                    </>
+                  )
+                )}
               </div>
             </div>
-            <p style={{ fontSize: 11, opacity: 0.5, marginTop: 4 }}>
+
+            <p style={{ fontSize: 11, opacity: 0.5, marginTop: 45 }}>
               ตัวอย่างตำแหน่งรูปบนกระดาษ ({tab === "portrait" ? portraitPaperSize : landscapePaperSize})
             </p>
           </div>
 
-          {/* Action row */}
           <div className="config-actions-row">
             <button className="config-reset-btn" onClick={handleReset}>
               🔄 Reset ค่าเริ่มต้น

@@ -51,9 +51,10 @@ impl Lut3D {
 
     fn apply(&self, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
         let max_idx = (self.size - 1) as f32;
-        let ri = (r * max_idx).min(max_idx);
-        let gi = (g * max_idx).min(max_idx);
-        let bi = (b * max_idx).min(max_idx);
+        
+        let ri = r.clamp(0.0, 1.0) * max_idx;
+        let gi = g.clamp(0.0, 1.0) * max_idx;
+        let bi = b.clamp(0.0, 1.0) * max_idx;
 
         let r0 = ri.floor() as usize;
         let g0 = gi.floor() as usize;
@@ -152,7 +153,6 @@ pub async fn apply_lut_filter(
 
     let lut = Lut3D::parse_cube_file(&lut_file_path)?;
 
-    // Decode base64 image
     let clean_base64 = if image_data_base64.contains(",") {
         image_data_base64.split(',').nth(1).unwrap_or(&image_data_base64)
     } else {
@@ -166,41 +166,43 @@ pub async fn apply_lut_filter(
     let img = image::load_from_memory(&image_bytes)
         .map_err(|e| format!("Image load error: {}", e))?;
 
-    let (width, height) = img.dimensions();
-    let mut output: RgbaImage = ImageBuffer::new(width, height);
+    let mut output = img.into_rgba8();
 
-    for (x, y, pixel) in img.pixels() {
+    for pixel in output.pixels_mut() {
         let r = pixel[0] as f32 / 255.0;
         let g = pixel[1] as f32 / 255.0;
         let b = pixel[2] as f32 / 255.0;
-        let a = pixel[3];
 
-        let (nr, ng, nb) = lut.apply(r, g, b);
+        let (mut nr, mut ng, mut nb) = lut.apply(r, g, b);
 
-        output.put_pixel(
-            x,
-            y,
-            Rgba([
-                (nr * 255.0) as u8,
-                (ng * 255.0) as u8,
-                (nb * 255.0) as u8,
-                a,
-            ]),
-        );
+        // --- แก้ปัญหาเงาเขียว (อัปเกรดความแรง ครอบคลุมเสื้อ/ฉากหลัง) ---
+        let luma = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+        let shadow_threshold = 0.28; // เพิ่มให้ครอบคลุมถึง 28% (ครอบคลุมเสื้อสีเข้ม/ดำ)
+        
+        if luma < shadow_threshold {
+            let t = luma / shadow_threshold;
+            let curve = t * t; // ใช้สมการ Quadratic ให้เกลี่ยสีเนียนที่สุด ไร้รอยต่อ
+            
+            nr = luma + (nr - luma) * curve;
+            ng = luma + (ng - luma) * curve;
+            nb = luma + (nb - luma) * curve;
+        }
+
+        pixel[0] = (nr * 255.0).clamp(0.0, 255.0) as u8;
+        pixel[1] = (ng * 255.0).clamp(0.0, 255.0) as u8;
+        pixel[2] = (nb * 255.0).clamp(0.0, 255.0) as u8;
     }
 
-    // Encode back to JPEG base64 (much smaller than PNG: ~10 MB → ~1-2 MB)
     let mut buf = Vec::new();
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 92);
     DynamicImage::ImageRgba8(output)
         .write_with_encoder(encoder)
         .map_err(|e| format!("Encode error: {}", e))?;
 
-    // Patch JFIF header to set DPI to 350
     if buf.len() >= 18 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF && buf[3] == 0xE0 {
         if buf[6] == b'J' && buf[7] == b'F' && buf[8] == b'I' && buf[9] == b'F' && buf[10] == 0x00 {
             let dpi: u16 = 350;
-            buf[13] = 1; // 1 = dots per inch
+            buf[13] = 1;
             buf[14] = (dpi >> 8) as u8;
             buf[15] = (dpi & 0xFF) as u8;
             buf[16] = (dpi >> 8) as u8;
@@ -212,7 +214,6 @@ pub async fn apply_lut_filter(
     Ok(result)
 }
 
-/// Faster version of apply_lut_filter that resizes image first for thumbnail previews
 #[tauri::command]
 pub async fn apply_lut_filter_preview(
     image_data_base64: String,
@@ -222,7 +223,6 @@ pub async fn apply_lut_filter_preview(
     let target_size = max_size.unwrap_or(200);
 
     if lut_file_path.is_empty() {
-        // Even for no-filter, resize for consistent thumbnail size
         let clean_base64 = if image_data_base64.contains(",") {
             image_data_base64.split(',').nth(1).unwrap_or(&image_data_base64)
         } else {
@@ -257,29 +257,32 @@ pub async fn apply_lut_filter_preview(
     let img = image::load_from_memory(&image_bytes)
         .map_err(|e| format!("Image load error: {}", e))?;
 
-    // Resize first for much faster LUT application
     let small = img.thumbnail(target_size, target_size);
-    let (width, height) = small.dimensions();
-    let mut output: RgbaImage = ImageBuffer::new(width, height);
+    let mut output = small.into_rgba8();
 
-    for (x, y, pixel) in small.pixels() {
+    for pixel in output.pixels_mut() {
         let r = pixel[0] as f32 / 255.0;
         let g = pixel[1] as f32 / 255.0;
         let b = pixel[2] as f32 / 255.0;
-        let a = pixel[3];
 
-        let (nr, ng, nb) = lut.apply(r, g, b);
+        let (mut nr, mut ng, mut nb) = lut.apply(r, g, b);
 
-        output.put_pixel(
-            x,
-            y,
-            Rgba([
-                (nr * 255.0) as u8,
-                (ng * 255.0) as u8,
-                (nb * 255.0) as u8,
-                a,
-            ]),
-        );
+        // --- แก้ปัญหาเงาเขียว (อัปเกรดความแรง ครอบคลุมเสื้อ/ฉากหลัง) ---
+        let luma = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+        let shadow_threshold = 0.28; 
+        
+        if luma < shadow_threshold {
+            let t = luma / shadow_threshold;
+            let curve = t * t;
+            
+            nr = luma + (nr - luma) * curve;
+            ng = luma + (ng - luma) * curve;
+            nb = luma + (nb - luma) * curve;
+        }
+
+        pixel[0] = (nr * 255.0).clamp(0.0, 255.0) as u8;
+        pixel[1] = (ng * 255.0).clamp(0.0, 255.0) as u8;
+        pixel[2] = (nb * 255.0).clamp(0.0, 255.0) as u8;
     }
 
     let mut buf = Vec::new();
@@ -299,14 +302,12 @@ pub async fn compose_frame(
     frame_width: u32,
     frame_height: u32,
 ) -> Result<String, String> {
-    // Load frame image
     let frame_bytes = if frame_image_url.starts_with("data:") {
         let clean = frame_image_url.split(',').nth(1).unwrap_or("");
         STANDARD
             .decode(clean)
             .map_err(|e| format!("Frame base64 decode: {}", e))?
     } else {
-        // Download from URL
         let client = reqwest::Client::new();
         let res = client
             .get(&frame_image_url)
@@ -325,7 +326,6 @@ pub async fn compose_frame(
     let (orig_w, orig_h) = frame_img.dimensions();
     println!("[compose_frame] frame original: {}x{}, grid target: {}x{}", orig_w, orig_h, frame_width, frame_height);
 
-    // Upscale frame image to at least 3600px on the longer dimension for print quality
     const MIN_OUTPUT_DIMENSION: u32 = 3600;
     let max_dim = orig_w.max(orig_h);
     let frame_img = if max_dim < MIN_OUTPUT_DIMENSION {
@@ -339,8 +339,6 @@ pub async fn compose_frame(
     };
     let (orig_w, orig_h) = frame_img.dimensions();
 
-    // Use the frame image's natural dimensions as canvas size (matches reference project)
-    // Slots are in grid coordinates — scale them to match the actual frame image size
     let scale_x = orig_w as f64 / frame_width as f64;
     let scale_y = orig_h as f64 / frame_height as f64;
 
@@ -348,10 +346,10 @@ pub async fn compose_frame(
 
     let canvas_w = orig_w;
     let canvas_h = orig_h;
-    let frame_img_rgba = frame_img.to_rgba8();
+    
+    let frame_img_rgba = frame_img.into_rgba8();
     let mut canvas: RgbaImage = ImageBuffer::new(canvas_w, canvas_h);
 
-    // 1. Draw background slots (zIndex < 0) — behind the frame
     for (i, slot) in slots.iter().enumerate() {
         if i >= photos_base64.len() {
             continue;
@@ -362,10 +360,8 @@ pub async fn compose_frame(
         }
     }
 
-    // 2. Draw frame overlay
     image::imageops::overlay(&mut canvas, &frame_img_rgba, 0, 0);
 
-    // 3. Draw foreground slots (zIndex >= 0) — on top of the frame
     for (i, slot) in slots.iter().enumerate() {
         if i >= photos_base64.len() {
             continue;
@@ -376,18 +372,16 @@ pub async fn compose_frame(
         }
     }
 
-    // Encode result as JPEG (much smaller than PNG while retaining print quality)
     let mut buf = Vec::new();
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 95);
     DynamicImage::ImageRgba8(canvas)
         .write_with_encoder(encoder)
         .map_err(|e| format!("Encode error: {}", e))?;
 
-    // Patch JFIF header to set DPI to 350
     if buf.len() >= 18 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF && buf[3] == 0xE0 {
         if buf[6] == b'J' && buf[7] == b'F' && buf[8] == b'I' && buf[9] == b'F' && buf[10] == 0x00 {
             let dpi: u16 = 350;
-            buf[13] = 1; // 1 = dots per inch
+            buf[13] = 1; 
             buf[14] = (dpi >> 8) as u8;
             buf[15] = (dpi & 0xFF) as u8;
             buf[16] = (dpi >> 8) as u8;
@@ -405,7 +399,6 @@ fn draw_photo_in_slot(
     scale_x: f64,
     scale_y: f64,
 ) -> Result<(), String> {
-    // Slot coordinates are in grid space — scale to actual canvas (frame image) space
     let x = slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x;
     let y = slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y;
     let w = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).round() as u32;
@@ -428,16 +421,14 @@ fn draw_photo_in_slot(
 
     let resized = photo.resize_to_fill(w, h, image::imageops::FilterType::Lanczos3);
 
-    // Apply radius (rounded corners) using alpha masking
-    let mut photo_rgba = resized.to_rgba8();
+    let mut photo_rgba = resized.into_rgba8();
+    
     if radius > 0 {
         apply_rounded_corners(&mut photo_rgba, radius);
     }
 
-    // Apply rotation if needed
     if rotate.abs() > 0.1 {
         let rotated = rotate_image_around_center(&photo_rgba, rotate);
-        // After rotation the image is larger; we need to center it at the slot position
         let (rw, rh) = rotated.dimensions();
         let offset_x = x.round() as i64 - (rw as i64 - w as i64) / 2;
         let offset_y = y.round() as i64 - (rh as i64 - h as i64) / 2;
@@ -449,15 +440,12 @@ fn draw_photo_in_slot(
     Ok(())
 }
 
-/// Rotate an RGBA image by arbitrary degrees around its center.
-/// Returns a new image large enough to contain the rotated result.
 fn rotate_image_around_center(img: &RgbaImage, degrees: f64) -> RgbaImage {
     let (w, h) = img.dimensions();
     let radians = degrees * std::f64::consts::PI / 180.0;
     let cos_a = radians.cos().abs();
     let sin_a = radians.sin().abs();
 
-    // New dimensions to fit the rotated image
     let new_w = (w as f64 * cos_a + h as f64 * sin_a).ceil() as u32;
     let new_h = (w as f64 * sin_a + h as f64 * cos_a).ceil() as u32;
 
@@ -473,13 +461,11 @@ fn rotate_image_around_center(img: &RgbaImage, degrees: f64) -> RgbaImage {
 
     for out_y in 0..new_h {
         for out_x in 0..new_w {
-            // Map destination pixel back to source
             let dx = out_x as f64 - cx_dst;
             let dy = out_y as f64 - cy_dst;
             let src_x = dx * cos_neg - dy * sin_neg + cx_src;
             let src_y = dx * sin_neg + dy * cos_neg + cy_src;
 
-            // Bilinear interpolation
             let sx = src_x.floor() as i64;
             let sy = src_y.floor() as i64;
             let fx = src_x - sx as f64;
@@ -511,40 +497,55 @@ fn apply_rounded_corners(img: &mut RgbaImage, radius: u32) {
     let (w, h) = img.dimensions();
     let r = radius.min(w / 2).min(h / 2) as f32;
 
-    for y in 0..h {
-        for x in 0..w {
-            let corners = [
-                (0.0f32, 0.0f32),           // top-left
-                (w as f32 - 1.0, 0.0),      // top-right
-                (0.0, h as f32 - 1.0),      // bottom-left
-                (w as f32 - 1.0, h as f32 - 1.0), // bottom-right
-            ];
+    if r <= 0.0 { return; }
 
-            for &(cx, cy) in &corners {
-                let dx = if (x as f32) < r && cx == 0.0 {
-                    r - x as f32
-                } else if (x as f32) > (w as f32 - 1.0 - r) && cx > 0.0 {
-                    x as f32 - (w as f32 - 1.0 - r)
-                } else {
-                    0.0
-                };
+    let r_u32 = r.ceil() as u32;
 
-                let dy = if (y as f32) < r && cy == 0.0 {
-                    r - y as f32
-                } else if (y as f32) > (h as f32 - 1.0 - r) && cy > 0.0 {
-                    y as f32 - (h as f32 - 1.0 - r)
-                } else {
-                    0.0
-                };
+    let mut process_pixel = |x: u32, y: u32| {
+        let corners = [
+            (0.0f32, 0.0f32),           
+            (w as f32 - 1.0, 0.0),      
+            (0.0, h as f32 - 1.0),      
+            (w as f32 - 1.0, h as f32 - 1.0), 
+        ];
 
-                if dx > 0.0 && dy > 0.0 {
-                    let dist = (dx * dx + dy * dy).sqrt();
-                    if dist > r {
-                        img.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-                    }
+        for &(cx, cy) in &corners {
+            let dx = if (x as f32) < r && cx == 0.0 {
+                r - x as f32
+            } else if (x as f32) > (w as f32 - 1.0 - r) && cx > 0.0 {
+                x as f32 - (w as f32 - 1.0 - r)
+            } else {
+                0.0
+            };
+
+            let dy = if (y as f32) < r && cy == 0.0 {
+                r - y as f32
+            } else if (y as f32) > (h as f32 - 1.0 - r) && cy > 0.0 {
+                y as f32 - (h as f32 - 1.0 - r)
+            } else {
+                0.0
+            };
+
+            if dx > 0.0 && dy > 0.0 {
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > r {
+                    img.put_pixel(x, y, Rgba([0, 0, 0, 0]));
                 }
             }
         }
+    };
+
+    for y in 0..r_u32 {
+        for x in 0..r_u32 { process_pixel(x, y); }
+    }
+    for y in 0..r_u32 {
+        for x in w.saturating_sub(r_u32)..w { process_pixel(x, y); }
+    }
+    for y in h.saturating_sub(r_u32)..h {
+        for x in 0..r_u32 { process_pixel(x, y); }
+    }
+    for y in h.saturating_sub(r_u32)..h {
+        for x in w.saturating_sub(r_u32)..w { process_pixel(x, y); }
     }
 }
 

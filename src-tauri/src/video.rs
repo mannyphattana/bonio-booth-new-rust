@@ -194,8 +194,8 @@ pub async fn trim_video_keep_last(
             "-i", &input_path,
             "-t", &format!("{}", keep_seconds),
             "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
+            "-preset", "ultrafast", 
+            "-crf", "18", 
             "-an",
             "-movflags", "+faststart",
             &output_path.to_string_lossy(),
@@ -238,9 +238,9 @@ pub async fn create_looped_video(
             "-c:v",
             "libx264",
             "-preset",
-            "fast",
+            "ultrafast", 
             "-crf",
-            "23",
+            "18", 
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -274,7 +274,9 @@ pub async fn apply_lut_to_video(
 
     // Copy LUT to temp dir and use just the filename (avoids path escaping issues)
     let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
-    let lut_filter = format!("lut3d={}", lut_filename);
+    
+    // 🚨 แก้ปัญหาภาพมีฝ้าขาวก่อนใส่ LUT (บังคับแปลง YUV -> RGB แบบ Full Range)
+    let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=pc:out_color_matrix=bt709,format=yuvj420p", lut_filename);
 
     let ffmpeg = get_ffmpeg_path();
     let status = hidden_command(&ffmpeg)
@@ -285,12 +287,17 @@ pub async fn apply_lut_to_video(
             &input_path,
             "-vf",
             &lut_filter,
-            "-c:v",
-            "libx264",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuvj420p", // 🚀 บังคับใช้ yuvj420p
             "-preset",
-            "fast",
+            "ultrafast", 
             "-crf",
-            "23",
+            "18", 
+            "-color_range", "2",
+            "-colorspace", "1",
+            "-color_primaries", "1",
+            "-color_trc", "13", // 🚀 ใช้ 13 (sRGB) เพื่อให้ตรงกับหน้าจอและรูปภาพ
+            "-bsf:v", "h264_metadata=video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -324,9 +331,9 @@ pub async fn convert_video_to_mp4(
             "-c:v",
             "libx264",
             "-preset",
-            "fast",
+            "ultrafast", 
             "-crf",
-            "23",
+            "18", 
             "-movflags",
             "+faststart",
             &output_path.to_string_lossy(),
@@ -362,8 +369,8 @@ pub async fn process_frame_video(
             "-i", &video_path,
             "-t", "9",
             "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
+            "-preset", "ultrafast", 
+            "-crf", "18", 
             &looped_path.to_string_lossy(),
         ])
         .output()
@@ -378,9 +385,10 @@ pub async fn process_frame_video(
     let output_path = temp_dir.join(&output_filename);
 
     if !lut_path.is_empty() && Path::new(&lut_path).exists() {
-        // Copy LUT to temp dir and use just the filename (avoids path escaping issues)
         let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
-        let lut_filter = format!("lut3d={}", lut_filename);
+        
+        // 🚨 แก้ปัญหาภาพมีฝ้าขาวก่อนใส่ LUT
+        let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=pc:out_color_matrix=bt709,format=yuvj420p", lut_filename);
 
         let filter_status = hidden_command(&ffmpeg)
             .current_dir(&temp_dir)
@@ -389,8 +397,14 @@ pub async fn process_frame_video(
                 "-i", &looped_path.to_string_lossy(),
                 "-vf", &lut_filter,
                 "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
+                "-pix_fmt", "yuvj420p", // 🚀 บังคับใช้ yuvj420p
+                "-preset", "ultrafast", 
+                "-crf", "18", 
+                "-color_range", "2",
+                "-colorspace", "1",
+                "-color_primaries", "1",
+                "-color_trc", "13", // 🚀 ใช้ 13 (sRGB) เพื่อให้ตรงกับหน้าจอและรูปภาพ
+                "-bsf:v", "h264_metadata=video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
                 "-movflags", "+faststart",
                 &output_path.to_string_lossy(),
             ])
@@ -481,9 +495,6 @@ pub async fn compose_frame_video(
     // Build FFmpeg arguments
     let mut final_args: Vec<String> = vec!["-y".to_string()];
 
-    // Add video inputs with -stream_loop -1 (infinite loop).
-    // Each video's filter chain includes trim=duration=9 to guarantee exactly 9s,
-    // regardless of whether the raw recording was 2.5s or 3.5s.
     for i in 0..num_videos {
         final_args.extend(vec![
             "-stream_loop".to_string(), "-1".to_string(),
@@ -493,16 +504,6 @@ pub async fn compose_frame_video(
     // Frame image as last input
     final_args.extend(vec!["-i".to_string(), frame_path.to_string_lossy().to_string()]);
 
-    // Build filter_complex: all compositing happens in RGBA space.
-    // Only ONE RGB→YUV conversion happens at the H.264 encode step at the very end.
-    // This eliminates all YUV colour matrix / range ambiguity for the frame PNG.
-    //
-    // Pipeline:
-    //   webcam WebM  → scale/crop → [lut3d] → format=rgba  [v0..vN]
-    //   frame PNG    → format=rgba → scale                  [frame_img]
-    //   white bg     → format=rgba                          [bg]
-    //   overlays all use format=auto  → stay in RGBA throughout
-    //   final output → format=yuv420p (single conversion, done by the encoder)
     let mut filter_parts: Vec<String> = Vec::new();
 
     for i in 0..num_videos {
@@ -522,20 +523,18 @@ pub async fn compose_frame_video(
         if sw % 2 != 0 { sw += 1; }
         if sh % 2 != 0 { sh += 1; }
 
-        // trim → scale (cover) → crop → [lut] → rgba
-        // +2px on scale to prevent single-pixel gaps at slot edges
         let mut chain = format!(
-            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},format=rgba",
+            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
             i, sw+2, sh+2, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));
         }
-        chain.push_str(&format!("[v{}]", i));
+        chain.push_str(&format!(",format=rgba[v{}]", i));
         filter_parts.push(chain);
     }
 
-    // Frame PNG: de-palettise then scale — stays in RGBA, no YUV involved at all
+    // Frame PNG: de-palettise then scale — stays in RGBA
     filter_parts.push(format!(
         "[{}:v]format=rgba,scale={}:{}:flags=accurate_rnd+full_chroma_int[frame_img]",
         num_videos, out_w, out_h
@@ -544,7 +543,6 @@ pub async fn compose_frame_video(
     // White background in RGBA
     filter_parts.push(format!("color=c=white:s={}x{}:d=9:r=30,format=rgba[bg]", out_w, out_h));
 
-    // Chain overlays — format=auto keeps everything in RGBA
     let mut prev = "bg".to_string();
 
     // Background slots (zIndex < 0)
@@ -566,7 +564,7 @@ pub async fn compose_frame_video(
         }
     }
 
-    // Frame overlay — RGBA PNG blends over RGBA bg (alpha channel used for slot holes)
+    // Frame overlay
     filter_parts.push(format!("[{}][frame_img]overlay=0:0:eof_action=repeat:format=auto[af]", prev));
     prev = "af".to_string();
 
@@ -589,15 +587,9 @@ pub async fn compose_frame_video(
         }
     }
 
-    // Single RGB→YUV conversion at the very end.
-    // scale=iw:ih:out_color_matrix=bt709 forces BT.709 matrix during the RGB→YUV step.
-    // Old FFmpeg (2018) defaults to BT.601 for format=yuv420p on RGBA input, but modern
-    // players decode with BT.709 → hue shift (encode BT.601 R160→R171, G30→G43, B32→B30).
-    // Explicitly specifying bt709 here + tagging output (-colorspace bt709 below) makes
-    // encode and decode use the same matrix.
     let final_label = format!("{}out", prev);
     filter_parts.push(format!(
-        "[{}]scale=iw:ih:out_color_matrix=bt709,format=yuv420p[{}]",
+        "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=pc,format=yuvj420p[{}]",
         prev, final_label
     ));
 
@@ -608,13 +600,17 @@ pub async fn compose_frame_video(
         "-filter_complex".to_string(), filter_complex,
         "-map".to_string(), format!("[{}]", final_label),
         "-c:v".to_string(), "libx264".to_string(),
-        "-pix_fmt".to_string(), "yuv420p".to_string(),
-        "-preset".to_string(), "fast".to_string(),
-        "-crf".to_string(), "23".to_string(),
-        // Tag output as BT.709 — must match the out_color_matrix=bt709 used above
-        "-colorspace".to_string(), "bt709".to_string(),
-        "-color_primaries".to_string(), "bt709".to_string(),
-        "-color_trc".to_string(), "bt709".to_string(),
+        "-pix_fmt".to_string(), "yuvj420p".to_string(), // 🚀 เปลี่ยนกลับมาใช้ yuvj420p
+        "-preset".to_string(), "ultrafast".to_string(), 
+        "-crf".to_string(), "18".to_string(), 
+        
+        "-color_range".to_string(), "2".to_string(), 
+        "-colorspace".to_string(), "1".to_string(), 
+        "-color_primaries".to_string(), "1".to_string(), 
+        "-color_trc".to_string(), "13".to_string(), // 🚀 เปลี่ยนกราฟสีเป็น 13 (sRGB) ให้เหมือนจอภาพ
+        
+        "-bsf:v".to_string(), "h264_metadata=video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1".to_string(),
+        
         "-t".to_string(), "9".to_string(),
         "-an".to_string(),
         "-movflags".to_string(), "+faststart".to_string(),
@@ -629,7 +625,6 @@ pub async fn compose_frame_video(
         .output()
         .map_err(|e| format!("FFmpeg compose error: {}", e))?;
 
-    // Always log stderr for debugging
     let stderr_str = String::from_utf8_lossy(&status.stderr);
     if !stderr_str.is_empty() {
         let truncated = if stderr_str.len() > 5000 { &stderr_str[stderr_str.len()-3000..] } else { &stderr_str };
@@ -640,7 +635,6 @@ pub async fn compose_frame_video(
         return Err(format!("FFmpeg compose video failed: {}", stderr_str));
     }
 
-    // Log output file size for validation
     if let Ok(meta) = fs::metadata(&output_path) {
         println!("[compose_frame_video] output: {} ({} bytes)", output_path.display(), meta.len());
     }
