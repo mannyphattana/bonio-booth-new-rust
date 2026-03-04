@@ -631,6 +631,64 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }, 1000);
       });
 
+      const isCanon = cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback;
+
+      // 🚨 1. สั่งกล้องถ่ายรูปทันทีที่เลข 0 (คำสั่งจะวิ่งผ่านสาย USB ทันที)
+      const capturePromise = isCanon
+        ? canonCamera.takePhotoDuringRecording()
+        : takePhoto();
+
+      // 🚨 2. จัดการแสงแฟลชหน้าจอให้ตรงกับกลไกกล้อง
+      if (isCanon) {
+        // กล้อง Canon มีดีเลย์กลไกม่านชัตเตอร์ประมาณ 150-200ms
+        // เราจึงต้อง "หน่วงเวลาโชว์แฟลช" ให้แสงขึ้นมาพร้อมกับเสียงกล้องเป๊ะๆ
+        setTimeout(() => {
+          setShowFlash(true);
+          setPhase("preview"); 
+          setTimeout(() => setShowFlash(false), 300);
+        }, 250); // **จุดปรับแต่ง**: ถ้าแสงมาก่อนเสียงนิดนึง ให้เพิ่มเป็น 200, ถ้าแสงมาช้าไป ให้ลดเป็น 100
+      } else {
+        // ถ้าเป็นกล้อง Webcam ถ่ายปุ๊บติดปั๊บ ให้โชว์แฟลชทันที
+        setShowFlash(true);
+        setPhase("preview"); 
+        setTimeout(() => setShowFlash(false), 300);
+      }
+
+      // รอแสงหน้าจอประมวลผลแป๊บนึง เพื่อความสมูท
+      await new Promise((r) => setTimeout(r, 50));
+
+      // 🚨 3. รอรับรูปที่ถ่ายกลับมา
+      let photoData: string = "";
+      try {
+        photoData = await capturePromise;
+      } catch (err) {
+        console.warn("[Capture] Auto Focus Fail or Error, Retrying...", err);
+        await new Promise((r) => setTimeout(r, 600));
+        try {
+          photoData = await takePhoto();
+        } catch (retryErr) {
+          console.error("[Capture] Retry failed", retryErr);
+        }
+      }
+
+      if (!photoData || photoData.length < 100) {
+        console.warn("[Capture] AF Failed! Fallback to LiveView screen capture.");
+        if (cameraTypeRef.current === "canon" && canonCamera.liveViewFrame) {
+          photoData = canonCamera.liveViewFrame;
+        } else if (cameraTypeRef.current === "webcam" && videoRef.current && canvasRef.current) {
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          canvas.width = video.videoWidth || 1920;
+          canvas.height = video.videoHeight || 1080;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            photoData = canvas.toDataURL("image/jpeg", 0.92);
+          }
+        }
+      }
+
+      // 🚨 4. ถ่ายรูปเสร็จสรรพแล้ว ค่อยมาปิดอัดวิดีโอตอนท้ายสุด จะได้ไม่รบกวนจังหวะแฟลช
       let recordingResult: { url: string; blob: Blob | null } = {
         url: "",
         blob: null,
@@ -681,47 +739,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         recordingResult = await waitForVideo();
       }
 
-      setShowFlash(true);
-      setPhase("preview"); 
-      
-      setTimeout(() => {
-        setShowFlash(false);
-      }, 300);
-
-      let photoData: string = "";
-      try {
-        if (cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback) {
-          photoData = await canonCamera.takePhotoDuringRecording();
-        } else {
-          photoData = await takePhoto();
-        }
-      } catch (err) {
-        console.warn("[Capture] Auto Focus Fail or Error, Retrying...", err);
-        await new Promise((r) => setTimeout(r, 600));
-        try {
-          photoData = await takePhoto();
-        } catch (retryErr) {
-          console.error("[Capture] Retry failed", retryErr);
-        }
-      }
-
-      if (!photoData || photoData.length < 100) {
-        console.warn("[Capture] AF Failed! Fallback to LiveView screen capture.");
-        if (cameraTypeRef.current === "canon" && canonCamera.liveViewFrame) {
-          photoData = canonCamera.liveViewFrame;
-        } else if (cameraTypeRef.current === "webcam" && videoRef.current && canvasRef.current) {
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          canvas.width = video.videoWidth || 1920;
-          canvas.height = video.videoHeight || 1080;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            photoData = canvas.toDataURL("image/jpeg", 0.92);
-          }
-        }
-      }
-
       const captureIndex = i;
 
       if (cameraTypeRef.current === "canon") {
@@ -737,7 +754,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         setCaptures([...localCaptures]);
         setCurrentCapture(i + 1);
 
-        // 🚀 ปรับเป็น 400ms ให้จังหวะรอยต่อสมูทขึ้น ตัวเลขไม่กระตุก!
         await new Promise((r) => setTimeout(r, 400));
 
       } else {
@@ -768,7 +784,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         setCaptures([...localCaptures]);
         setCurrentCapture(i + 1);
         
-        // 🚀 ปรับเป็น 400ms เช่นเดียวกัน
         await new Promise((r) => setTimeout(r, 400));
       }
 

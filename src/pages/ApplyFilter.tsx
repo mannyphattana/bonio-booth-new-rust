@@ -302,7 +302,8 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 gap: "15px",
                 overflowX: "auto",
                 scrollBehavior: "smooth",
-                padding: "15px 60px",
+                // 🚨 ขยายพื้นที่ให้กว้างขึ้น เพื่อให้มั่นใจว่าจะไม่โดนขอบบนของคอนเทนเนอร์นี้ตัด
+                padding: "20px 60px 20px 80px",
                 WebkitOverflowScrolling: "touch",
                 width: "100%",
                 alignItems: "stretch",
@@ -322,7 +323,8 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "center",
-                      padding: 0,
+                      // 🚨 ดันเนื้อหาลงมา 16px เพื่อให้มีพื้นที่เหลือสำหรับวงกลมด้านบน
+                      paddingTop: "16px",
                       background: "transparent",
                       cursor: "pointer",
                       position: "relative",
@@ -335,7 +337,8 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                       <div
                         style={{
                           position: "absolute",
-                          top: "-10px",
+                          // 🚨 ขยับลงมาให้อยู่ในพื้นที่ 16px ที่เราดันลงมา
+                          top: "4px",
                           left: "50%",
                           transform: "translateX(-50%)",
                           zIndex: 10,
@@ -470,22 +473,19 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              padding: "0 30px 20px",
+              padding: "10px 30px 20px", 
               width: "100%",
             }}
           >
             <div
               style={{
-                width: "100%",
+                position: "relative",
+                display: "inline-block", // ให้กรอบปรับขนาดตามรูปภาพ
                 maxWidth: "800px",
-                height: "auto",
-                maxHeight: "40vh",
-                aspectRatio: "16 / 9",
+                maxHeight: "45vh", // เพิ่มความสูงได้อีกนิดนึง
                 borderRadius: "15px",
                 overflow: "hidden",
                 boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
-                position: "relative",
-                background: "black",
               }}
             >
               {loading && (
@@ -509,7 +509,14 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 src={previewImage}
                 alt="Preview"
                 draggable={false}
-                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                style={{ 
+                  display: "block", 
+                  width: "auto",    
+                  height: "auto",   
+                  maxWidth: "100%", 
+                  maxHeight: "45vh", 
+                  objectFit: "contain" 
+                }}
               />
             </div>
           </div>

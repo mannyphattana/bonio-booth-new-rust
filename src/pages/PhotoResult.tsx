@@ -29,9 +29,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const selectedFilter = state.selectedFilter;
   const quantity: number = state.quantity || 1;
   const slots: FrameSlot[] = selectedFrame?.grid?.slots || [];
-  // Slot coordinates are in imageSize space (matching old project)
-  // imageSize = frame pixel dimensions (e.g. "2400x3600")
-  // grid.width/height = logical frame format (e.g. 1200x1800 = 2x3)
+  
   const [_imgW, _imgH] = (selectedFrame?.imageSize || "")
     .split("x")
     .map(Number);
@@ -45,7 +43,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const [uploadStatus, setUploadStatus] = useState<string>("processing");
   const [printStatus, setPrintStatus] = useState<string>("idle");
   const [error, setError] = useState("");
-  // const [countdown, setCountdown] = useState(300); // Removed custom state
   const [, setStatusText] = useState("กำลังประมวลผล...");
 
   const hasStarted = useRef(false);
@@ -85,9 +82,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     }
   }, [frameCaptures, selectedFrame, slots, frameWidth, frameHeight]);
 
-  // Step 1: Create presigned upload session immediately
-  // This returns qrcodeStorageUrl + presigned URLs + sessionId
-  // QR code is displayed BEFORE any files are uploaded (matches reference flow)
   useEffect(() => {
     if (hasCreatedPresign.current) return;
 
@@ -112,27 +106,22 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       try {
         console.log("📸 [PhotoResult] Creating presigned upload session...");
 
-        // Format transaction code (optional)
         const transactionCode = state.referenceId
           ? state.referenceId.startsWith("TXN-")
             ? state.referenceId
             : `TXN-${state.referenceId}`
           : undefined;
 
-        // Build files metadata for presign request
         const filesMeta: { type: string; contentType: string }[] = [];
 
-        // finalImage (composed frame photo) - always present
         filesMeta.push({ type: "photo", contentType: "image/jpeg" });
 
-        // Individual capture photos
         frameCaptures.forEach((cap: Capture) => {
           if (cap.photo) {
             filesMeta.push({ type: "photo", contentType: "image/jpeg" });
           }
         });
 
-        // ONE compiled frame video (if any captures have video)
         if (frameCaptures.some((cap: Capture) => cap.videoPath)) {
           filesMeta.push({ type: "video", contentType: "video/mp4" });
         }
@@ -149,7 +138,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           transactionCode: transactionCode || null,
         });
 
-        // The API response is wrapped in ApiResponse { success, data, error }
         const responseData = presignResult.data || presignResult;
 
         if (presignResult.success && responseData.qrcodeStorageUrl) {
@@ -157,7 +145,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             "✅ [PhotoResult] Presign session created! QR Code URL:",
             responseData.qrcodeStorageUrl,
           );
-          // Set QR code URL immediately - shows QR before upload starts
           setQrCodeUrl(responseData.qrcodeStorageUrl);
           setSessionId(responseData.photoSession?.id || "");
           setUploadUrls(responseData.uploadUrls || []);
@@ -174,18 +161,17 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             "❌ [PhotoResult] Failed to create presign session:",
             responseData.error || responseData.message || presignResult.error,
           );
-          hasCreatedPresign.current = false; // Allow retry
+          hasCreatedPresign.current = false; 
         }
       } catch (err) {
         console.error("❌ [PhotoResult] Error creating presign session:", err);
-        hasCreatedPresign.current = false; // Allow retry
+        hasCreatedPresign.current = false; 
       }
     };
 
     createPresignSession();
-  }, [state?.transactionId, state?.referenceId]); // eslint-disable-line
+  }, [state?.transactionId, state?.referenceId]); 
 
-  // Step 2: Upload files to presigned URLs (runs after presign + compose are done)
   const uploadFiles = useCallback(
     async (composedImg: string) => {
       if (hasUploadedFiles.current) return;
@@ -201,7 +187,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         setUploadStatus("uploading");
         setStatusText("กำลังอัปโหลด...");
 
-        // Separate photo and video upload URLs (sorted by order)
         const photoUrls = uploadUrls
           .filter((u: any) => u.type === "photo")
           .sort((a: any, b: any) => a.order - b.order);
@@ -217,7 +202,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           [];
         let photoIdx = 0;
 
-        // Upload composed frame (order 1 = finalImage)
         if (photoIdx < photoUrls.length) {
           setStatusText("กำลังอัปโหลดรูปเฟรม...");
           const composedPath: string = await invoke("save_temp_image", {
@@ -244,7 +228,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           photoIdx++;
         }
 
-        // Upload individual capture photos
         for (
           let i = 0;
           i < frameCaptures.length && photoIdx < photoUrls.length;
@@ -278,9 +261,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           photoIdx++;
         }
 
-        // Upload compiled frame video (ONE video with all captures in frame layout)
         if (videoUrls.length > 0) {
-          // Collect all video paths from captures
           const videoPaths = frameCaptures
             .map((cap: Capture) => cap.videoPath)
             .filter((p): p is string => !!p);
@@ -288,11 +269,9 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           if (videoPaths.length > 0) {
             setStatusText("กำลังรวมวิดีโอ...");
             try {
-              // Compose all capture videos into one framed video
               console.log(
                 `🎬 [PhotoResult] Composing framed video with ${videoPaths.length} captures...`,
               );
-              // Resolve LUT path for video filter if a filter is selected
               let lutPath: string | null = null;
               if (
                 selectedFilter &&
@@ -327,6 +306,18 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
                 `✅ [PhotoResult] Framed video composed: ${composedVideoPath}`,
               );
 
+              // 🚨 [เพิ่มใหม่] สั่งเซฟไฟล์วิดีโอ (mp4) ลงเครื่องคอมพิวเตอร์
+              try {
+                const txId = state.transactionId || state.referenceId || new Date().getTime();
+                await invoke("copy_video_to_local_drive", {
+                  sourcePath: composedVideoPath,
+                  filename: `BonioBooth_${txId}.mp4`, 
+                });
+                console.log("✅ [PhotoResult] Saved video to local drive successfully!");
+              } catch (err) {
+                console.error("❌ [PhotoResult] Save video to local drive failed:", err);
+              }
+
               setStatusText("กำลังอัปโหลดวิดีโอ...");
               await invoke("upload_to_presigned_url", {
                 url: videoUrls[0].uploadUrl,
@@ -350,7 +341,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           }
         }
 
-        // Confirm upload
         if (uploadedFiles.length > 0) {
           console.log(
             `📤 [PhotoResult] Confirming ${uploadedFiles.length} uploaded files...`,
@@ -371,43 +361,37 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       } catch (err) {
         console.error("❌ [PhotoResult] Upload error:", err);
         setUploadStatus("error");
-        hasUploadedFiles.current = false; // Allow retry
+        hasUploadedFiles.current = false; 
       }
     },
-    [sessionId, uploadUrls, frameCaptures],
+    [sessionId, uploadUrls, frameCaptures, selectedFrame, selectedFilter, slots, frameWidth, frameHeight, state.transactionId, state.referenceId],
   );
 
-  // Print the composed frame
   const printFrame = useCallback(
     async (composedImg: string, printQuantity: number = 1) => {
       try {
         setPrintStatus("printing");
 
-        // Determine frame type for cutting
-        // Rust print_photo handles duplication automatically for 2x6 and 6x2
         let frameType = "4x6";
         let isLandscape = false;
         if (frameWidth && frameHeight) {
           const ratio = frameWidth / frameHeight;
           if (ratio < 0.5) {
-            frameType = "2x6";      // portrait-cut: 2x6 → duplicated to 4x6 by Rust
+            frameType = "2x6";      
           } else if (ratio > 2) {
-            frameType = "6x2";      // landscape-cut: 6x2 → duplicated to 6x4 by Rust
+            frameType = "6x2";      
             isLandscape = true;
           } else if (ratio > 1) {
-            frameType = "6x4";      // landscape no-cut
+            frameType = "6x4";      
             isLandscape = true;
           }
-          // else: 4x6 portrait no-cut (default)
         }
 
-        // Save to temp file (Rust handles 2x6/6x2 duplication internally)
         const printPath: string = await invoke("save_temp_image", {
           imageDataBase64: composedImg,
           filename: "print-frame.png",
         });
 
-        // Load paper position config (per-orientation: paperConfigPortrait / paperConfigLandscape)
         let scale = 100;
         let verticalOffset = 0;
         let horizontalOffset = 0;
@@ -423,14 +407,11 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             horizontalOffset = config.horizontal ?? 0;
           }
         } catch {
-          /* use defaults */
         }
 
-        // Get selected printer (from config or auto-detect)
         let printerName = localStorage.getItem("selectedPrinter") || "";
 
         if (!printerName) {
-          // Fallback: auto-detect printer
           const printers: any[] = await invoke("get_printers");
           const dnpPrinter = printers.find(
             (p: any) =>
@@ -442,13 +423,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }
 
         if (printerName) {
-          // Set printing state BEFORE checking printer status to prevent false notifications
-          // This must be done synchronously before any async operations
-          const printTimeout = printQuantity * 45000; // 45 seconds per copy
+          const printTimeout = printQuantity * 45000; 
           setPrinting(true, printTimeout);
           console.log(`[PhotoResult] Printing state set to true before print (${printQuantity} copies, timeout: ${printTimeout}ms)`);
           
-          // Small delay to ensure printing state is set before device check runs
           await new Promise(resolve => setTimeout(resolve, 100));
 
           try {
@@ -465,11 +443,9 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
               });
             }
 
-            // Reduce paper level by actual quantity
             await invoke("reduce_paper_level", { copies: printQuantity });
             setPrintStatus("done");
           } finally {
-            // Clear printing state after print completes (includes grace period)
             console.log("[PhotoResult] Print completed, clearing printing state");
             setPrinting(false);
           }
@@ -480,32 +456,39 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       } catch (err) {
         console.error("Print error:", err);
         setPrintStatus("error");
-        // Clear printing state on error
         setPrinting(false);
       }
     },
     [frameWidth, frameHeight],
   );
 
-  // Main effect - compose frame + print immediately
-  // Upload is triggered separately when presign data + composed image are both ready
   useEffect(() => {
     if (hasStarted.current) return;
     hasStarted.current = true;
 
     const process = async () => {
-      // Compose frame
       const composedImg = await composeFrame();
       if (!composedImg) return;
 
-      // Print immediately (doesn't need presign)
+      // 🚨 [เพิ่มใหม่] สั่งเซฟรูปภาพ (jpg) ลงเครื่องคอมพิวเตอร์
+      try {
+        const txId = state.transactionId || state.referenceId || new Date().getTime();
+        await invoke("save_to_local_drive", {
+          imageDataBase64: composedImg,
+          filename: `BonioBooth_${txId}.jpg`, // เซฟเป็น .jpg
+        });
+        console.log("✅ [PhotoResult] Saved photo to local drive successfully!");
+      } catch (err) {
+        console.error("❌ [PhotoResult] Save photo to local drive failed:", err);
+      }
+
+      // สั่งปริ้นท์ทันที
       printFrame(composedImg, quantity);
     };
 
     process();
   }, []); // eslint-disable-line
 
-  // Trigger upload when presign data arrives AND composedImage is ready
   useEffect(() => {
     if (!composedImage || !sessionId || uploadUrls.length === 0) return;
     if (hasUploadedFiles.current) return;
@@ -513,25 +496,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     uploadFiles(composedImage);
   }, [composedImage, sessionId, uploadUrls, uploadFiles]);
 
-  // Auto-return countdown handled by Countdown component
-  /*
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          navigate("/");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [navigate]);
-  */
-
-  // Printer disconnect check
   useEffect(() => {
     const checkPrinter = setInterval(async () => {
       try {
@@ -542,7 +506,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           setTimeout(() => navigate("/"), 3000);
         }
       } catch {
-        // Ignore
       }
     }, 5000);
 
@@ -553,8 +516,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     navigate("/");
   };
 
-  // ✅ เพิ่มตัวแปรสำหรับเช็คว่ากำลังอัปโหลดอยู่หรือไม่ 
-  // (ถ้ากำลังอัปโหลด หรือกำลังประมวลผลอยู่ จะเป็น true)
   const isUploading = uploadStatus === "processing" || uploadStatus === "uploading";
 
   return (
@@ -734,7 +695,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         </p>
       )}
 
-      {/* ✅ ปรับปรุงปุ่ม Home เพื่อล็อกและแสดงสถานะระหว่างการอัปโหลด */}
+      {/* ปุ่ม Home พร้อมแสดงสถานะระหว่างอัปโหลด */}
       <button
         className="primary-button"
         onClick={handleHome}
@@ -745,7 +706,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           marginBottom: 20,
           cursor: isUploading ? "not-allowed" : "pointer",
           opacity: isUploading ? 0.7 : 1,
-          transition: "all 0.3s ease" // เพิ่ม transition ให้สีเปลี่ยนนุ่มนวล
+          transition: "all 0.3s ease" 
         }}
       >
         {isUploading ? "⏳ กำลังอัปโหลดภาพและวิดีโอ..." : "กลับหน้าหลัก / HOME"}

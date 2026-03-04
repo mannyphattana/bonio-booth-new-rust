@@ -195,7 +195,7 @@ pub async fn trim_video_keep_last(
             "-t", &format!("{}", keep_seconds),
             "-c:v", "libx264",
             "-preset", "ultrafast", 
-            "-crf", "18", 
+            "-crf", "18",
             "-an",
             "-movflags", "+faststart",
             &output_path.to_string_lossy(),
@@ -275,8 +275,8 @@ pub async fn apply_lut_to_video(
     // Copy LUT to temp dir and use just the filename (avoids path escaping issues)
     let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
     
-    // 🚨 แก้ปัญหาภาพมีฝ้าขาวก่อนใส่ LUT (บังคับแปลง YUV -> RGB แบบ Full Range)
-    let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=pc:out_color_matrix=bt709,format=yuvj420p", lut_filename);
+    // 🚨 แปลง RGB เข้า LUT แล้วแปลงออกเป็น yuv420p แบบ TV Range ป้องกัน Gamma Shift
+    let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=tv:out_color_matrix=bt709,format=yuv420p", lut_filename);
 
     let ffmpeg = get_ffmpeg_path();
     let status = hidden_command(&ffmpeg)
@@ -288,16 +288,16 @@ pub async fn apply_lut_to_video(
             "-vf",
             &lut_filter,
             "-c:v", "libx264",
-            "-pix_fmt", "yuvj420p", // 🚀 บังคับใช้ yuvj420p
+            "-pix_fmt", "yuv420p",
             "-preset",
             "ultrafast", 
             "-crf",
             "18", 
-            "-color_range", "2",
+            "-color_range", "1", // 🚀 บังคับเป็น TV Range (1) เพื่อให้เข้ากับทุกเครื่องเล่น
             "-colorspace", "1",
             "-color_primaries", "1",
-            "-color_trc", "13", // 🚀 ใช้ 13 (sRGB) เพื่อให้ตรงกับหน้าจอและรูปภาพ
-            "-bsf:v", "h264_metadata=video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+            "-color_trc", "1",   // 🚀 บังคับเป็น BT.709 (1) แก้ปัญหาสีซีด
+            "-bsf:v", "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -387,8 +387,8 @@ pub async fn process_frame_video(
     if !lut_path.is_empty() && Path::new(&lut_path).exists() {
         let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
         
-        // 🚨 แก้ปัญหาภาพมีฝ้าขาวก่อนใส่ LUT
-        let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=pc:out_color_matrix=bt709,format=yuvj420p", lut_filename);
+        // 🚨 แปลง RGB เข้า LUT แล้วแปลงออกเป็น yuv420p แบบ TV Range ป้องกัน Gamma Shift
+        let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=tv:out_color_matrix=bt709,format=yuv420p", lut_filename);
 
         let filter_status = hidden_command(&ffmpeg)
             .current_dir(&temp_dir)
@@ -397,14 +397,14 @@ pub async fn process_frame_video(
                 "-i", &looped_path.to_string_lossy(),
                 "-vf", &lut_filter,
                 "-c:v", "libx264",
-                "-pix_fmt", "yuvj420p", // 🚀 บังคับใช้ yuvj420p
+                "-pix_fmt", "yuv420p",
                 "-preset", "ultrafast", 
                 "-crf", "18", 
-                "-color_range", "2",
+                "-color_range", "1", // 🚀 บังคับเป็น TV Range (1)
                 "-colorspace", "1",
                 "-color_primaries", "1",
-                "-color_trc", "13", // 🚀 ใช้ 13 (sRGB) เพื่อให้ตรงกับหน้าจอและรูปภาพ
-                "-bsf:v", "h264_metadata=video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+                "-color_trc", "1",   // 🚀 บังคับเป็น BT.709 (1)
+                "-bsf:v", "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
                 "-movflags", "+faststart",
                 &output_path.to_string_lossy(),
             ])
@@ -588,8 +588,9 @@ pub async fn compose_frame_video(
     }
 
     let final_label = format!("{}out", prev);
+    // 🚨 แปลงกลับเป็น TV Range (yuv420p) เพื่อป้องกันสีวิดีโอเพี้ยนเวลาเปิดบน Mac/iOS
     filter_parts.push(format!(
-        "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=pc,format=yuvj420p[{}]",
+        "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[{}]",
         prev, final_label
     ));
 
@@ -600,16 +601,17 @@ pub async fn compose_frame_video(
         "-filter_complex".to_string(), filter_complex,
         "-map".to_string(), format!("[{}]", final_label),
         "-c:v".to_string(), "libx264".to_string(),
-        "-pix_fmt".to_string(), "yuvj420p".to_string(), // 🚀 เปลี่ยนกลับมาใช้ yuvj420p
+        "-pix_fmt".to_string(), "yuv420p".to_string(), // 🚀 บังคับกลับมาใช้ yuv420p
         "-preset".to_string(), "ultrafast".to_string(), 
         "-crf".to_string(), "18".to_string(), 
         
-        "-color_range".to_string(), "2".to_string(), 
+        "-color_range".to_string(), "1".to_string(), // 🚀 บังคับเป็น TV Range (1) 
         "-colorspace".to_string(), "1".to_string(), 
         "-color_primaries".to_string(), "1".to_string(), 
-        "-color_trc".to_string(), "13".to_string(), // 🚀 เปลี่ยนกราฟสีเป็น 13 (sRGB) ให้เหมือนจอภาพ
+        "-color_trc".to_string(), "1".to_string(), // 🚀 บังคับเป็น BT.709 (1)
         
-        "-bsf:v".to_string(), "h264_metadata=video_full_range_flag=1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1".to_string(),
+        // 🚀 ฝัง Metadata ป้องกันการเร่งแสง
+        "-bsf:v".to_string(), "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1".to_string(),
         
         "-t".to_string(), "9".to_string(),
         "-an".to_string(),
@@ -651,3 +653,54 @@ pub async fn cleanup_temp() -> Result<(), String> {
     }
     Ok(())
 }
+// =====================================================================
+// 🚨 [โค้ดส่วนที่แก้ไขใหม่] บังคับเซฟตรงไปที่ C:\Users\boniobooth\Saved_Photos
+// =====================================================================
+
+/// บันทึกรูปภาพ (Base64) ลงในเครื่องถาวร
+#[tauri::command]
+pub async fn save_to_local_drive(
+    image_data_base64: String,
+    filename: String,
+) -> Result<String, String> {
+    // 🚨 ล็อกเป้าหมายไปที่โฟลเดอร์ของ boniobooth โดยตรง
+    let save_dir = std::path::PathBuf::from(r"C:\Users\boniobooth\Saved_Photos");
+        
+    std::fs::create_dir_all(&save_dir).map_err(|e| format!("Create dir error: {}", e))?;
+
+    let clean = if image_data_base64.contains(",") {
+        image_data_base64.split(',').nth(1).unwrap_or(&image_data_base64)
+    } else {
+        &image_data_base64
+    };
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(clean)
+        .map_err(|e| format!("Decode error: {}", e))?;
+
+    let file_path = save_dir.join(&filename);
+    std::fs::write(&file_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
+
+    println!("✅ [Local Save] Saved photo to: {}", file_path.display());
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+/// ก๊อปปี้ไฟล์วิดีโอ (.mp4) ลงในเครื่องถาวร
+#[tauri::command]
+pub async fn copy_video_to_local_drive(
+    source_path: String,
+    filename: String,
+) -> Result<String, String> {
+    // 🚨 ล็อกเป้าหมายไปที่โฟลเดอร์ของ boniobooth โดยตรง
+    let save_dir = std::path::PathBuf::from(r"C:\Users\boniobooth\Saved_Photos");
+        
+    std::fs::create_dir_all(&save_dir).map_err(|e| format!("Create dir error: {}", e))?;
+
+    let dest_path = save_dir.join(&filename);
+    
+    std::fs::copy(&source_path, &dest_path).map_err(|e| format!("Copy error: {}", e))?;
+
+    println!("✅ [Local Save] Saved video to: {}", dest_path.display());
+    Ok(dest_path.to_string_lossy().to_string())
+}
+// =====================================================================

@@ -724,7 +724,7 @@ button:active {
 
 /* Row 1: title area – fixed 35% */
 .page-row-top {
-  flex: 0 0 25%;
+  flex: 0 0 20%;
   width: 100%;
   display: flex;
   flex-direction: column;
