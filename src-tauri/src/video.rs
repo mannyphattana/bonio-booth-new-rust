@@ -654,17 +654,19 @@ pub async fn cleanup_temp() -> Result<(), String> {
     Ok(())
 }
 // =====================================================================
-// 🚨 [โค้ดส่วนที่แก้ไขใหม่] บังคับเซฟตรงไปที่ C:\Users\boniobooth\Saved_Photos
+// 🚨 [โค้ดส่วนที่แก้ไขใหม่] บังคับเซฟตรงไปที่ C:\boniobooth\Saved_Photos
 // =====================================================================
 
+/// บันทึกรูปภาพ (Base64) ลงในเครื่องถาวร
 #[tauri::command]
 pub async fn save_to_local_drive(
     image_data_base64: String,
     filename: String,
 ) -> Result<String, String> {
-    // 🚨 ล็อกเป้าหมายไปที่โฟลเดอร์ของเครื่อง timelab#4 โดยตรง
-    let save_dir = std::path::PathBuf::from(r"C:\Users\timelab#4\Saved_Photos");
+    // 🚨 สร้างและชี้เป้าหมายไปที่ C:\boniobooth\Saved_Photos โดยตรง จะได้เหมือนกันทุกตู้
+    let save_dir = std::path::PathBuf::from(r"C:\boniobooth\Saved_Photos");
         
+    // คำสั่งนี้จะสร้างโฟลเดอร์ boniobooth และ Saved_Photos ให้อัตโนมัติถ้ายังไม่มี
     std::fs::create_dir_all(&save_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
     let clean = if image_data_base64.contains(",") {
@@ -690,8 +692,8 @@ pub async fn copy_video_to_local_drive(
     source_path: String,
     filename: String,
 ) -> Result<String, String> {
-    // 🚨 ล็อกเป้าหมายไปที่โฟลเดอร์ของเครื่อง timelab#4 โดยตรง
-    let save_dir = std::path::PathBuf::from(r"C:\Users\timelab#4\Saved_Photos");
+    // 🚨 สร้างและชี้เป้าหมายไปที่ C:\boniobooth\Saved_Photos โดยตรง
+    let save_dir = std::path::PathBuf::from(r"C:\boniobooth\Saved_Photos");
         
     std::fs::create_dir_all(&save_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
