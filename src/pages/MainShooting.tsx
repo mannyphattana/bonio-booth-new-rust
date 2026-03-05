@@ -323,7 +323,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     const recorder = new RecordRTC(streamRef.current, {
       type: "video",
       mimeType: mimeType as any,
-      videoBitsPerSecond: 15000000, 
+      videoBitsPerSecond: 6000000, 
       frameRate: 30,
       timeSlice: 1000, 
       disableLogs: true,
