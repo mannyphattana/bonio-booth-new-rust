@@ -25,9 +25,18 @@ export default function ContextMenu({
     "camera" | "printer" | "paper" | null
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  
+  // State สำหรับรหัสปิดแอป (ของเดิม)
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState(false);
+
+  // 🚨 State สำหรับรหัสผ่านเข้าเมนู (7053)
+  const [isMenuUnlocked, setIsMenuUnlocked] = useState(false);
+  const [unlockPinInput, setUnlockPinInput] = useState("");
+  const [unlockPinError, setUnlockPinError] = useState(false);
+  const MENU_PIN = "7053";
+
   const [cameraStatus, setCameraStatus] = useState("");
   const [printerStatus, setPrinterStatus] = useState("");
   const [appVersion, setAppVersion] = useState("");
@@ -40,6 +49,11 @@ export default function ContextMenu({
     setShowPinModal(false);
     setPinInput("");
     setPinError(false);
+    
+    // 🚨 รีเซ็ตสถานะการล็อกทุกครั้งที่เปิดเมนูใหม่
+    setIsMenuUnlocked(false);
+    setUnlockPinInput("");
+    setUnlockPinError(false);
 
     // Get app version
     getVersion().then(v => setAppVersion(v)).catch(console.error);
@@ -78,16 +92,37 @@ export default function ContextMenu({
 
   const handleCloseApp = async () => {
     try {
-      // exit_app handles everything: notify backend → destroy SSE → exit
-      // Do NOT call onBeforeClose/destroySSE here — it causes a race condition
-      // where SSE disconnect triggers markOffline lock before notifyGoingOffline arrives
       await invoke("exit_app");
     } catch {
-      // fallback: force process exit via window close (CloseRequested handler will handle cleanup)
       window.close();
     }
   };
 
+  // 🚨 ฟังก์ชันจัดการปุ่มกดรหัสสำหรับ "เข้าเมนู (7053)"
+  const handleUnlockPinKey = (key: string) => {
+    if (key === "del") {
+      setUnlockPinInput((p) => p.slice(0, -1));
+      setUnlockPinError(false);
+      return;
+    }
+    if (unlockPinInput.length >= 4) return;
+    const next = unlockPinInput + key;
+    setUnlockPinInput(next);
+    
+    if (next.length === MENU_PIN.length) {
+      if (next === MENU_PIN) {
+        setIsMenuUnlocked(true);
+      } else {
+        setUnlockPinError(true);
+        setTimeout(() => {
+          setUnlockPinInput("");
+          setUnlockPinError(false);
+        }, 800);
+      }
+    }
+  };
+
+  // ฟังก์ชันจัดการปุ่มกดรหัสสำหรับ "ปิดแอป"
   const handlePinKey = (key: string) => {
     if (key === "del") {
       setPinInput((p) => p.slice(0, -1));
@@ -113,47 +148,55 @@ export default function ContextMenu({
     }
   };
 
-  // Keyboard support for PIN modal
+  // Keyboard support for PIN modals
   useEffect(() => {
-    if (!showPinModal) return;
+    if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key >= "0" && e.key <= "9") {
-        handlePinKey(e.key);
-      } else if (e.key === "Backspace") {
-        handlePinKey("del");
-      } else if (e.key === "Escape") {
-        setShowPinModal(false);
-        setPinInput("");
-        setPinError(false);
+      // โหมดกดรหัสปิดแอป
+      if (showPinModal) {
+        if (e.key >= "0" && e.key <= "9") handlePinKey(e.key);
+        else if (e.key === "Backspace") handlePinKey("del");
+        else if (e.key === "Escape") {
+          setShowPinModal(false);
+          setPinInput("");
+          setPinError(false);
+        }
+      } 
+      // โหมดกดรหัสเข้าเมนู (ยังไม่ปลดล็อก)
+      else if (!isMenuUnlocked) {
+        if (e.key >= "0" && e.key <= "9") handleUnlockPinKey(e.key);
+        else if (e.key === "Backspace") handleUnlockPinKey("del");
+        else if (e.key === "Escape") onClose();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showPinModal, pinInput, pinError]);
+  }, [showPinModal, isMenuUnlocked, open, unlockPinInput, pinInput]);
 
   if (!open) return null;
 
-  // PIN modal for closing the app
-  if (showPinModal) {
-    const PAD = [["1","2","3"],["4","5","6"],["7","8","9"],["del","0",""]];
+  const PAD = [["1","2","3"],["4","5","6"],["7","8","9"],["del","0",""]];
+
+  // 🚨 ด่านตรวจที่ 1: ถ้ายังไม่ได้ปลดล็อกรหัส 7053 ให้แสดงหน้าต่างนี้ขวางไว้
+  if (!isMenuUnlocked) {
     return (
       <div
         className="context-menu-overlay"
-        onClick={(e) => { e.stopPropagation(); setShowPinModal(false); setPinInput(""); setPinError(false); }}
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
       >
         <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 320, textAlign: "center" }}>
-          <h3 style={{ margin: "0 0 8px" }}>🔒 ยืนยันรหัสก่อนปิดแอป</h3>
-          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>Enter PIN to close the app</p>
+          <h3 style={{ margin: "0 0 8px" }}>🔒 รหัสผ่านตั้งค่า</h3>
+          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>กรอกรหัสผ่านเพื่อเข้าสู่เมนูผู้ดูแล</p>
 
           {/* Dots */}
           <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
-            {Array.from({ length: CLOSE_APP_PIN.length }).map((_, i) => (
+            {Array.from({ length: MENU_PIN.length }).map((_, i) => (
               <div
                 key={i}
                 style={{
                   width: 18, height: 18, borderRadius: "50%",
-                  background: i < pinInput.length
-                    ? (pinError ? "#ff4444" : "#fff")
+                  background: i < unlockPinInput.length
+                    ? (unlockPinError ? "#ff4444" : "#fff")
                     : "#555",
                   transition: "background 0.15s",
                 }}
@@ -161,7 +204,7 @@ export default function ContextMenu({
             ))}
           </div>
 
-          {pinError && (
+          {unlockPinError && (
             <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>รหัสไม่ถูกต้อง</p>
           )}
 
@@ -171,7 +214,7 @@ export default function ContextMenu({
               key === "" ? <div key={i} /> :
               <button
                 key={i}
-                onClick={() => handlePinKey(key)}
+                onClick={() => handleUnlockPinKey(key)}
                 style={{
                   padding: "16px 0",
                   fontSize: key === "del" ? 18 : 24,
@@ -181,6 +224,61 @@ export default function ContextMenu({
                   background: key === "del" ? "#444" : "#2a2a2a",
                   color: "#fff",
                   cursor: "pointer",
+                }}
+              >
+                {key === "del" ? "⌫" : key}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="context-menu-item"
+            style={{ marginTop: 16, justifyContent: "center", background: "#333" }}
+            onClick={onClose}
+          >
+            ยกเลิก
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ด่านตรวจที่ 2: PIN modal สำหรับยืนยันการ "ปิดแอป" (ของเดิม)
+  if (showPinModal) {
+    return (
+      <div
+        className="context-menu-overlay"
+        onClick={(e) => { e.stopPropagation(); setShowPinModal(false); setPinInput(""); setPinError(false); }}
+      >
+        <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 320, textAlign: "center" }}>
+          <h3 style={{ margin: "0 0 8px" }}>🔒 ยืนยันรหัสก่อนปิดแอป</h3>
+          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>Enter PIN to close the app</p>
+
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
+            {Array.from({ length: CLOSE_APP_PIN.length }).map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  width: 18, height: 18, borderRadius: "50%",
+                  background: i < pinInput.length ? (pinError ? "#ff4444" : "#fff") : "#555",
+                  transition: "background 0.15s",
+                }}
+              />
+            ))}
+          </div>
+
+          {pinError && <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>รหัสไม่ถูกต้อง</p>}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            {PAD.flat().map((key, i) => (
+              key === "" ? <div key={i} /> :
+              <button
+                key={i}
+                onClick={() => handlePinKey(key)}
+                style={{
+                  padding: "16px 0", fontSize: key === "del" ? 18 : 24, fontWeight: 600,
+                  borderRadius: 12, border: "none", background: key === "del" ? "#444" : "#2a2a2a",
+                  color: "#fff", cursor: "pointer",
                 }}
               >
                 {key === "del" ? "⌫" : key}
@@ -202,23 +300,18 @@ export default function ContextMenu({
 
   // If a sub-modal is active, show it instead
   if (activeModal === "camera") {
-    return (
-      <CameraConfigModal open={true} onClose={() => setActiveModal(null)} />
-    );
+    return <CameraConfigModal open={true} onClose={() => setActiveModal(null)} />;
   }
 
   if (activeModal === "printer") {
-    return (
-      <PrinterConfigModal open={true} onClose={() => setActiveModal(null)} />
-    );
+    return <PrinterConfigModal open={true} onClose={() => setActiveModal(null)} />;
   }
 
   if (activeModal === "paper") {
-    return (
-      <PaperPositionModal open={true} onClose={() => setActiveModal(null)} />
-    );
+    return <PaperPositionModal open={true} onClose={() => setActiveModal(null)} />;
   }
 
+  // หน้าจอเมนูหลัก (แสดงเมื่อกรอกรหัส 7053 ผ่านแล้ว)
   return (
     <div
       className="context-menu-overlay"

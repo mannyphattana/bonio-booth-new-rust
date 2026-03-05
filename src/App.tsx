@@ -55,7 +55,7 @@ export interface FrameSlot {
   height: number;
   radius: number;
   zIndex: number;
-  rotate?: number; // Rotation in degrees (0-360)
+  rotate?: number; 
 }
 
 export interface FrameData {
@@ -63,7 +63,7 @@ export interface FrameData {
   name: string;
   code: string;
   imageUrl: string;
-  imageSize?: string; // Format: "widthxheight" e.g. "1200x1800"
+  imageSize?: string; 
   orientation?: "portrait" | "landscape";
   previewUrl?: string;
   grid: {
@@ -80,7 +80,7 @@ export interface Capture {
   videoPath?: string;
 }
 
-/** ส่ง pathname ไปให้ parent (ใช้ใน Router) — อิง logic จาก app booth: countdown ทำที่หน้าแรกเท่านั้น */
+/** ส่ง pathname ไปให้ parent */
 function RouteSync({
   onRouteChange,
 }: {
@@ -98,25 +98,28 @@ function App() {
   const [themeData, setThemeData] = useState<ThemeData | null>(null);
   const [isVerified, setIsVerified] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
-  /** true = เปิด maintenance จาก dashboard (isMaintenanceMode) — priority หลัก, ไม่ให้ device-check ปิด overlay เอง */
   const [maintenanceFromBackend, setMaintenanceFromBackend] = useState(false);
   const [maintenanceConfig, setMaintenanceConfig] = useState<
     "camera" | "printer" | "network" | "paper" | null
   >(null);
   const [lineUrl, setLineUrl] = useState<string>("");
-  /** อยู่หน้าแรกเท่านั้นถึงจะรัน shutdown countdown (อิงจาก app booth: home-page-active / home-page-inactive) */
+  
   const [isOnHomePage, setIsOnHomePage] = useState(true);
+  const isOnHomePageRef = useRef(true); // 🚨 Ref สำหรับใช้เช็คสถานะแบบเรียลไทม์ ป้องกันค่าไม่อัปเดต
+  const [pendingPaperOut, setPendingPaperOut] = useState(false);
 
   const initRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Restore camera type from localStorage to Rust AppState on startup
-  // Otherwise AppState defaults to "webcam" even if user configured "canon"
+  const handleRouteChange = useCallback((path: string) => {
+    const isHome = path === "/";
+    setIsOnHomePage(isHome);
+    isOnHomePageRef.current = isHome;
+  }, []);
+
   useEffect(() => {
     const savedCameraType = localStorage.getItem("cameraType");
     if (savedCameraType) {
-      invoke("set_camera_type", { cameraType: savedCameraType }).catch(
-        () => {},
-      );
+      invoke("set_camera_type", { cameraType: savedCameraType }).catch(() => {});
     }
   }, []);
 
@@ -144,33 +147,34 @@ function App() {
             );
             setIsVerified(true);
 
-            // Clear network error if previously set
             if (maintenanceConfig === "network") {
               setMaintenanceConfig(null);
               setShowMaintenance(false);
             }
 
-            // Extract lineUrl from workspace/theme if available
             if (initResult.data.machine?.lineUrl) {
               setLineUrl(initResult.data.machine.lineUrl);
             }
 
-            // Check if backend set maintenance mode (dashboard) — priority หลัก
-            if (initResult.data.machine?.isMaintenanceMode) {
+            const backendMaintenance = !!initResult.data.machine?.isMaintenanceMode;
+            const paperLevel = initResult.data.paperLevel ?? initResult.data.machine?.paperLevel ?? -1;
+
+            if (backendMaintenance) {
               setShowMaintenance(true);
               setMaintenanceFromBackend(true);
               setMaintenanceConfig(null);
-            } else {
-              // กระดาษหมดจาก API — แสดง maintenance กระดาษหมด
-              const paperLevel =
-                initResult.data.paperLevel ??
-                initResult.data.machine?.paperLevel ??
-                -1;
-              if (paperLevel === 0) {
+            } else if (paperLevel === 0) {
+              // 🚨 ถ้ากระดาษเหลือ 0 ให้เช็คว่าอยู่หน้า Home ไหม
+              if (isOnHomePageRef.current) {
                 setShowMaintenance(true);
                 setMaintenanceFromBackend(false);
                 setMaintenanceConfig("paper");
+              } else {
+                setPendingPaperOut(true); // ฝากคิวไว้ก่อน ค่อยไปโชว์ตอนถึงหน้า Home
               }
+            } else if (!backendMaintenance && paperLevel > 0 && maintenanceConfig === "paper") {
+                setShowMaintenance(false);
+                setMaintenanceConfig(null);
             }
           } else {
             throw new Error("init_machine returned unsuccessful response");
@@ -180,7 +184,6 @@ function App() {
         }
       } catch (err) {
         console.error("Init error:", err);
-        // Backend or network failure — แจ้งเน็ต ไม่ใช่ maintenance จาก dashboard
         setShowMaintenance(true);
         setMaintenanceConfig("network");
         setMaintenanceFromBackend(false);
@@ -189,7 +192,6 @@ function App() {
     [maintenanceConfig],
   );
 
-  // Network retry logic when in network maintenance state
   useEffect(() => {
     if (maintenanceConfig === "network") {
       const savedMachineId = localStorage.getItem("machineId");
@@ -214,19 +216,15 @@ function App() {
     };
   }, [maintenanceConfig, initMachine]);
 
-  // SSE connection - receive events from backend
-  // Shutdown events are handled directly in Rust backend (shutdown manager)
-  // Use stable callbacks to prevent unnecessary reconnects
   const handleMaintenanceMode = useCallback((enabled: boolean) => {
     setShowMaintenance(enabled);
     setMaintenanceFromBackend(enabled);
-    if (enabled) setMaintenanceConfig(null); // แสดง UI แจ้งเตือนจาก dashboard เป็นหลัก ไม่ค้างที่ modal กล้อง/ปริ้น
+    if (enabled) setMaintenanceConfig(null); 
   }, []);
 
   const handleConfigUpdated = useCallback(
     (configType: string) => {
       console.log("[App] Config updated via SSE:", configType);
-      // Re-fetch machine & theme data from backend
       const savedMachineId = localStorage.getItem("machineId");
       if (savedMachineId) {
         initMachine(savedMachineId);
@@ -242,13 +240,11 @@ function App() {
     onConfigUpdated: handleConfigUpdated,
   });
 
-  // Shutdown countdown — listens to Rust shutdown manager events
   const { state: shutdownState, notifyActivity: notifyShutdownActivity } =
     useShutdown({
       enabled: isVerified,
     });
 
-  // Device monitoring - centralized, runs when verified
   const handleMaintenanceNeeded = useCallback(() => {
     setShowMaintenance(true);
   }, []);
@@ -259,68 +255,65 @@ function App() {
     onMaintenanceNeeded: handleMaintenanceNeeded,
   });
 
-  // Auto-update check every 5 minutes
   useAutoUpdate({ enabled: isVerified });
 
-  // Timer Auto-Shutdown — polls backend every 30s to check operating hours
-  // When outside operating hours, starts a 2-minute shutdown countdown
-  // Only refresh machineData if it actually changed (prevent unnecessary re-renders)
   const handleMachineDataRefreshed = useCallback(
     (data: any) => {
       if (data.machine) {
-        // Only update if machineId changed or if critical fields changed
-        const currentMachineId = machineData?._id;
-        const newMachineId = data.machine._id;
+        setMachineData(data.machine);
+        if (data.theme) setThemeData(data.theme);
+        if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
 
-        if (currentMachineId !== newMachineId) {
-          // Machine changed, update everything
-          setMachineData(data.machine);
-          if (data.theme) setThemeData(data.theme);
-          if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
-          // Sync maintenance from backend (เปิด/ปิดจาก dashboard — priority หลัก)
-          const backendMaintenance = !!data.machine?.isMaintenanceMode;
-          setShowMaintenance(backendMaintenance);
-          setMaintenanceFromBackend(backendMaintenance);
-          if (backendMaintenance) setMaintenanceConfig(null);
-        } else {
-          // Same machine, only update if critical fields changed
-          const currentPaperLevel = machineData?.paperLevel;
-          const newPaperLevel = data.machine.paperLevel;
-          const currentMaintenanceMode = machineData?.isMaintenanceMode;
-          const newMaintenanceMode = data.machine.isMaintenanceMode;
+        const newMaintenanceMode = !!data.machine?.isMaintenanceMode;
+        const newPaperLevel = data.paperLevel ?? data.machine?.paperLevel ?? -1;
 
-          if (
-            currentPaperLevel !== newPaperLevel ||
-            currentMaintenanceMode !== newMaintenanceMode ||
-            machineData?.lineUrl !== data.machine?.lineUrl ||
-            machineData?.cameraCountdown !== data.machine?.cameraCountdown
-          ) {
-            setMachineData(data.machine);
-            if (data.theme) setThemeData(data.theme);
-            if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
-            // Sync maintenance from backend (เปิด/ปิดจาก dashboard — priority หลัก)
-            if (newMaintenanceMode) {
-              setShowMaintenance(true);
-              setMaintenanceFromBackend(true);
-              setMaintenanceConfig(null);
-            } else if (newPaperLevel === 0) {
-              // กระดาษหมด — แสดง maintenance กระดาษหมด
-              setShowMaintenance(true);
-              setMaintenanceFromBackend(false);
-              setMaintenanceConfig("paper");
-            } else {
-              setShowMaintenance(!!newMaintenanceMode);
-              setMaintenanceFromBackend(!!newMaintenanceMode);
-              if (newMaintenanceMode) setMaintenanceConfig(null);
-            }
+        if (newMaintenanceMode) {
+          setShowMaintenance(true);
+          setMaintenanceFromBackend(true);
+          setMaintenanceConfig(null);
+        } else if (newPaperLevel === 0) {
+          // 🚨 กันเหนียว: เช็คว่าอยู่หน้าแรกจริงๆ ไหม
+          if (isOnHomePageRef.current) {
+            setShowMaintenance(true);
+            setMaintenanceFromBackend(false);
+            setMaintenanceConfig("paper");
+          } else {
+            setPendingPaperOut(true);
           }
         }
       }
     },
-    [machineData],
+    [],
   );
 
-  // เมื่อโพล์หลังบ้าน (init_machine) ไม่ได้ — แสดง maintenance เชื่อมต่อระบบไม่ได้ แล้ว retry ทุก 10s จนเชื่อมได้
+  // 🚨 [พระเอกของงานนี้] ทำงานทันทีที่พอลูกค้ากลับมาถึงหน้า Home 
+  useEffect(() => {
+    if (isOnHomePage) {
+      // 1. ถ้าระบบฝากคิวเอาไว้ว่ากระดาษหมด ให้เด้งทันที
+      if (pendingPaperOut) {
+        setShowMaintenance(true);
+        setMaintenanceFromBackend(false);
+        setMaintenanceConfig("paper");
+        setPendingPaperOut(false);
+      }
+
+      // 2. ดึงข้อมูลตู้จากหลังบ้านมาเช็คอีกรอบกันเหนียว ทันทีที่แตะหน้า Home! (ข้ามการรอ 30 วินาที)
+      const savedMachineId = localStorage.getItem("machineId");
+      if (savedMachineId && isVerified) {
+         invoke("init_machine").then((res: any) => {
+             if (res.success && res.data) {
+                 const pLevel = res.data.paperLevel ?? res.data.machine?.paperLevel ?? -1;
+                 if (pLevel === 0) {
+                     setShowMaintenance(true);
+                     setMaintenanceFromBackend(false);
+                     setMaintenanceConfig("paper");
+                 }
+             }
+         }).catch(() => {});
+      }
+    }
+  }, [isOnHomePage, pendingPaperOut, isVerified]);
+
   const handleConnectionLost = useCallback(() => {
     setShowMaintenance(true);
     setMaintenanceConfig("network");
@@ -338,6 +331,7 @@ function App() {
     setShowMaintenance(false);
     setMaintenanceFromBackend(false);
     setMaintenanceConfig(null);
+    setPendingPaperOut(false);
   }, []);
 
   const handleFormatReset = () => {
@@ -345,6 +339,7 @@ function App() {
     setThemeData(null);
     setIsVerified(false);
     setShowMaintenance(false);
+    setPendingPaperOut(false);
   };
 
   if (!isVerified) {
@@ -362,7 +357,7 @@ function App() {
 
   return (
     <Router>
-      <RouteSync onRouteChange={(path) => setIsOnHomePage(path === "/")} />
+      <RouteSync onRouteChange={handleRouteChange} />
       {/* Shutdown countdown overlay */}
       <ShutdownOverlay
         state={shutdownState}

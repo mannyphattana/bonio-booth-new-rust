@@ -25,11 +25,16 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
 
   const selectedQuantity = state.quantity || 1;
 
-  // Calculate max quantity from available prices
-  const maxQuantity =
+  // 🚨 [จุดที่แก้ไข] คำนวณขีดจำกัดสูงสุด โดยเช็คจากกระดาษที่เหลือในตู้ด้วย
+  const maxPriceQuantity =
     machineData.prices.length > 0
       ? Math.max(...machineData.prices.map((p) => p.quantity))
       : 10;
+      
+  const availablePaper = machineData.paperLevel !== undefined ? machineData.paperLevel : 999;
+  
+  // ให้เอาค่าที่น้อยกว่าระหว่าง "จำนวนแผ่นสูงสุดที่ตั้งราคาไว้" กับ "กระดาษที่เหลือจริงๆ"
+  const actualMaxQuantity = Math.min(maxPriceQuantity, availablePaper);
 
   // Get current price for selected quantity
   const currentPrice =
@@ -49,7 +54,7 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
   };
 
   const handleIncrease = () => {
-    if (selectedQuantity < maxQuantity) handleSetQuantity(selectedQuantity + 1);
+    if (selectedQuantity < actualMaxQuantity) handleSetQuantity(selectedQuantity + 1);
   };
 
   const handleQRCode = () => {
@@ -106,6 +111,7 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
             onClick={handleDecrease}
             disabled={selectedQuantity <= 1}
             className="quantity-button"
+            style={{ opacity: selectedQuantity <= 1 ? 0.3 : 1 }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path
@@ -121,8 +127,9 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
 
           <button
             onClick={handleIncrease}
-            disabled={selectedQuantity >= maxQuantity}
+            disabled={selectedQuantity >= actualMaxQuantity}
             className="quantity-button"
+            style={{ opacity: selectedQuantity >= actualMaxQuantity ? 0.3 : 1 }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path

@@ -469,7 +469,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           const blob = new Blob(chunks, { type: mimeType });
           
           if (blob.size < 1000) {
-             console.warn("[createVideo] Blob is corrupted (too small), generation failed");
              resolve({ url: "", blob: null });
              return;
           }
@@ -633,46 +632,36 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
       const isCanon = cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback;
 
-      // 🚨 1. สั่งกล้องถ่ายรูปทันทีที่เลข 0 (คำสั่งจะวิ่งผ่านสาย USB ทันที)
       const capturePromise = isCanon
         ? canonCamera.takePhotoDuringRecording()
         : takePhoto();
 
-      // 🚨 2. จัดการแสงแฟลชหน้าจอให้ตรงกับกลไกกล้อง
       if (isCanon) {
-        // กล้อง Canon มีดีเลย์กลไกม่านชัตเตอร์ประมาณ 150-200ms
-        // เราจึงต้อง "หน่วงเวลาโชว์แฟลช" ให้แสงขึ้นมาพร้อมกับเสียงกล้องเป๊ะๆ
         setTimeout(() => {
           setShowFlash(true);
           setPhase("preview"); 
           setTimeout(() => setShowFlash(false), 300);
-        }, 250); // **จุดปรับแต่ง**: ถ้าแสงมาก่อนเสียงนิดนึง ให้เพิ่มเป็น 200, ถ้าแสงมาช้าไป ให้ลดเป็น 100
+        }, 300); 
       } else {
-        // ถ้าเป็นกล้อง Webcam ถ่ายปุ๊บติดปั๊บ ให้โชว์แฟลชทันที
         setShowFlash(true);
         setPhase("preview"); 
         setTimeout(() => setShowFlash(false), 300);
       }
 
-      // รอแสงหน้าจอประมวลผลแป๊บนึง เพื่อความสมูท
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 300)); 
 
-      // 🚨 3. รอรับรูปที่ถ่ายกลับมา
       let photoData: string = "";
       try {
         photoData = await capturePromise;
       } catch (err) {
-        console.warn("[Capture] Auto Focus Fail or Error, Retrying...", err);
         await new Promise((r) => setTimeout(r, 600));
         try {
           photoData = await takePhoto();
         } catch (retryErr) {
-          console.error("[Capture] Retry failed", retryErr);
         }
       }
 
       if (!photoData || photoData.length < 100) {
-        console.warn("[Capture] AF Failed! Fallback to LiveView screen capture.");
         if (cameraTypeRef.current === "canon" && canonCamera.liveViewFrame) {
           photoData = canonCamera.liveViewFrame;
         } else if (cameraTypeRef.current === "webcam" && videoRef.current && canvasRef.current) {
@@ -688,7 +677,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }
       }
 
-      // 🚨 4. ถ่ายรูปเสร็จสรรพแล้ว ค่อยมาปิดอัดวิดีโอตอนท้ายสุด จะได้ไม่รบกวนจังหวะแฟลช
       let recordingResult: { url: string; blob: Blob | null } = {
         url: "",
         blob: null,
@@ -733,7 +721,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           }
           
           (window as any).__lastCanonFrames = final45Frames;
-          await new Promise((r) => setTimeout(r, 50));
         }
       } else {
         recordingResult = await waitForVideo();
@@ -754,29 +741,16 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         setCaptures([...localCaptures]);
         setCurrentCapture(i + 1);
 
-        await new Promise((r) => setTimeout(r, 400));
+        // Canon needs a bit of breathing room between shots
+        await new Promise((r) => setTimeout(r, 200));
 
       } else {
         let videoUrl = recordingResult.url;
         let videoPath = "";
         
         if (recordingResult.blob && recordingResult.blob.size > 1000) {
+          // 🚨 เซฟไฟล์ต้นฉบับอย่างเดียว ไม่ใช้ FFmpeg trim ระหว่างถ่ายแล้ว (เพราะเริ่มอัดตอนเหลือ 3 วิอยู่แล้ว)
           videoPath = await saveVideoToTemp(recordingResult.blob, i);
-          
-          if (cameraCountdown > 3) {
-              try {
-                  const trimmedPath: string = await invoke("trim_video_keep_last", {
-                      inputPath: videoPath,
-                      keepSeconds: 3,
-                      outputFilename: `trimmed_webcam_${captureIndex}.mp4`, 
-                  });
-                  if (trimmedPath) {
-                      videoPath = trimmedPath;
-                  }
-              } catch (err) {
-                  console.error("[Webcam] Trim error:", err);
-              }
-          }
         }
 
         const newCapture: Capture = { photo: photoData, video: videoUrl, videoPath: videoPath };
@@ -784,7 +758,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         setCaptures([...localCaptures]);
         setCurrentCapture(i + 1);
         
-        await new Promise((r) => setTimeout(r, 400));
+        // 🚨 เอาการหน่วงเวลาแบบไร้สาระของ Webcam ออก ให้ถ่ายไวขึ้น
+        await new Promise((r) => setTimeout(r, 50));
       }
 
       console.log(`[Capture] Capture ${i + 1}/${totalCaptures} completed`);
@@ -806,8 +781,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
               let path = await saveVideoToTemp(result.blob, item.index);
               localCaptures[item.index].video = result.url;
               localCaptures[item.index].videoPath = path;
-            } else {
-               console.warn(`[Canon] Blob is corrupted for capture ${item.index + 1}`);
             }
           } catch (err) {
             console.error(`[Canon] Background video processing failed for capture ${item.index + 1}:`, err);
@@ -829,7 +802,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           captures: localCaptures,
         },
       });
-    }, 500);
+    }, 200);
 
   }, [
     totalCaptures,
@@ -876,7 +849,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
               captures,
             },
           });
-        }, 200);
+        }, 100);
         return () => clearTimeout(delay);
       }
     }
@@ -1005,6 +978,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     objectFit: "cover",
                     transform: "scaleX(-1)", 
                     borderRadius: 20,
+                    filter: "blur(1px)",
                   }}
                 />
               )}
