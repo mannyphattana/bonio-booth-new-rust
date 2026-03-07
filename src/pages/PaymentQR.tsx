@@ -28,6 +28,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isCheckingRef = useRef(false); // Guard against concurrent status checks
   useIdleTimeout();
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
@@ -66,6 +67,9 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
 
   const checkStatus = useCallback(async () => {
     if (!referenceId || status !== "PENDING") return;
+    // Prevent concurrent requests — skip if previous check is still in-flight
+    if (isCheckingRef.current) return;
+    isCheckingRef.current = true;
 
     try {
       const result: any = await invoke("check_payment_status", {
@@ -101,17 +105,34 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
               },
             });
           }, 2000);
-        } else if (
-          paymentStatus === "FAIL" ||
-          paymentStatus === "CLOSED" ||
-          paymentStatus === "PAYERROR"
-        ) {
+        }
+        // Per Ksher docs:
+        // PAYERROR/CLOSED = definitive failure → stop polling, show error
+        // NOTPAY/PENDING/USERPAYING/NOTSURE/FAIL = still processing → keep polling
+        if (paymentStatus === "PAYERROR" || paymentStatus === "CLOSED") {
           setStatus("FAILED");
-          setError("การชำระเงินไม่สำเร็จ");
+          setError(
+            paymentStatus === "CLOSED"
+              ? "QR Code หมดอายุ กรุณาลองใหม่อีกครั้ง"
+              : "การชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"
+          );
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+        } else if (
+          paymentStatus === "NOTPAY" ||
+          paymentStatus === "PENDING" ||
+          paymentStatus === "USERPAYING" ||
+          paymentStatus === "NOTSURE" ||
+          paymentStatus === "FAIL"
+        ) {
+          // Still processing — continue polling
+          console.log(`Payment status: ${paymentStatus} for ${referenceId}, continuing to poll...`);
         }
       }
     } catch (err) {
       console.error("Payment check error:", err);
+    } finally {
+      isCheckingRef.current = false;
     }
   }, [referenceId, paymentTransactionId, status, navigate, state]);
 
