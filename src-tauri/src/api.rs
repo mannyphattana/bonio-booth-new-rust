@@ -585,6 +585,62 @@ pub async fn get_machine_status(
     })
 }
 
+// ============ Error Log ============
+
+#[tauri::command]
+pub async fn send_error_log(
+    state: tauri::State<'_, AppState>,
+    error_type: String,
+    error_message: String,
+    error_stack: Option<String>,
+    severity: Option<String>,
+) -> Result<(), String> {
+    let machine_id = state.machine_id.lock().unwrap().clone();
+    let machine_port = state.machine_port.lock().unwrap().clone();
+
+    // ถ้ายังไม่ได้ตั้งค่า machine id ให้ข้ามไปเงียบๆ
+    if machine_id.is_empty() {
+        return Ok(());
+    }
+
+    let client = &state.http_client;
+    let url = format!("{}/api/machines-public/error-log", API_BASE_URL);
+
+    let mut payload = serde_json::json!({
+        "errorType": error_type,
+        "errorMessage": error_message,
+        "severity": severity.unwrap_or_else(|| "error".to_string()),
+    });
+
+    if let Some(stack) = error_stack {
+        payload["errorStack"] = serde_json::Value::String(stack);
+    }
+
+    let result = client
+        .post(&url)
+        .header("X-Machine-Port", &machine_port)
+        .query(&[("machineId", &machine_id)])
+        .json(&payload)
+        .send()
+        .await;
+
+    match result {
+        Ok(res) => {
+            if !res.status().is_success() {
+                log::warn!("[API] send_error_log: server returned {}", res.status());
+            } else {
+                log::info!("[API] send_error_log: {} recorded ({})", error_type, res.status());
+            }
+        }
+        Err(e) => {
+            // ไม่ crash แอพ แค่ log warning
+            log::warn!("[API] send_error_log failed to send: {}", e);
+        }
+    }
+
+    Ok(())
+}
+
 // ============ Device Alert ============
 
 #[tauri::command]

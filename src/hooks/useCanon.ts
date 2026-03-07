@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { logError } from "../utils/logger";
 
 export interface CanonState {
   initialized: boolean;
@@ -102,6 +103,7 @@ export function useCanon() {
     } catch (err: any) {
       const errorMsg = typeof err === "string" ? err : JSON.stringify(err);
       console.error("[useCanon] SDK init error:", errorMsg);
+      logError("canon_sdk_init", `SDK init error: ${errorMsg}`, undefined, "critical");
       setState((s) => ({ ...s, error: `SDK init error: ${errorMsg}` }));
       return false;
     }
@@ -117,6 +119,7 @@ export function useCanon() {
       return true;
     } catch (err: any) {
       setState((s) => ({ ...s, error: `Connect error: ${err}` }));
+      logError("canon_connect", `Connect error: ${err}`, undefined, "critical");
       return false;
     }
   }, []);
@@ -130,6 +133,7 @@ export function useCanon() {
       return true;
     } catch (err: any) {
       setState((s) => ({ ...s, error: `Live view error: ${err}` }));
+      logError("canon_live_view", `Live view error: ${err}`, undefined, "error");
       return false;
     }
   }, [startLiveViewPolling]);

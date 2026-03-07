@@ -296,6 +296,7 @@ pub fn run() {
             api::confirm_upload,
             api::notify_going_offline,
             api::get_machine_status,
+            api::send_error_log,
             api::send_device_alert,
             api::send_device_status_report,
             api::send_device_reconnected,

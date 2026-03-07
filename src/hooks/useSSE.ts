@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { logError } from "../utils/logger";
 
 export interface SSEEvent {
   type: string;
@@ -76,7 +77,9 @@ export function useSSE(options: UseSSEOptions) {
     }
     console.log("[SSE] Requesting Rust backend to connect...");
     invoke("connect_sse").catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("[SSE] Failed to connect:", err);
+      logError("sse_connect_failed", `SSE failed to connect: ${msg}`, undefined, "error");
     });
   }, [machineId, enabled]);
 

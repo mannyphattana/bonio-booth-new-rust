@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { isPrinting } from "../utils/printingState";
 import { DEVICE_CHECK } from "../config/appConfig";
+import { logError } from "../utils/logger";
 
 interface DeviceCheckOptions {
   enabled?: boolean;
@@ -195,6 +196,12 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         } catch {
           /* ignore */
         }
+        logError(
+          "camera_disconnect",
+          `Camera disconnected: ${cameraName}`,
+          undefined,
+          "critical"
+        );
         if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
       }
 
@@ -232,6 +239,12 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         } catch {
           /* ignore */
         }
+        logError(
+          "printer_disconnect",
+          `Printer disconnected: ${printerName}`,
+          undefined,
+          "critical"
+        );
         if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
       }
 
