@@ -194,8 +194,8 @@ pub async fn trim_video_keep_last(
             "-i", &input_path,
             "-t", &format!("{}", keep_seconds),
             "-c:v", "libx264",
-            "-preset", "ultrafast", 
-            "-crf", "18",
+            "-preset", "veryfast", 
+            "-crf", "23",
             "-an",
             "-movflags", "+faststart",
             &output_path.to_string_lossy(),
@@ -238,9 +238,9 @@ pub async fn create_looped_video(
             "-c:v",
             "libx264",
             "-preset",
-            "ultrafast", 
+            "veryfast", 
             "-crf",
-            "18", 
+            "23", 
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -290,9 +290,9 @@ pub async fn apply_lut_to_video(
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-preset",
-            "ultrafast", 
+            "veryfast", 
             "-crf",
-            "18", 
+            "23", 
             "-color_range", "1", // 🚀 บังคับเป็น TV Range (1) เพื่อให้เข้ากับทุกเครื่องเล่น
             "-colorspace", "1",
             "-color_primaries", "1",
@@ -331,9 +331,9 @@ pub async fn convert_video_to_mp4(
             "-c:v",
             "libx264",
             "-preset",
-            "ultrafast", 
+            "veryfast", 
             "-crf",
-            "18", 
+            "23", 
             "-movflags",
             "+faststart",
             &output_path.to_string_lossy(),
@@ -369,8 +369,8 @@ pub async fn process_frame_video(
             "-i", &video_path,
             "-t", "9",
             "-c:v", "libx264",
-            "-preset", "ultrafast", 
-            "-crf", "18", 
+            "-preset", "veryfast", 
+            "-crf", "23", 
             &looped_path.to_string_lossy(),
         ])
         .output()
@@ -398,8 +398,8 @@ pub async fn process_frame_video(
                 "-vf", &lut_filter,
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
-                "-preset", "ultrafast", 
-                "-crf", "18", 
+                "-preset", "veryfast", 
+                "-crf", "23", 
                 "-color_range", "1", // 🚀 บังคับเป็น TV Range (1)
                 "-colorspace", "1",
                 "-color_primaries", "1",
@@ -602,8 +602,8 @@ pub async fn compose_frame_video(
         "-map".to_string(), format!("[{}]", final_label),
         "-c:v".to_string(), "libx264".to_string(),
         "-pix_fmt".to_string(), "yuv420p".to_string(), // 🚀 บังคับกลับมาใช้ yuv420p
-        "-preset".to_string(), "ultrafast".to_string(), 
-        "-crf".to_string(), "18".to_string(), 
+        "-preset".to_string(), "veryfast".to_string(), 
+        "-crf".to_string(), "23".to_string(), 
         
         "-color_range".to_string(), "1".to_string(), // 🚀 บังคับเป็น TV Range (1) 
         "-colorspace".to_string(), "1".to_string(), 
