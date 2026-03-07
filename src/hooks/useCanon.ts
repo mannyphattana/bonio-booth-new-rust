@@ -77,7 +77,11 @@ export function useCanon() {
           }
         }
       } catch {
-        // frame fetch failed — skip (normal during transitions)
+        // frame fetch failed — push last good frame to avoid gaps in recording
+        if (isRecordingRef.current && latestFrameRef.current) {
+          recordedFramesRef.current.push(latestFrameRef.current);
+          recordedTimestampsRef.current.push(Date.now());
+        }
       }
     }, 33); // ~30fps
   }, []);
