@@ -168,9 +168,6 @@ pub async fn save_temp_video(
 }
 
 /// Trim a video to keep only the last N seconds.
-/// Uses FFmpeg `-sseof` to seek from the end.
-/// If the video is shorter than `keep_seconds`, the whole video is kept.
-/// Returns the path to the trimmed output file.
 #[tauri::command]
 pub async fn trim_video_keep_last(
     input_path: String,
@@ -183,8 +180,6 @@ pub async fn trim_video_keep_last(
     let output_path = temp_dir.join(&output_filename);
     let ffmpeg = get_ffmpeg_path();
 
-    // Use -sseof to seek from the end of the file
-    // e.g. -sseof -3 starts 3 seconds before the end
     let sseof_value = format!("-{}", keep_seconds);
 
     let status = hidden_command(&ffmpeg)
@@ -194,8 +189,8 @@ pub async fn trim_video_keep_last(
             "-i", &input_path,
             "-t", &format!("{}", keep_seconds),
             "-c:v", "libx264",
-            "-preset", "veryfast", 
-            "-crf", "23",
+            "-preset", "ultrafast", 
+            "-crf", "18",
             "-an",
             "-movflags", "+faststart",
             &output_path.to_string_lossy(),
@@ -213,7 +208,6 @@ pub async fn trim_video_keep_last(
 }
 
 /// Loop a 3-second video to create a 9-second video using ffmpeg
-/// NOTE: Kept for standalone use. For framed video output, use compose_frame_video instead.
 #[tauri::command]
 pub async fn create_looped_video(
     input_path: String,
@@ -223,24 +217,17 @@ pub async fn create_looped_video(
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
     let output_path = temp_dir.join(&output_filename);
-
-    // Use ffmpeg to loop video 3 times (3s * 3 = 9s)
     let ffmpeg = get_ffmpeg_path();
+
     let status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
-            "-stream_loop",
-            "2", // loop 2 additional times (total 3x)
-            "-i",
-            &input_path,
-            "-t",
-            "9", // force exactly 9 seconds
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast", 
-            "-crf",
-            "23", 
+            "-stream_loop", "2", 
+            "-i", &input_path,
+            "-t", "9", 
+            "-c:v", "libx264",
+            "-preset", "ultrafast", 
+            "-crf", "18", 
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -267,36 +254,29 @@ pub async fn apply_lut_to_video(
     let output_path = temp_dir.join(&output_filename);
 
     if lut_path.is_empty() {
-        // No filter - just copy
         fs::copy(&input_path, &output_path).map_err(|e| format!("Copy error: {}", e))?;
         return Ok(output_path.to_string_lossy().to_string());
     }
 
-    // Copy LUT to temp dir and use just the filename (avoids path escaping issues)
     let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
-    
-    // 🚨 แปลง RGB เข้า LUT แล้วแปลงออกเป็น yuv420p แบบ TV Range ป้องกัน Gamma Shift
     let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=tv:out_color_matrix=bt709,format=yuv420p", lut_filename);
 
     let ffmpeg = get_ffmpeg_path();
+    
     let status = hidden_command(&ffmpeg)
         .current_dir(&temp_dir)
         .args(&[
             "-y",
-            "-i",
-            &input_path,
-            "-vf",
-            &lut_filter,
+            "-i", &input_path,
+            "-vf", &lut_filter,
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
-            "-preset",
-            "veryfast", 
-            "-crf",
-            "23", 
-            "-color_range", "1", // 🚀 บังคับเป็น TV Range (1) เพื่อให้เข้ากับทุกเครื่องเล่น
+            "-preset", "ultrafast", 
+            "-crf", "18", 
+            "-color_range", "1", 
             "-colorspace", "1",
             "-color_primaries", "1",
-            "-color_trc", "1",   // 🚀 บังคับเป็น BT.709 (1) แก้ปัญหาสีซีด
+            "-color_trc", "1",  
             "-bsf:v", "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
             &output_path.to_string_lossy(),
         ])
@@ -321,21 +301,16 @@ pub async fn convert_video_to_mp4(
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
     let output_path = temp_dir.join(&output_filename);
-
     let ffmpeg = get_ffmpeg_path();
+
     let status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
-            "-i",
-            &input_path,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast", 
-            "-crf",
-            "23", 
-            "-movflags",
-            "+faststart",
+            "-i", &input_path,
+            "-c:v", "libx264",
+            "-preset", "ultrafast", 
+            "-crf", "18", 
+            "-movflags", "+faststart",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -359,9 +334,9 @@ pub async fn process_frame_video(
     let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
-    // Step 1: Loop to 9 seconds (infinite loop + trim to handle videos that aren't exactly 3s)
     let ffmpeg = get_ffmpeg_path();
     let looped_path = temp_dir.join("looped_temp.mp4");
+    
     let loop_status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
@@ -369,8 +344,8 @@ pub async fn process_frame_video(
             "-i", &video_path,
             "-t", "9",
             "-c:v", "libx264",
-            "-preset", "veryfast", 
-            "-crf", "23", 
+            "-preset", "ultrafast", 
+            "-crf", "18", 
             &looped_path.to_string_lossy(),
         ])
         .output()
@@ -381,13 +356,10 @@ pub async fn process_frame_video(
         return Err(format!("FFmpeg loop failed: {}", stderr));
     }
 
-    // Step 2: Apply LUT filter if provided
     let output_path = temp_dir.join(&output_filename);
 
     if !lut_path.is_empty() && Path::new(&lut_path).exists() {
         let lut_filename = prepare_lut_in_temp(&lut_path, &temp_dir)?;
-        
-        // 🚨 แปลง RGB เข้า LUT แล้วแปลงออกเป็น yuv420p แบบ TV Range ป้องกัน Gamma Shift
         let lut_filter = format!("scale=out_range=pc:out_color_matrix=bt709,format=rgb24,lut3d={},scale=out_range=tv:out_color_matrix=bt709,format=yuv420p", lut_filename);
 
         let filter_status = hidden_command(&ffmpeg)
@@ -398,12 +370,12 @@ pub async fn process_frame_video(
                 "-vf", &lut_filter,
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
-                "-preset", "veryfast", 
-                "-crf", "23", 
-                "-color_range", "1", // 🚀 บังคับเป็น TV Range (1)
+                "-preset", "ultrafast", 
+                "-crf", "18", 
+                "-color_range", "1", 
                 "-colorspace", "1",
                 "-color_primaries", "1",
-                "-color_trc", "1",   // 🚀 บังคับเป็น BT.709 (1)
+                "-color_trc", "1",   
                 "-bsf:v", "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
                 "-movflags", "+faststart",
                 &output_path.to_string_lossy(),
@@ -416,7 +388,6 @@ pub async fn process_frame_video(
             return Err(format!("FFmpeg filter failed: {}", stderr));
         }
 
-        // Clean up temp
         let _ = fs::remove_file(&looped_path);
     } else {
         fs::rename(&looped_path, &output_path)
@@ -427,9 +398,6 @@ pub async fn process_frame_video(
 }
 
 /// Compose multiple videos into a single framed video using a SINGLE FFmpeg call.
-/// Handles: loop (3s→9s), LUT filter, scale/crop to slots, overlay on frame image.
-/// This replaces the old multi-pass pipeline (loop → LUT → compose) with one efficient pass.
-/// Output: 9-second video at 1080p equivalent resolution.
 #[tauri::command]
 pub async fn compose_frame_video(
     frame_image_url: String,
@@ -443,25 +411,35 @@ pub async fn compose_frame_video(
     let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
-    // Download frame image to temp
     let frame_path = temp_dir.join("frame_overlay.png");
+    
+    println!("[compose_frame_video] 📥 Downloading frame from: {}", frame_image_url);
+
     let client = reqwest::Client::new();
-    let frame_bytes = client.get(&frame_image_url)
+    let response = client.get(&frame_image_url)
         .send()
         .await
-        .map_err(|e| format!("Frame download error: {}", e))?
-        .bytes()
+        .map_err(|e| format!("Frame download error: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let err_msg = format!("❌ ลิงก์รูปกรอบเฟรมมีปัญหา (HTTP {}): กรุณาเช็คว่าลิงก์เป็น Public และไม่ใช่ไฟล์ที่ถูกลบไปแล้ว", status);
+        println!("{}", err_msg);
+        return Err(err_msg);
+    }
+
+    let frame_bytes = response.bytes()
         .await
         .map_err(|e| format!("Frame bytes error: {}", e))?;
+        
     fs::write(&frame_path, &frame_bytes)
         .map_err(|e| format!("Frame write error: {}", e))?;
 
-    // Get frame image actual dimensions for scaling
     let frame_img = image::load_from_memory(&frame_bytes)
-        .map_err(|e| format!("Frame load error: {}", e))?;
+        .map_err(|e| format!("Frame load error (ไฟล์ที่โหลดมาไม่ใช่รูปภาพ หรือรูปเสีย): {}", e))?;
+        
     let (orig_w, orig_h) = frame_img.dimensions();
 
-    // Scale output to 1080p equivalent (matching old project)
     let is_portrait = orig_h > orig_w;
     let (mut out_w, mut out_h) = if is_portrait {
         let tw = 1080u32;
@@ -478,7 +456,6 @@ pub async fn compose_frame_video(
     let scale_x = out_w as f64 / frame_width as f64;
     let scale_y = out_h as f64 / frame_height as f64;
 
-    // Prepare LUT if provided
     let lut_filename = match &lut_path {
         Some(lp) if !lp.is_empty() && Path::new(lp).exists() => {
             Some(prepare_lut_in_temp(lp, &temp_dir)?)
@@ -492,7 +469,6 @@ pub async fn compose_frame_video(
     let num_videos = video_paths.len().min(slots.len());
     let output_path = temp_dir.join(&output_filename);
 
-    // Build FFmpeg arguments
     let mut final_args: Vec<String> = vec!["-y".to_string()];
 
     for i in 0..num_videos {
@@ -501,7 +477,6 @@ pub async fn compose_frame_video(
             "-i".to_string(), video_paths[i].clone(),
         ]);
     }
-    // Frame image as last input
     final_args.extend(vec!["-i".to_string(), frame_path.to_string_lossy().to_string()]);
 
     let mut filter_parts: Vec<String> = Vec::new();
@@ -534,18 +509,15 @@ pub async fn compose_frame_video(
         filter_parts.push(chain);
     }
 
-    // Frame PNG: de-palettise then scale — stays in RGBA
     filter_parts.push(format!(
         "[{}:v]format=rgba,scale={}:{}:flags=accurate_rnd+full_chroma_int[frame_img]",
         num_videos, out_w, out_h
     ));
 
-    // White background in RGBA
     filter_parts.push(format!("color=c=white:s={}x{}:d=9:r=30,format=rgba[bg]", out_w, out_h));
 
     let mut prev = "bg".to_string();
 
-    // Background slots (zIndex < 0)
     for i in 0..num_videos {
         let slot = &slots[i];
         let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
@@ -564,11 +536,9 @@ pub async fn compose_frame_video(
         }
     }
 
-    // Frame overlay
     filter_parts.push(format!("[{}][frame_img]overlay=0:0:eof_action=repeat:format=auto[af]", prev));
     prev = "af".to_string();
 
-    // Foreground slots (zIndex >= 0)
     for i in 0..num_videos {
         let slot = &slots[i];
         let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
@@ -588,7 +558,6 @@ pub async fn compose_frame_video(
     }
 
     let final_label = format!("{}out", prev);
-    // 🚨 แปลงกลับเป็น TV Range (yuv420p) เพื่อป้องกันสีวิดีโอเพี้ยนเวลาเปิดบน Mac/iOS
     filter_parts.push(format!(
         "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[{}]",
         prev, final_label
@@ -601,16 +570,15 @@ pub async fn compose_frame_video(
         "-filter_complex".to_string(), filter_complex,
         "-map".to_string(), format!("[{}]", final_label),
         "-c:v".to_string(), "libx264".to_string(),
-        "-pix_fmt".to_string(), "yuv420p".to_string(), // 🚀 บังคับกลับมาใช้ yuv420p
-        "-preset".to_string(), "veryfast".to_string(), 
-        "-crf".to_string(), "23".to_string(), 
+        "-pix_fmt".to_string(), "yuv420p".to_string(),
         
-        "-color_range".to_string(), "1".to_string(), // 🚀 บังคับเป็น TV Range (1) 
+        "-preset".to_string(), "ultrafast".to_string(), // 🚨 กลับไปใช้ ultrafast 
+        "-crf".to_string(), "18".to_string(), // 🚨 กลับไปใช้ crf 18 
+        
+        "-color_range".to_string(), "1".to_string(), 
         "-colorspace".to_string(), "1".to_string(), 
         "-color_primaries".to_string(), "1".to_string(), 
-        "-color_trc".to_string(), "1".to_string(), // 🚀 บังคับเป็น BT.709 (1)
-        
-        // 🚀 ฝัง Metadata ป้องกันการเร่งแสง
+        "-color_trc".to_string(), "1".to_string(), 
         "-bsf:v".to_string(), "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1".to_string(),
         
         "-t".to_string(), "9".to_string(),
@@ -653,6 +621,7 @@ pub async fn cleanup_temp() -> Result<(), String> {
     }
     Ok(())
 }
+
 // =====================================================================
 // 🚨 [โค้ดส่วนที่แก้ไขใหม่] บังคับเซฟตรงไปที่ C:\boniobooth\Saved_Photos
 // =====================================================================
@@ -663,10 +632,8 @@ pub async fn save_to_local_drive(
     image_data_base64: String,
     filename: String,
 ) -> Result<String, String> {
-    // 🚨 สร้างและชี้เป้าหมายไปที่ C:\boniobooth\Saved_Photos โดยตรง จะได้เหมือนกันทุกตู้
     let save_dir = std::path::PathBuf::from(r"C:\boniobooth\Saved_Photos");
         
-    // คำสั่งนี้จะสร้างโฟลเดอร์ boniobooth และ Saved_Photos ให้อัตโนมัติถ้ายังไม่มี
     std::fs::create_dir_all(&save_dir).map_err(|e| format!("Create dir error: {}", e))?;
 
     let clean = if image_data_base64.contains(",") {
@@ -692,7 +659,6 @@ pub async fn copy_video_to_local_drive(
     source_path: String,
     filename: String,
 ) -> Result<String, String> {
-    // 🚨 สร้างและชี้เป้าหมายไปที่ C:\boniobooth\Saved_Photos โดยตรง
     let save_dir = std::path::PathBuf::from(r"C:\boniobooth\Saved_Photos");
         
     std::fs::create_dir_all(&save_dir).map_err(|e| format!("Create dir error: {}", e))?;

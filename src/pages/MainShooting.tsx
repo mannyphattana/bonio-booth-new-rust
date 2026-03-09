@@ -125,13 +125,16 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraContainerRef = useRef<HTMLDivElement>(null);
   const canonLiveViewRef = useRef<HTMLImageElement>(null);
+  
+  // 🚨 เพิ่ม Refs สำหรับจำลอง Canon Live View ให้เป็น Webcam Stream
+  const canonCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canonDrawLoopRef = useRef<number>(0);
+
   const mediaRecorderRef = useRef<RecordRTC | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isRecordingRef = useRef(false);
   const sequenceRunningRef = useRef(false);
   const cameraTypeRef = useRef("webcam");
-
-  const pendingVideoFramesRef = useRef<{ index: number; frames: string[]; duration: number }[]>([]);
 
   const canonCamera = useCanon();
 
@@ -139,7 +142,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const [, setCurrentCapture] = useState(0);
   const [countdown, setCountdown] = useState(-1);
   const [phase, setPhase] = useState<
-    "ready" | "countdown" | "flash" | "preview" | "done" | "preparing"
+    "ready" | "countdown" | "flash" | "preview" | "done"
   >("ready");
   const [isRecording, setIsRecording] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
@@ -176,6 +179,23 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     return () => {
       stopCamera();
     };
+  }, []);
+
+  // 🚨 ฟังก์ชันลูปดึงภาพ Live View ของ Canon มาวาดลง Canvas แบบ 30FPS ตลอดเวลา
+  const drawCanonFrame = useCallback(() => {
+    if (cameraTypeRef.current === "canon" && canonCanvasRef.current && canonLiveViewRef.current) {
+      const ctx = canonCanvasRef.current.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(
+          canonLiveViewRef.current,
+          0,
+          0,
+          canonCanvasRef.current.width,
+          canonCanvasRef.current.height
+        );
+      }
+    }
+    canonDrawLoopRef.current = requestAnimationFrame(drawCanonFrame);
   }, []);
 
   const initCamera = async () => {
@@ -238,6 +258,17 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       if (cameraContainerRef.current) {
         const rect = cameraContainerRef.current.getBoundingClientRect();
         setContainerDimensions({ width: rect.width, height: rect.height });
+      }
+
+      // 🚨 จุดสำคัญ: แปลง Canvas ของ Canon ให้กลายเป็น MediaStream (จำลองตัวเป็น Webcam) ที่ 30 FPS!
+      if (canonCanvasRef.current) {
+        canonCanvasRef.current.width = 1920;
+        canonCanvasRef.current.height = 1280;
+        streamRef.current = canonCanvasRef.current.captureStream(30);
+        
+        // เริ่มลูปวาดภาพ
+        if (canonDrawLoopRef.current) cancelAnimationFrame(canonDrawLoopRef.current);
+        drawCanonFrame();
       }
     }, 100);
   };
@@ -304,6 +335,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   };
 
   const stopCamera = () => {
+    if (canonDrawLoopRef.current) cancelAnimationFrame(canonDrawLoopRef.current);
     if (cameraTypeRef.current === "canon") {
       canonCamera.cleanup();
     }
@@ -323,15 +355,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     const recorder = new RecordRTC(streamRef.current, {
       type: "video",
       mimeType: mimeType as any,
-      videoBitsPerSecond: 6000000, 
-      frameRate: 30,
+      videoBitsPerSecond: 2500000, // 🚨 ล็อคบิตเรตไว้ที่ 2.5 Mbps เพื่อให้ไฟล์เล็ก
+      frameRate: 30, // 🚨 อัดที่ 30 เฟรมเสมอ
       timeSlice: 1000, 
       disableLogs: true,
     });
-
-    (window as any).__lastVideoReady = false;
-    (window as any).__lastVideoUrl = "";
-    (window as any).__lastVideoBlob = null;
 
     recorder.startRecording();
     mediaRecorderRef.current = recorder;
@@ -391,118 +419,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     ctx.drawImage(video, 0, 0, w, h);
     return canvas.toDataURL("image/jpeg", 0.92);
   }, []);
-
-  const createVideoFromFrames = useCallback(
-    async (
-      frames: string[],
-      targetDurationSec: number, 
-    ): Promise<{ url: string; blob: Blob | null }> => {
-      if (!frames || frames.length === 0) {
-        return { url: "", blob: null };
-      }
-
-      const targetFps = 15;
-      const targetFramesCount = 45; 
-      
-      let sampledFrames: string[] = [];
-      if (frames.length > targetFramesCount) {
-        const step = frames.length / targetFramesCount;
-        for (let i = 0; i < targetFramesCount; i++) {
-          sampledFrames.push(frames[Math.floor(i * step)]);
-        }
-      } else {
-        sampledFrames = frames;
-      }
-
-      const loadedImages = await Promise.all(
-        sampledFrames.map((src) => {
-          return new Promise<HTMLImageElement | null>((resolve) => {
-            const img = new Image();
-            img.onload = () => resolve(img);
-            img.onerror = () => resolve(null); 
-            img.src = src;
-          });
-        })
-      );
-
-      return new Promise((resolve) => {
-        const offCanvas = document.createElement("canvas");
-        offCanvas.width = 960; 
-        offCanvas.height = 640;
-        
-        offCanvas.style.position = "fixed";
-        offCanvas.style.top = "0px";
-        offCanvas.style.left = "0px";
-        offCanvas.style.opacity = "0.01";
-        offCanvas.style.pointerEvents = "none";
-        offCanvas.style.zIndex = "-9999";
-        document.body.appendChild(offCanvas);
-
-        const ctx = offCanvas.getContext("2d", { alpha: false, colorSpace: "srgb" });
-        if (!ctx) {
-          if (offCanvas.parentNode) document.body.removeChild(offCanvas);
-          return resolve({ url: "", blob: null });
-        }
-
-        const firstValid = loadedImages.find(img => img !== null);
-        if (firstValid) {
-          ctx.drawImage(firstValid, 0, 0, offCanvas.width, offCanvas.height);
-        }
-
-        const finalFps = Math.max(5, Math.min(targetFps, sampledFrames.length / targetDurationSec));
-        const stream = offCanvas.captureStream(finalFps);
-        const mimeType = "video/webm;codecs=vp8"; 
-          
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: 2500000,
-        });
-        
-        const chunks: Blob[] = [];
-
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
-
-        recorder.onstop = () => {
-          if (offCanvas.parentNode) document.body.removeChild(offCanvas);
-          const blob = new Blob(chunks, { type: mimeType });
-          
-          if (blob.size < 1000) {
-             resolve({ url: "", blob: null });
-             return;
-          }
-          
-          const url = URL.createObjectURL(blob);
-          resolve({ url, blob });
-        };
-
-        recorder.start();
-
-        let frameIdx = 0;
-        const interval = setInterval(() => {
-          if (frameIdx >= loadedImages.length) {
-            clearInterval(interval);
-            setTimeout(() => {
-              if (recorder.state !== "inactive") recorder.stop();
-            }, 300);
-            return;
-          }
-
-          const img = loadedImages[frameIdx];
-          if (img) {
-            ctx.drawImage(img, 0, 0, offCanvas.width, offCanvas.height);
-            const track = stream.getVideoTracks()[0];
-            if (track && typeof (track as any).requestFrame === "function") {
-                (track as any).requestFrame();
-            }
-          }
-          frameIdx++;
-        }, 1000 / finalFps);
-      });
-    },
-    []
-  );
 
   const saveVideoToTemp = useCallback(
     async (blob: Blob, index: number): Promise<string> => {
@@ -567,34 +483,23 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       setShowGetReady(false);
     }
 
-    pendingVideoFramesRef.current = [];
     let localCaptures: Capture[] = []; 
 
+    // 🚨 ลูปถ่ายรูปและอัดวิดีโอ (ใช้ Flow เดียวกันทั้ง Webcam และ Canon)
     for (let i = 0; i < totalCaptures; i++) {
       console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
       
       isRecordingRef.current = false;
       setIsRecording(false);
-
       setPhase("countdown");
 
       await new Promise<void>((resolve) => {
         let currentCount = cameraCountdown; 
         setCountdown(currentCount);
 
-        const webcamStartAt = Math.min(currentCount, 3);
-        const canonStartAt = Math.min(currentCount, 4);
+        const startRecordAt = Math.min(currentCount, 3); // เริ่มอัดเมื่อเหลือ 3 วิ
 
-        if (cameraTypeRef.current === "canon" && currentCount <= canonStartAt && !isRecordingRef.current) {
-          canonCamera.startFrameRecording();
-          isRecordingRef.current = true;
-          setIsRecording(true);
-          (window as any).__recordStartTime = Date.now();
-          (window as any).__canonMovieFallback = true;
-          if (currentCount <= 3) {
-             (window as any).__countdown3Time = Date.now();
-          }
-        } else if (cameraTypeRef.current !== "canon" && currentCount <= webcamStartAt && !isRecordingRef.current) {
+        if (currentCount <= startRecordAt && !isRecordingRef.current) {
           startRecording();
         }
 
@@ -602,25 +507,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           currentCount--;
           setCountdown(currentCount);
 
-          if (currentCount === 3) {
-             (window as any).__countdown3Time = Date.now();
-          }
-
-          if (cameraTypeRef.current === "canon") {
-            if (currentCount <= canonStartAt && !isRecordingRef.current) {
-              canonCamera.startFrameRecording();
-              isRecordingRef.current = true;
-              setIsRecording(true);
-              (window as any).__recordStartTime = Date.now();
-              (window as any).__canonMovieFallback = true;
-              if (currentCount === 3) {
-                 (window as any).__countdown3Time = Date.now();
-              }
-            }
-          } else {
-            if (currentCount <= webcamStartAt && !isRecordingRef.current) {
-              startRecording();
-            }
+          if (currentCount <= startRecordAt && !isRecordingRef.current) {
+            startRecording();
           }
 
           if (currentCount <= 0) {
@@ -630,23 +518,16 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }, 1000);
       });
 
-      const isCanon = cameraTypeRef.current === "canon" && !(window as any).__canonMovieFallback;
-
-      const capturePromise = isCanon
-        ? canonCamera.takePhotoDuringRecording()
+      // 🚨 ถ่ายภาพปกติ ไม่ว่าจะเป็น Canon หรือ Webcam
+      const capturePromise = cameraTypeRef.current === "canon"
+        ? canonCamera.takePicture()
         : takePhoto();
 
-      if (isCanon) {
-        setTimeout(() => {
-          setShowFlash(true);
-          setPhase("preview"); 
-          setTimeout(() => setShowFlash(false), 300);
-        }, 300); 
-      } else {
+      setTimeout(() => {
         setShowFlash(true);
         setPhase("preview"); 
         setTimeout(() => setShowFlash(false), 300);
-      }
+      }, 300); 
 
       await new Promise((r) => setTimeout(r, 300)); 
 
@@ -677,119 +558,21 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }
       }
 
-      let recordingResult: { url: string; blob: Blob | null } = {
-        url: "",
-        blob: null,
-      };
-
-      if (cameraTypeRef.current === "canon") {
-        if ((window as any).__canonMovieFallback) {
-          const recording = canonCamera.stopFrameRecording();
-          isRecordingRef.current = false;
-          setIsRecording(false);
-          
-          const rawFrames = recording.frames || [];
-          
-          const stopTime = Date.now();
-          const recordStartTime = (window as any).__recordStartTime || stopTime;
-          let countdown3Time = (window as any).__countdown3Time || recordStartTime;
-
-          if (cameraCountdown > 3) {
-              countdown3Time += 250;
-          }
-
-          const totalDurationMs = stopTime - recordStartTime;
-          let keepDurationMs = stopTime - countdown3Time;
-          
-          if (keepDurationMs <= 0 || keepDurationMs > totalDurationMs) {
-              keepDurationMs = totalDurationMs;
-          }
-
-          let keepRatio = keepDurationMs / totalDurationMs;
-          if (keepRatio > 1) keepRatio = 1; 
-
-          const framesToKeep = Math.floor(rawFrames.length * keepRatio);
-          const last3SecFrames = rawFrames.slice(-framesToKeep);
-
-          const targetFramesCount = 45;
-          let final45Frames: string[] = [];
-          if (last3SecFrames.length > 0) {
-              const step = last3SecFrames.length / targetFramesCount;
-              for (let j = 0; j < targetFramesCount; j++) {
-                  final45Frames.push(last3SecFrames[Math.floor(j * step)]);
-              }
-          }
-          
-          (window as any).__lastCanonFrames = final45Frames;
-        }
-      } else {
-        recordingResult = await waitForVideo();
-      }
-
-      const captureIndex = i;
-
-      if (cameraTypeRef.current === "canon") {
-        const frames = ((window as any).__lastCanonFrames as string[]) || [];
-        (window as any).__lastCanonFrames = null;
-
-        if (frames.length > 0) {
-          pendingVideoFramesRef.current.push({ index: captureIndex, frames, duration: 3.0 });
-        }
-
-        const newCapture: Capture = { photo: photoData, video: "", videoPath: "" };
-        localCaptures.push(newCapture);
-        setCaptures([...localCaptures]);
-        setCurrentCapture(i + 1);
-
-        // Canon needs a bit of breathing room between shots
-        await new Promise((r) => setTimeout(r, 200));
-
-      } else {
-        let videoUrl = recordingResult.url;
-        let videoPath = "";
-        
-        if (recordingResult.blob && recordingResult.blob.size > 1000) {
-          // 🚨 เซฟไฟล์ต้นฉบับอย่างเดียว ไม่ใช้ FFmpeg trim ระหว่างถ่ายแล้ว (เพราะเริ่มอัดตอนเหลือ 3 วิอยู่แล้ว)
-          videoPath = await saveVideoToTemp(recordingResult.blob, i);
-        }
-
-        const newCapture: Capture = { photo: photoData, video: videoUrl, videoPath: videoPath };
-        localCaptures.push(newCapture);
-        setCaptures([...localCaptures]);
-        setCurrentCapture(i + 1);
-        
-        // 🚨 เอาการหน่วงเวลาแบบไร้สาระของ Webcam ออก ให้ถ่ายไวขึ้น
-        await new Promise((r) => setTimeout(r, 50));
-      }
-
-      console.log(`[Capture] Capture ${i + 1}/${totalCaptures} completed`);
-
-      if (i + 1 >= totalCaptures) {
-        break;
-      }
-    }
-
-    if (pendingVideoFramesRef.current.length > 0) {
-      console.log(`[MainShooting] Post-processing ${pendingVideoFramesRef.current.length} Canon videos...`);
-      setPhase("preparing"); 
+      // 🚨 หยุดบันทึกและรอรับวิดีโอ 30 FPS ทันทีที่ถ่ายเสร็จ!
+      const recordingResult = await waitForVideo();
+      let videoUrl = recordingResult.url;
+      let videoPath = "";
       
-      await Promise.all(
-        pendingVideoFramesRef.current.map(async (item) => {
-          try {
-            const result = await createVideoFromFrames(item.frames, 3.0);
-            if (result.blob && result.blob.size > 1000) {
-              let path = await saveVideoToTemp(result.blob, item.index);
-              localCaptures[item.index].video = result.url;
-              localCaptures[item.index].videoPath = path;
-            }
-          } catch (err) {
-            console.error(`[Canon] Background video processing failed for capture ${item.index + 1}:`, err);
-          }
-        })
-      );
+      if (recordingResult.blob && recordingResult.blob.size > 1000) {
+        videoPath = await saveVideoToTemp(recordingResult.blob, i);
+      }
+
+      const newCapture: Capture = { photo: photoData, video: videoUrl, videoPath };
+      localCaptures.push(newCapture);
+      setCaptures([...localCaptures]);
+      setCurrentCapture(i + 1);
       
-      pendingVideoFramesRef.current = []; 
-      setCaptures([...localCaptures]); 
+      await new Promise((r) => setTimeout(r, 50));
     }
 
     setPhase("done");
@@ -811,7 +594,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     waitForVideo,
     takePhoto,
     saveVideoToTemp,
-    createVideoFromFrames,
     navigate,
     state
   ]);
@@ -833,15 +615,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
   useEffect(() => {
     if (phase === "done" && captures.length >= totalCaptures) {
-      const isCanonMovie =
-        cameraTypeRef.current === "canon" &&
-        !(window as any).__canonMovieFallback;
-
       const allVideosReady = captures.every(
         (c) => c.videoPath && c.videoPath.length > 0
       );
 
-      if (!isCanonMovie || allVideosReady || videosReadyTimeout) {
+      if (allVideosReady || videosReadyTimeout) {
         const delay = setTimeout(() => {
           navigate("/slot-selection", {
             state: {
@@ -1107,33 +885,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                 </div>
               )}
 
-              {phase === "preparing" && (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "rgba(0,0,0,0.7)",
-                    zIndex: 40,
-                    color: "white",
-                  }}
-                >
-                  <div
-                    className="loading-spinner"
-                    style={{ marginBottom: 20 }}
-                  ></div>
-                  <div style={{ fontSize: 24, fontWeight: 600 }}>
-                    กำลังประมวลผลวิดีโอ...
-                  </div>
-                  <div style={{ fontSize: 16, marginTop: 8, opacity: 0.8 }}>
-                    Processing Videos
-                  </div>
-                </div>
-              )}
-
               {isRecording && (
                 <div
                   style={{
@@ -1272,7 +1023,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         </div>
       </div>
 
+      {/* 🚨 ซ่อน Canvas ไว้ใช้ทำวิดีโอ 30FPS */}
       <canvas ref={canvasRef} style={{ display: "none" }} />
+      <canvas ref={canonCanvasRef} style={{ display: "none" }} />
 
       <style>{`
         @keyframes countdownPulse {
