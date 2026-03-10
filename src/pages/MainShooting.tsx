@@ -348,14 +348,15 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const startRecording = useCallback(() => {
     if (!streamRef.current || isRecordingRef.current) return;
 
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-      ? "video/webm;codecs=vp9"
+    // 🚨 เปลี่ยนจาก vp9 เป็น vp8 เพื่อลดการกระชาก CPU ตอนเริ่มอัดช็อตแรก
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+      ? "video/webm;codecs=vp8"
       : "video/webm";
 
     const recorder = new RecordRTC(streamRef.current, {
       type: "video",
       mimeType: mimeType as any,
-      videoBitsPerSecond: 2500000, // 🚨 ล็อคบิตเรตไว้ที่ 2.5 Mbps เพื่อให้ไฟล์เล็ก
+      videoBitsPerSecond: 15000000, // 🚨 ล็อคบิตเรตไว้ที่ 15 Mbps เพื่อให้ไฟล์เล็ก
       frameRate: 30, // 🚨 อัดที่ 30 เฟรมเสมอ
       timeSlice: 1000, 
       disableLogs: true,
@@ -482,7 +483,27 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       await new Promise((r) => setTimeout(r, 1500));
       setShowGetReady(false);
     }
-
+      if (streamRef.current) {
+        console.log("[Warm-up] อุ่นเครื่อง Video Encoder แบบจัดเต็ม 800ms...");
+        try {
+          // ใช้ Native MediaRecorder เพื่อกระชากเอนจิ้นเบราว์เซอร์ให้ตื่น 100%
+          const warmupRecorder = new MediaRecorder(streamRef.current, {
+            mimeType: "video/webm;codecs=vp9",
+            videoBitsPerSecond: 15000000
+          });
+          
+          warmupRecorder.start();
+          // 🚨 เพิ่มเวลาอัดทิ้งเป็น 0.8 วินาที (800ms) เพื่อให้ CPU รันเข้าระบบวิดีโอเต็มที่
+          await new Promise((r) => setTimeout(r, 800)); 
+          
+          if (warmupRecorder.state !== "inactive") {
+            warmupRecorder.stop();
+          }
+        } catch (e) {
+          console.error("Warmup failed", e);
+        }
+      }
+      // 👆👆👆 จบระบบ WARM-UP 👆👆👆
     let localCaptures: Capture[] = []; 
 
     // 🚨 ลูปถ่ายรูปและอัดวิดีโอ (ใช้ Flow เดียวกันทั้ง Webcam และ Canon)
@@ -519,17 +540,21 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       });
 
       // 🚨 ถ่ายภาพปกติ ไม่ว่าจะเป็น Canon หรือ Webcam
-      const capturePromise = cameraTypeRef.current === "canon"
+   const capturePromise = cameraTypeRef.current === "canon"
         ? canonCamera.takePicture()
         : takePhoto();
+
+      // 🚨 ตั้งกลับมาเป็น 100 (หรือ 200) เพื่อให้แฟลชเด้งขึ้นมาพร้อมกล้องที่ทำงานไวขึ้นแล้ว
+      const flashDelay = cameraTypeRef.current === "canon" ? 600 : 0;
 
       setTimeout(() => {
         setShowFlash(true);
         setPhase("preview"); 
         setTimeout(() => setShowFlash(false), 300);
-      }, 300); 
+      }, flashDelay);
 
-      await new Promise((r) => setTimeout(r, 300)); 
+      // (บรรทัดนี้ปล่อยไว้เหมือนเดิมได้เลยครับ เป็นการหน่วงให้ UI เปลี่ยนหน้าสอดคล้องกัน)
+      await new Promise((r) => setTimeout(r, 300));
 
       let photoData: string = "";
       try {
