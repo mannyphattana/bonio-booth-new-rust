@@ -127,25 +127,57 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
+  // 👇👇👇 แก้ไข Logic การสลับรูปใหม่ทั้งหมดตรงนี้ครับ 👇👇👇
   const handleNext = () => {
     if (getAssignedCount() < slots.length) return;
-    const selectedCaptureIndexes = slots.map((_, slotIdx) => {
+
+    // 1. ดึง Index ที่ลูกค้าเลือกมาทั้งหมด
+    let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
       return captureIdx !== undefined ? captureIdx : 0;
     });
 
-    const frameCaptures = slots.map((_, slotIdx) => {
-      const captureIdx = selectedCaptureIndexes[slotIdx];
-      return captures[captureIdx] ?? captures[0];
+    // 2. ค้นหากองหนุน: ดึง Index เฉพาะรูปที่ "ไม่ได้ถูกเลือก" และ "มีวิดีโอสมบูรณ์"
+    let spareValidIndexes = captures
+      .map((cap, idx) => ({ cap, idx }))
+      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx)) // ต้องไม่ได้ถูกเลือกไปแล้ว
+      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "") // วิดีโอต้องใช้งานได้
+      .map((item) => item.idx);
+
+    // 3. สแกนตรวจสอบรูปที่ลูกค้าเลือก ถ้ารูปไหนวิดีโอพัง สลับเอาของดีมาใส่แทนทั้งชุด
+    finalSelectedCaptureIndexes = finalSelectedCaptureIndexes.map((currentIdx) => {
+      const currentCap = captures[currentIdx];
+      const isBroken = !currentCap || !currentCap.videoPath || currentCap.videoPath.trim() === "";
+
+      if (isBroken) {
+        console.warn(`[Smart Fallback] รูปที่ ${currentIdx + 1} ไม่มีวิดีโอ!`);
+        
+        if (spareValidIndexes.length > 0) {
+          // ดึงกองหนุนมาสวมรอย "ทั้งรูปภาพและวิดีโอ" จะได้ไม่มีอาการภาพกระตุก
+          const spareIdx = spareValidIndexes.shift()!;
+          console.log(`-> สลับไปใช้รูปและวิดีโอจากช่องที่ ${spareIdx + 1} แทนเรียบร้อย`);
+          return spareIdx; 
+        } else {
+          // ท่าไม้ตายก้นหีบ: ถ้ากองหนุนพังเกลี้ยงหมดตู้จริงๆ ให้ดึงวิดีโอไหนก็ได้ที่สมบูรณ์มาใช้กันระบบแครช/จอดำ
+          const emergencyIdx = captures.findIndex(c => c && c.videoPath && c.videoPath.trim() !== "");
+          return emergencyIdx !== -1 ? emergencyIdx : currentIdx;
+        }
+      }
+      return currentIdx; // ถ้ารูปปกติ ก็ใช้รูปเดิมที่ลูกค้าเลือก
     });
+
+    // 4. ประกอบข้อมูลให้พร้อมส่ง
+    const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
+
     navigate("/apply-filter", {
       state: {
         ...state,
         frameCaptures,
-        selectedCaptureIndexes,
+        selectedCaptureIndexes: finalSelectedCaptureIndexes,
       },
     });
   };
+  // 👆👆👆 จบการแก้ไข 👆👆👆
 
   if (!selectedFrame) return null;
 
