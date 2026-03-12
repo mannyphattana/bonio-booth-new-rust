@@ -539,8 +539,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }, 1000);
       });
 
+      // 👇👇 สลับลำดับตรงนี้ที่เดียวครับ: สั่งวิดีโอให้หยุดก่อน แล้วค่อยสั่งกล้องให้ถ่ายรูป เพื่อหนีจังหวะกล้องค้าง 👇👇
+      const recordingPromise = waitForVideo();
+
       // 🚨 ถ่ายภาพปกติ ไม่ว่าจะเป็น Canon หรือ Webcam
-   const capturePromise = cameraTypeRef.current === "canon"
+      const capturePromise = cameraTypeRef.current === "canon"
         ? canonCamera.takePicture()
         : takePhoto();
 
@@ -583,8 +586,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }
       }
 
-      // 🚨 หยุดบันทึกและรอรับวิดีโอ 30 FPS ทันทีที่ถ่ายเสร็จ!
-      const recordingResult = await waitForVideo();
+      // 🚨 รอรับไฟล์วิดีโอ 30 FPS ที่สั่งหยุดไว้ตั้งแต่ตอนแรก
+      const recordingResult = await recordingPromise;
       let videoUrl = recordingResult.url;
       let videoPath = "";
       
