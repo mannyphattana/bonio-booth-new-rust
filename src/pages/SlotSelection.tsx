@@ -129,11 +129,22 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
 
   const handleNext = () => {
     if (getAssignedCount() < slots.length) return;
-    const frameCaptures = slots.map((_, slotIdx) => {
+    const selectedCaptureIndexes = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
-      return captureIdx !== undefined ? captures[captureIdx] : captures[0];
+      return captureIdx !== undefined ? captureIdx : 0;
     });
-    navigate("/apply-filter", { state: { ...state, frameCaptures } });
+
+    const frameCaptures = slots.map((_, slotIdx) => {
+      const captureIdx = selectedCaptureIndexes[slotIdx];
+      return captures[captureIdx] ?? captures[0];
+    });
+    navigate("/apply-filter", {
+      state: {
+        ...state,
+        frameCaptures,
+        selectedCaptureIndexes,
+      },
+    });
   };
 
   if (!selectedFrame) return null;

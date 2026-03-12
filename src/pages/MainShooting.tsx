@@ -7,6 +7,7 @@ import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { useCanon } from "../hooks/useCanon";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+import { logError } from "../utils/logger";
 
 function CropOverlay({
   slotWidth,
@@ -135,6 +136,15 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const isRecordingRef = useRef(false);
   const sequenceRunningRef = useRef(false);
   const cameraTypeRef = useRef("webcam");
+  const captureVideoDiagnosticsRef = useRef<
+    Array<{
+      captureIndex: number;
+      status: "ok" | "missing";
+      reason: string;
+      blobSize: number;
+      cameraType: string;
+    }>
+  >([]);
 
   const canonCamera = useCanon();
 
@@ -504,7 +514,14 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }
       }
       // 👆👆👆 จบระบบ WARM-UP 👆👆👆
-    let localCaptures: Capture[] = []; 
+    let localCaptures: Capture[] = [];
+    const captureVideoDiagnostics: Array<{
+      captureIndex: number;
+      status: "ok" | "missing";
+      reason: string;
+      blobSize: number;
+      cameraType: string;
+    }> = [];
 
     // 🚨 ลูปถ่ายรูปและอัดวิดีโอ (ใช้ Flow เดียวกันทั้ง Webcam และ Canon)
     for (let i = 0; i < totalCaptures; i++) {
@@ -590,10 +607,28 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       const recordingResult = await recordingPromise;
       let videoUrl = recordingResult.url;
       let videoPath = "";
-      
-      if (recordingResult.blob && recordingResult.blob.size > 1000) {
+
+      const blobSize = recordingResult.blob?.size ?? 0;
+      let missingReason = "";
+
+      if (!recordingResult.blob) {
+        missingReason = "recording_blob_null";
+      } else if (blobSize <= 1000) {
+        missingReason = `recording_blob_too_small_${blobSize}`;
+      } else {
         videoPath = await saveVideoToTemp(recordingResult.blob, i);
+        if (!videoPath) {
+          missingReason = "save_temp_video_failed";
+        }
       }
+
+      captureVideoDiagnostics.push({
+        captureIndex: i,
+        status: missingReason ? "missing" : "ok",
+        reason: missingReason || "ok",
+        blobSize,
+        cameraType: cameraTypeRef.current,
+      });
 
       const newCapture: Capture = { photo: photoData, video: videoUrl, videoPath };
       localCaptures.push(newCapture);
@@ -601,6 +636,30 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       setCurrentCapture(i + 1);
       
       await new Promise((r) => setTimeout(r, 50));
+    }
+
+    captureVideoDiagnosticsRef.current = captureVideoDiagnostics;
+    const missingVideoDiagnostics = captureVideoDiagnostics.filter(
+      (item) => item.status === "missing",
+    );
+    if (missingVideoDiagnostics.length > 0) {
+      console.warn("[Capture Video Diagnostics]", {
+        totalCaptures,
+        missingCount: missingVideoDiagnostics.length,
+        missingItems: missingVideoDiagnostics,
+      });
+
+      // ส่งเข้า backend error-log เพื่อเก็บ trace ระยะยาว
+      logError(
+        "capture_video_missing",
+        JSON.stringify({
+          totalCaptures,
+          missingCount: missingVideoDiagnostics.length,
+          missingItems: missingVideoDiagnostics,
+        }),
+        undefined,
+        "warning",
+      );
     }
 
     setPhase("done");
@@ -611,6 +670,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         state: {
           ...state,
           captures: localCaptures,
+          captureVideoDiagnostics: captureVideoDiagnosticsRef.current,
         },
       });
     }, 200);
@@ -653,6 +713,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             state: {
               ...state,
               captures,
+              captureVideoDiagnostics: captureVideoDiagnosticsRef.current,
             },
           });
         }, 100);

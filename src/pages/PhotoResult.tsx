@@ -25,6 +25,15 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const frameCaptures: Capture[] = state.frameCaptures || [];
+  const allCaptures: Capture[] = state.captures || [];
+  const selectedCaptureIndexes: number[] = state.selectedCaptureIndexes || [];
+  const captureVideoDiagnostics: Array<{
+    captureIndex: number;
+    status: "ok" | "missing";
+    reason: string;
+    blobSize: number;
+    cameraType: string;
+  }> = state.captureVideoDiagnostics || [];
   const selectedFrame = state.selectedFrame;
   const selectedFilter = state.selectedFilter;
   const quantity: number = state.quantity || 1;
@@ -50,7 +59,86 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const hasStarted = useRef(false);
   const hasCreatedPresign = useRef(false);
   const hasUploadedFiles = useRef(false);
+  const hasLoggedMissingVideoRef = useRef(false);
   useIdleTimeout();
+
+  const buildVideoPathsBySlot = useCallback((): string[] => {
+    const slotVideoPaths = frameCaptures.map((cap) => cap.videoPath || "");
+    const hasMissing = slotVideoPaths.some((path) => !path);
+    if (!hasMissing) {
+      return slotVideoPaths;
+    }
+
+    const selectedSet = new Set(
+      selectedCaptureIndexes.filter((idx) => Number.isInteger(idx)),
+    );
+
+    const unselectedCandidates = allCaptures
+      .map((cap, idx) => ({ idx, videoPath: cap.videoPath || "" }))
+      .filter((item) => !selectedSet.has(item.idx) && !!item.videoPath);
+
+    // Shuffle once per session so fallback is random and non-repeating.
+    for (let i = unselectedCandidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [unselectedCandidates[i], unselectedCandidates[j]] = [
+        unselectedCandidates[j],
+        unselectedCandidates[i],
+      ];
+    }
+
+    let fallbackIdx = 0;
+    const fallbackAssignments: Array<{
+      slotIndex: number;
+      fallbackCaptureIndex: number;
+    }> = [];
+    const resolvedBySlot = slotVideoPaths.map((path, slotIndex) => {
+      if (path) return path;
+      if (fallbackIdx >= unselectedCandidates.length) return "";
+      const selectedFallback = unselectedCandidates[fallbackIdx];
+      const fallbackPath = selectedFallback.videoPath;
+      fallbackAssignments.push({
+        slotIndex,
+        fallbackCaptureIndex: selectedFallback.idx,
+      });
+      fallbackIdx += 1;
+      return fallbackPath;
+    });
+
+    if (!hasLoggedMissingVideoRef.current) {
+      const diagnosticsByCapture = new Map(
+        captureVideoDiagnostics.map((d) => [d.captureIndex, d]),
+      );
+
+      const missingSlots = slotVideoPaths
+        .map((path, slotIndex) => {
+          if (path) return null;
+          const captureIndex = selectedCaptureIndexes[slotIndex];
+          const diagnostic = diagnosticsByCapture.get(captureIndex);
+          return {
+            slotIndex,
+            selectedCaptureIndex: captureIndex,
+            reason: diagnostic?.reason || "unknown",
+            blobSize: diagnostic?.blobSize ?? -1,
+            cameraType: diagnostic?.cameraType || "unknown",
+          };
+        })
+        .filter((item): item is {
+          slotIndex: number;
+          selectedCaptureIndex: number;
+          reason: string;
+          blobSize: number;
+          cameraType: string;
+        } => item !== null);
+
+      console.warn("[Video Slot Fallback Summary]", {
+        missingSlots,
+        fallbackAssignments,
+      });
+      hasLoggedMissingVideoRef.current = true;
+    }
+
+    return resolvedBySlot;
+  }, [allCaptures, captureVideoDiagnostics, frameCaptures, selectedCaptureIndexes]);
 
   const composeFrame = useCallback(async () => {
     try {
@@ -167,9 +255,13 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       // 2. จัดการวิดีโอ (รวมเฟรม + เซฟ)
       // =====================================
       let composedVid = "";
-      const videoPaths = frameCaptures
-        .map((cap: Capture) => cap.videoPath)
-        .filter((p): p is string => !!p);
+      const resolvedVideoBySlot = buildVideoPathsBySlot();
+      const slotVideoPairs = slots
+        .map((slot, idx) => ({ slot, videoPath: resolvedVideoBySlot[idx] || "" }))
+        .filter((pair) => !!pair.videoPath);
+
+      const videoPaths = slotVideoPairs.map((pair) => pair.videoPath);
+      const videoSlots = slotVideoPairs.map((pair) => pair.slot);
 
       if (videoPaths.length > 0) {
         setStatusText("กำลังรวมวิดีโอ...");
@@ -186,7 +278,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           composedVid = await invoke("compose_frame_video", {
             frameImageUrl: selectedFrame?.imageUrl || "",
             videoPaths,
-            slots: slots,
+            slots: videoSlots,
             frameWidth: frameWidth,
             frameHeight: frameHeight,
             outputFilename: "framed-video.mp4",
@@ -213,7 +305,19 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     };
 
     processMedia();
-  }, []); // eslint-disable-line
+  }, [
+    buildVideoPathsBySlot,
+    composeFrame,
+    frameCaptures,
+    frameHeight,
+    frameWidth,
+    quantity,
+    selectedFilter,
+    selectedFrame,
+    slots,
+    state.referenceId,
+    state.transactionId,
+  ]);
 
   // 🚨 2. อัปโหลดเมื่อไฟล์พร้อมและได้รับ Session ID แล้วเท่านั้น
   const uploadFiles = useCallback(async () => {
