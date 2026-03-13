@@ -5,7 +5,14 @@ import { getVersion } from "@tauri-apps/api/app";
 import CameraConfigModal from "./CameraConfigModal";
 import PrinterConfigModal from "./PrinterConfigModal";
 import PaperPositionModal from "./PaperPositionModal";
-import { CLOSE_APP_PIN } from "../config/appConfig";
+import {
+  DEFAULT_CLOSE_APP_PIN,
+  DEFAULT_MENU_PIN,
+  getCloseAppPin,
+  getMenuPin,
+  setCloseAppPin,
+  setMenuPin,
+} from "../config/appConfig";
 
 interface Props {
   open: boolean;
@@ -22,7 +29,7 @@ export default function ContextMenu({
 }: Props) {
   const navigate = useNavigate();
   const [activeModal, setActiveModal] = useState<
-    "camera" | "printer" | "paper" | null
+    "camera" | "printer" | "paper" | "pin" | null
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
@@ -35,7 +42,16 @@ export default function ContextMenu({
   const [isMenuUnlocked, setIsMenuUnlocked] = useState(false);
   const [unlockPinInput, setUnlockPinInput] = useState("");
   const [unlockPinError, setUnlockPinError] = useState(false);
-  const MENU_PIN = "7053";
+
+  const [menuPin, setMenuPinState] = useState(DEFAULT_MENU_PIN);
+  const [closeAppPin, setCloseAppPinState] = useState(DEFAULT_CLOSE_APP_PIN);
+
+  const [pinChangeStep, setPinChangeStep] = useState<"enter" | "confirm">("enter");
+  const [pinDraftInput, setPinDraftInput] = useState("");
+  const [pinConfirmInput, setPinConfirmInput] = useState("");
+  const [pinFirstValue, setPinFirstValue] = useState("");
+  const [pinChangeError, setPinChangeError] = useState("");
+  const [pinChangeSuccess, setPinChangeSuccess] = useState("");
 
   const [cameraStatus, setCameraStatus] = useState("");
   const [printerStatus, setPrinterStatus] = useState("");
@@ -54,6 +70,14 @@ export default function ContextMenu({
     setIsMenuUnlocked(false);
     setUnlockPinInput("");
     setUnlockPinError(false);
+    setPinChangeStep("enter");
+    setPinDraftInput("");
+    setPinConfirmInput("");
+    setPinFirstValue("");
+    setPinChangeError("");
+    setPinChangeSuccess("");
+    setMenuPinState(getMenuPin());
+    setCloseAppPinState(getCloseAppPin());
 
     // Get app version
     getVersion().then(v => setAppVersion(v)).catch(console.error);
@@ -105,12 +129,12 @@ export default function ContextMenu({
       setUnlockPinError(false);
       return;
     }
-    if (unlockPinInput.length >= 4) return;
+    if (unlockPinInput.length >= menuPin.length) return;
     const next = unlockPinInput + key;
     setUnlockPinInput(next);
     
-    if (next.length === MENU_PIN.length) {
-      if (next === MENU_PIN) {
+    if (next.length === menuPin.length) {
+      if (next === menuPin) {
         setIsMenuUnlocked(true);
       } else {
         setUnlockPinError(true);
@@ -129,11 +153,11 @@ export default function ContextMenu({
       setPinError(false);
       return;
     }
-    if (pinInput.length >= 6) return;
+    if (pinInput.length >= closeAppPin.length) return;
     const next = pinInput + key;
     setPinInput(next);
-    if (next.length === CLOSE_APP_PIN.length) {
-      if (next === CLOSE_APP_PIN) {
+    if (next.length === closeAppPin.length) {
+      if (next === closeAppPin) {
         setShowPinModal(false);
         setPinInput("");
         setPinError(false);
@@ -148,10 +172,76 @@ export default function ContextMenu({
     }
   };
 
+  const resetPinChangeState = () => {
+    setPinChangeStep("enter");
+    setPinDraftInput("");
+    setPinConfirmInput("");
+    setPinFirstValue("");
+    setPinChangeError("");
+    setPinChangeSuccess("");
+  };
+
+  const closePinChangeModal = () => {
+    resetPinChangeState();
+    setActiveModal(null);
+  };
+
+  const handleChangePinKey = (key: string) => {
+    if (pinChangeSuccess) return;
+    if (key === "del") {
+      if (pinChangeStep === "enter") {
+        setPinDraftInput((p) => p.slice(0, -1));
+      } else {
+        setPinConfirmInput((p) => p.slice(0, -1));
+      }
+      setPinChangeError("");
+      return;
+    }
+
+    const currentInput = pinChangeStep === "enter" ? pinDraftInput : pinConfirmInput;
+    if (currentInput.length >= 4) return;
+
+    const next = currentInput + key;
+    if (pinChangeStep === "enter") {
+      setPinDraftInput(next);
+      if (next.length === 4) {
+        setPinFirstValue(next);
+        setPinChangeStep("confirm");
+        setPinConfirmInput("");
+      }
+      return;
+    }
+
+    setPinConfirmInput(next);
+    if (next.length === 4) {
+      if (next === pinFirstValue) {
+        setMenuPin(next);
+        setCloseAppPin(next);
+        setMenuPinState(next);
+        setCloseAppPinState(next);
+        setPinChangeSuccess("บันทึก PIN ใหม่สำเร็จ (ใช้ทั้งเข้าเมนูและปิดแอป)");
+        setPinChangeError("");
+      } else {
+        setPinChangeError("PIN ไม่ตรงกัน กรุณาลองใหม่");
+        setPinDraftInput("");
+        setPinConfirmInput("");
+        setPinFirstValue("");
+        setPinChangeStep("enter");
+      }
+    }
+  };
+
   // Keyboard support for PIN modals
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (activeModal === "pin") {
+        if (e.key >= "0" && e.key <= "9") handleChangePinKey(e.key);
+        else if (e.key === "Backspace") handleChangePinKey("del");
+        else if (e.key === "Escape") closePinChangeModal();
+        return;
+      }
+
       // โหมดกดรหัสปิดแอป
       if (showPinModal) {
         if (e.key >= "0" && e.key <= "9") handlePinKey(e.key);
@@ -171,7 +261,7 @@ export default function ContextMenu({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showPinModal, isMenuUnlocked, open, unlockPinInput, pinInput]);
+  }, [activeModal, showPinModal, isMenuUnlocked, open, unlockPinInput, pinInput, pinChangeStep, pinDraftInput, pinConfirmInput, pinChangeSuccess]);
 
   if (!open) return null;
 
@@ -190,7 +280,7 @@ export default function ContextMenu({
 
           {/* Dots */}
           <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
-            {Array.from({ length: MENU_PIN.length }).map((_, i) => (
+            {Array.from({ length: menuPin.length }).map((_, i) => (
               <div
                 key={i}
                 style={{
@@ -255,7 +345,7 @@ export default function ContextMenu({
           <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>Enter PIN to close the app</p>
 
           <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
-            {Array.from({ length: CLOSE_APP_PIN.length }).map((_, i) => (
+            {Array.from({ length: closeAppPin.length }).map((_, i) => (
               <div
                 key={i}
                 style={{
@@ -309,6 +399,97 @@ export default function ContextMenu({
 
   if (activeModal === "paper") {
     return <PaperPositionModal open={true} onClose={() => setActiveModal(null)} />;
+  }
+
+  if (activeModal === "pin") {
+    const dotsLength = 4;
+    const currentInput = pinChangeStep === "enter" ? pinDraftInput : pinConfirmInput;
+
+    return (
+      <div
+        className="context-menu-overlay"
+        onClick={(e) => {
+          e.stopPropagation();
+          closePinChangeModal();
+        }}
+      >
+        <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 340, textAlign: "center" }}>
+          <h3 style={{ margin: "0 0 8px" }}>🔐 เปลี่ยน PIN</h3>
+
+          <p style={{ fontSize: 13, opacity: 0.7, marginBottom: 12 }}>
+            {pinChangeStep === "enter"
+              ? "กรอก PIN ใหม่ (4 หลัก)"
+              : "ยืนยัน PIN อีกครั้ง"}
+          </p>
+
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
+            {Array.from({ length: dotsLength }).map((_, i) => (
+              <div
+                key={i}
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: "50%",
+                  background: i < currentInput.length ? (pinChangeError ? "#ff4444" : "#fff") : "#555",
+                  transition: "background 0.15s",
+                }}
+              />
+            ))}
+          </div>
+
+          {pinChangeError && (
+            <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>{pinChangeError}</p>
+          )}
+          {pinChangeSuccess && (
+            <p style={{ color: "#4cd964", fontSize: 13, marginBottom: 10 }}>{pinChangeSuccess}</p>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            {PAD.flat().map((key, i) => (
+              key === "" ? <div key={i} /> :
+              <button
+                key={i}
+                onClick={() => handleChangePinKey(key)}
+                disabled={!!pinChangeSuccess}
+                style={{
+                  padding: "16px 0",
+                  fontSize: key === "del" ? 18 : 24,
+                  fontWeight: 600,
+                  borderRadius: 12,
+                  border: "none",
+                  background: key === "del" ? "#444" : "#2a2a2a",
+                  color: "#fff",
+                  cursor: pinChangeSuccess ? "not-allowed" : "pointer",
+                  opacity: pinChangeSuccess ? 0.5 : 1,
+                }}
+              >
+                {key === "del" ? "⌫" : key}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            <button
+              className="context-menu-item"
+              style={{ justifyContent: "center", background: "#333", flex: 1 }}
+              onClick={closePinChangeModal}
+            >
+              ปิด
+            </button>
+
+            {pinChangeSuccess && (
+              <button
+                className="context-menu-item"
+                style={{ justifyContent: "center", background: "#2f5f2f", flex: 1 }}
+                onClick={closePinChangeModal}
+              >
+                เสร็จสิ้น
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // หน้าจอเมนูหลัก (แสดงเมื่อกรอกรหัส 7053 ผ่านแล้ว)
@@ -390,6 +571,22 @@ export default function ContextMenu({
             <div style={{ fontWeight: 600 }}>พิมพ์ย้อนหลัง</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               Request Image Print
+            </div>
+          </div>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+        </button>
+
+        <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
+
+        <button
+          className="context-menu-item context-menu-config-item"
+          onClick={() => setActiveModal("pin")}
+        >
+          <span style={{ fontSize: 24 }}>🔐</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>เปลี่ยน PIN</div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+              Menu PIN / Close App PIN
             </div>
           </div>
           <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
