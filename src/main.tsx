@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import CameraApp from "./CameraApp";
 import { logError } from "./utils/logger";
 
 // Global uncaught JS error handler
@@ -30,8 +31,13 @@ window.addEventListener("unhandledrejection", (event) => {
   );
 });
 
+// Detect which Tauri window this is (synchronous — reads from Tauri internals)
+// "camera" = secondary display window, anything else = main interactive window
+const windowLabel: string =
+  (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? "main";
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    {windowLabel === "camera" ? <CameraApp /> : <App />}
   </React.StrictMode>,
 );

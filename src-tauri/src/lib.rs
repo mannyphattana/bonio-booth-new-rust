@@ -2,6 +2,7 @@ mod api;
 mod canon;
 #[cfg(target_os = "windows")]
 mod edsdk_sys;
+mod display;
 mod image_processing;
 mod printer;
 mod shutdown;
@@ -328,6 +329,11 @@ pub fn run() {
             printer::list_dslr_cameras,
             printer::reduce_paper_level,
             printer::get_printer_paper_sizes,
+            // Display / dual monitor
+            display::get_monitors,
+            display::open_display_window,
+            display::close_display_window,
+            display::move_main_window,
             // Video
             video::check_ffmpeg_available,
             video::ensure_ffmpeg,
@@ -347,9 +353,14 @@ pub fn run() {
         .run(|app, event| {
             match event {
                 RunEvent::WindowEvent {
+                    label,
                     event: WindowEvent::CloseRequested { api, .. },
                     ..
                 } => {
+                    // Camera/display window can close freely without backend cleanup
+                    if label != "main" {
+                        return;
+                    }
                     // Prevent default close — we'll handle cleanup first
                     api.prevent_close();
 

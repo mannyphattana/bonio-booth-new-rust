@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import CameraConfigModal from "./CameraConfigModal";
 import PrinterConfigModal from "./PrinterConfigModal";
 import PaperPositionModal from "./PaperPositionModal";
+import MonitorConfigModal from "./MonitorConfigModal";
 import { CLOSE_APP_PIN } from "../config/appConfig";
 
 interface Props {
@@ -22,7 +23,7 @@ export default function ContextMenu({
 }: Props) {
   const navigate = useNavigate();
   const [activeModal, setActiveModal] = useState<
-    "camera" | "printer" | "paper" | null
+    "camera" | "printer" | "paper" | "monitor" | null
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
@@ -85,6 +86,9 @@ export default function ContextMenu({
     localStorage.removeItem("paperConfig");
     localStorage.removeItem("paperConfigPortrait");
     localStorage.removeItem("paperConfigLandscape");
+    localStorage.removeItem("displayMonitorConfig");
+    localStorage.removeItem("machineData");
+    localStorage.removeItem("themeData");
 
     onFormatReset();
     onClose();
@@ -311,6 +315,10 @@ export default function ContextMenu({
     return <PaperPositionModal open={true} onClose={() => setActiveModal(null)} />;
   }
 
+  if (activeModal === "monitor") {
+    return <MonitorConfigModal open={true} onClose={() => setActiveModal(null)} />;
+  }
+
   // หน้าจอเมนูหลัก (แสดงเมื่อกรอกรหัส 7053 ผ่านแล้ว)
   return (
     <div
@@ -370,6 +378,30 @@ export default function ContextMenu({
             <div style={{ fontWeight: 600 }}>Paper Position Config</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               ปรับ Scale, Vertical, Horizontal
+            </div>
+          </div>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+        </button>
+
+        {/* 4. Dual Monitor Config */}
+        <button
+          className="context-menu-item context-menu-config-item"
+          onClick={() => setActiveModal("monitor")}
+        >
+          <span style={{ fontSize: 24 }}>🖥️</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>Display Monitor Config</div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+              {(() => {
+                try {
+                  const cfg = JSON.parse(localStorage.getItem("displayMonitorConfig") || "null");
+                  return cfg?.enabled
+                    ? `จอแสดงผล: ${cfg.displayName || "เปิดใช้งาน"}`
+                    : "ปิดใช้งาน (Single Monitor)";
+                } catch {
+                  return "ปิดใช้งาน (Single Monitor)";
+                }
+              })()}
             </div>
           </div>
           <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>

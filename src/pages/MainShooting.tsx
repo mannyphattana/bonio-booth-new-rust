@@ -106,14 +106,34 @@ interface Props {
   machineData: MachineData;
   onFormatReset: () => void;
   onBeforeClose?: () => void;
+  /** Called instead of navigate when running inside the camera window (dual-monitor mode) */
+  onShootingComplete?: (captures: Capture[], selectedFrame: any, locationState: any) => void;
 }
 
-export default function MainShooting({ theme, machineData, onFormatReset, onBeforeClose }: Props) {
+export default function MainShooting({ theme, machineData, onFormatReset, onBeforeClose, onShootingComplete }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
   const selectedFrame = state.selectedFrame;
   const slots: FrameSlot[] = selectedFrame?.grid?.slots || [];
+
+  /** ส่งต่อ captures ไปยัง slot-selection หรือ callback (dual monitor) */
+  const completeSession = useCallback(
+    (captureList: Capture[]) => {
+      const targetState = {
+        ...state,
+        captures: captureList,
+        captureVideoDiagnostics: captureVideoDiagnosticsRef.current,
+      };
+      if (onShootingComplete) {
+        onShootingComplete(captureList, selectedFrame, targetState);
+      } else {
+        navigate("/slot-selection", { state: targetState });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigate, onShootingComplete, state, selectedFrame]
+  );
 
   const cameraCountdown = Number(machineData.cameraCountdown) || 5;
   const totalSlots = slots.length || 4;
@@ -669,13 +689,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     sequenceRunningRef.current = false;
 
     setTimeout(() => {
-      navigate("/slot-selection", {
-        state: {
-          ...state,
-          captures: localCaptures,
-          captureVideoDiagnostics: captureVideoDiagnosticsRef.current,
-        },
-      });
+      completeSession(localCaptures);
     }, 200);
 
   }, [
@@ -685,6 +699,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     waitForVideo,
     takePhoto,
     saveVideoToTemp,
+    completeSession,
     navigate,
     state
   ]);
@@ -712,18 +727,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
       if (allVideosReady || videosReadyTimeout) {
         const delay = setTimeout(() => {
-          navigate("/slot-selection", {
-            state: {
-              ...state,
-              captures,
-              captureVideoDiagnostics: captureVideoDiagnosticsRef.current,
-            },
-          });
+          completeSession(captures);
         }, 100);
         return () => clearTimeout(delay);
       }
     }
-  }, [phase, captures, totalCaptures, videosReadyTimeout, navigate, state]);
+  }, [phase, captures, totalCaptures, videosReadyTimeout, completeSession, navigate, state]);
 
   useEffect(() => {
     const checkCamera = setInterval(async () => {

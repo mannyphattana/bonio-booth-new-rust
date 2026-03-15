@@ -8,6 +8,8 @@ import PaymentQR from "./pages/PaymentQR";
 import FrameSelection from "./pages/FrameSelection";
 import PrepareShooting from "./pages/PrepareShooting";
 import MainShooting from "./pages/MainShooting";
+import DualMonitorShootingWait from "./pages/DualMonitorShootingWait";
+import { isDualMonitorEnabled } from "./utils/displayBroadcast";
 import SlotSelection from "./pages/SlotSelection";
 import ApplyFilter from "./pages/ApplyFilter";
 import PhotoResult from "./pages/PhotoResult";
@@ -142,10 +144,12 @@ function App() {
           const initResult: any = await invoke("init_machine");
           if (initResult.success && initResult.data?.machine) {
             setMachineData(initResult.data.machine);
-            setThemeData(
-              initResult.data.theme || initResult.data.machine.theme,
-            );
+            const freshTheme = initResult.data.theme || initResult.data.machine.theme;
+            setThemeData(freshTheme);
             setIsVerified(true);
+            // Keep camera window in sync
+            localStorage.setItem("machineData", JSON.stringify(initResult.data.machine));
+            localStorage.setItem("themeData", JSON.stringify(freshTheme));
 
             if (maintenanceConfig === "network") {
               setMaintenanceConfig(null);
@@ -263,6 +267,9 @@ function App() {
         setMachineData(data.machine);
         if (data.theme) setThemeData(data.theme);
         if (data.machine?.lineUrl) setLineUrl(data.machine.lineUrl);
+        // Keep camera window in sync
+        localStorage.setItem("machineData", JSON.stringify(data.machine));
+        if (data.theme) localStorage.setItem("themeData", JSON.stringify(data.theme));
 
         const newMaintenanceMode = !!data.machine?.isMaintenanceMode;
         const newPaperLevel = data.paperLevel ?? data.machine?.paperLevel ?? -1;
@@ -350,6 +357,9 @@ function App() {
           setThemeData(data.theme || data.machine?.theme);
           setIsVerified(true);
           localStorage.setItem("machineId", data.machine._id);
+          // Save serialized data for the camera window (shared localStorage)
+          localStorage.setItem("machineData", JSON.stringify(data.machine));
+          localStorage.setItem("themeData", JSON.stringify(data.theme || data.machine?.theme));
         }}
       />
     );
@@ -492,12 +502,21 @@ function App() {
         <Route
           path="/main-shooting"
           element={
-            <MainShooting
-              theme={themeData!}
-              machineData={machineData!}
-              onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
-            />
+            isDualMonitorEnabled() ? (
+              <DualMonitorShootingWait
+                theme={themeData!}
+                machineData={machineData!}
+                onFormatReset={handleFormatReset}
+                onBeforeClose={destroySSE}
+              />
+            ) : (
+              <MainShooting
+                theme={themeData!}
+                machineData={machineData!}
+                onFormatReset={handleFormatReset}
+                onBeforeClose={destroySSE}
+              />
+            )
           }
         />
         <Route
