@@ -62,8 +62,10 @@ export const REFETCH_INTERVAL = {
 };
 
 /**
+ * PIN สำหรับยืนยันก่อนปิดแอป
  * Default PIN values (used when user has not configured custom PIN yet)
  */
+export const CLOSE_APP_PIN = "7053";
 export const DEFAULT_MENU_PIN = "7053";
 export const DEFAULT_CLOSE_APP_PIN = "7053";
 
