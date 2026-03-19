@@ -129,6 +129,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   // 🚨 เพิ่ม Refs สำหรับจำลอง Canon Live View ให้เป็น Webcam Stream
   const canonCanvasRef = useRef<HTMLCanvasElement>(null);
   const canonDrawLoopRef = useRef<number>(0);
+  const canonDisconnectFailCountRef = useRef(0);
+  const canonDisconnectSuppressUntilRef = useRef(0);
+  const canonDisconnectHandledRef = useRef(false);
 
   // 🚨 เปลี่ยนจาก RecordRTC เป็น MediaRecorder Native
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -471,6 +474,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     sequenceRunningRef.current = true;
 
     if (cameraTypeRef.current === "canon") {
+      canonDisconnectSuppressUntilRef.current = Date.now() + 8000;
+
       const FRESH_FRAME_TIMEOUT = 5000; 
       const POLL_MS = 50;
       let elapsed = 0;
@@ -574,9 +579,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       // 👆👆👆
 
       // 🚨 สั่งถ่ายภาพ
-      const capturePromise = cameraTypeRef.current === "canon"
-        ? canonCamera.takePicture()
-        : takePhoto();
+      let capturePromise: Promise<string>;
+      if (cameraTypeRef.current === "canon") {
+        canonDisconnectSuppressUntilRef.current = Date.now() + 2500;
+        capturePromise = canonCamera.takePicture();
+      } else {
+        capturePromise = takePhoto();
+      }
 
       // 🚨 ลดดีเลย์แฟลชลงมาเป็น 500 (เพื่อชดเชยที่เบรก CPU ไป 100ms ด้านบน)
       const flashDelay = cameraTypeRef.current === "canon" ? 500 : 0;
@@ -734,13 +743,36 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           setTimeout(() => navigate("/"), 3000);
         }
       } else if (cameraType === "canon") {
+        if (Date.now() < canonDisconnectSuppressUntilRef.current) {
+          return;
+        }
+
         try {
           const connected = await invoke<boolean>("canon_is_connected");
-          if (!connected) {
+          if (connected) {
+            canonDisconnectFailCountRef.current = 0;
+            return;
+          }
+
+          canonDisconnectFailCountRef.current += 1;
+          if (
+            canonDisconnectFailCountRef.current >= 3 &&
+            !canonDisconnectHandledRef.current
+          ) {
+            canonDisconnectHandledRef.current = true;
             setCameraError("กล้อง Canon ถูกถอดออก กรุณาเชื่อมต่อใหม่");
             setTimeout(() => navigate("/"), 3000);
           }
         } catch {
+          canonDisconnectFailCountRef.current += 1;
+          if (
+            canonDisconnectFailCountRef.current >= 3 &&
+            !canonDisconnectHandledRef.current
+          ) {
+            canonDisconnectHandledRef.current = true;
+            setCameraError("กล้อง Canon ถูกถอดออก กรุณาเชื่อมต่อใหม่");
+            setTimeout(() => navigate("/"), 3000);
+          }
         }
       }
     }, 2000);
