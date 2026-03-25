@@ -1,8 +1,11 @@
 import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { isPrinting } from "../utils/printingState";
 import { DEVICE_CHECK } from "../config/appConfig";
 import { logError } from "../utils/logger";
+
+// DS-RX1 และ printer บางรุ่นจะ re-enumerate USB ชั่วคราว (2-3 วิ) ระหว่าง wakeup/ribbon load
+// ใช้ debounce ก่อนยิง alert เพื่อกรอง false disconnect ออก
+const PRINTER_DISCONNECT_DEBOUNCE_MS = 5000;
 
 interface DeviceCheckOptions {
   enabled?: boolean;
@@ -38,6 +41,9 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     camera: false,
     printer: false,
   });
+  // Debounce timer สำหรับ printer disconnect
+  // ถ้า printer reconnect ก่อน timer ยิง = brief re-enum → ยกเลิก alert
+  const printerDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkDevices = useCallback(async () => {
     if (!enabled) return;
@@ -89,36 +95,16 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     const savedPrinter = localStorage.getItem("selectedPrinter") || "";
     printerName = savedPrinter;
     const isConfiguredPrinter = !!savedPrinter;
-    
-    // Check printing state first - if printing, skip printer status check to avoid false notifications
-    const printingState = isPrinting();
-    if (printingState && isConfiguredPrinter) {
-      console.log("[useDeviceCheck] Printer is printing or in grace period, skipping printer status check");
-      // Keep previous printer connected state to avoid false transitions
-      if (prevStateRef.current) {
-        printerConnected = prevStateRef.current.printerConnected;
-        console.log(`[useDeviceCheck] Using previous printer state: ${printerConnected}`);
-      } else {
-        printerConnected = true; // Assume connected during printing
-        console.log("[useDeviceCheck] No previous state, assuming printer connected during printing");
-      }
-      // Get available printers for potential alert (but don't change connected state)
+
+    let printerLastStatus = "";
+    if (savedPrinter) {
       try {
         const printers: any[] = await invoke("get_printers");
         availablePrinterNames = printers.map((p: any) => p.name);
-      } catch {
-        // Keep empty array if can't get printers
-      }
-    } else if (savedPrinter) {
-      try {
-        const printers: any[] = await invoke("get_printers");
-        availablePrinterNames = printers.map((p: any) => p.name);
-        // Check both name AND is_online — Get-Printer returns installed printers
-        // even when physically unplugged, but WorkOffline flag changes to true
         const foundPrinter = printers.find((p: any) => p.name === savedPrinter);
         printerConnected = foundPrinter?.is_online || false;
-        
-        // Log printer status for debugging
+        if (foundPrinter?.status) printerLastStatus = foundPrinter.status;
+
         if (foundPrinter) {
           console.log(
             `[useDeviceCheck] Printer "${savedPrinter}": is_online=${foundPrinter.is_online}, status="${foundPrinter.status}"`,
@@ -222,30 +208,52 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         }
       }
 
-      // Printer disconnect transition
+      // Printer disconnect transition — ใช้ debounce เพื่อกรอง DS-RX1 brief re-enum (2-3 วิ)
       if (
         isConfiguredPrinter &&
         prevState.printerConnected &&
         !printerConnected &&
-        !alertSentRef.current.printer
+        !alertSentRef.current.printer &&
+        !printerDisconnectTimerRef.current
       ) {
-        alertSentRef.current.printer = true;
-        try {
-          await invoke("send_device_alert", {
-            deviceType: "printer",
-            deviceName: printerName,
-            availableDevices: availablePrinterNames,
-          });
-        } catch {
-          /* ignore */
-        }
-        logError(
-          "printer_disconnect",
-          `Printer disconnected: ${printerName}`,
-          undefined,
-          "critical"
-        );
-        if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
+        const capturedPrinterName = printerName;
+        const capturedAvailableNames = [...availablePrinterNames];
+        const capturedPrinterStatus = printerLastStatus;
+        console.log(`[useDeviceCheck] Printer disconnected (status: ${capturedPrinterStatus}), waiting ${PRINTER_DISCONNECT_DEBOUNCE_MS}ms to confirm...`);
+        printerDisconnectTimerRef.current = setTimeout(async () => {
+          printerDisconnectTimerRef.current = null;
+          // ตรวจจับอีกครั้ง — ถ้ายังหลุดอยู่ค่อยส่ง alert
+          let stillDisconnected = true;
+          let confirmedStatus = capturedPrinterStatus;
+          try {
+            const printers: any[] = await invoke("get_printers");
+            const found = printers.find((p: any) => p.name === capturedPrinterName);
+            stillDisconnected = !found?.is_online;
+            if (found?.status) confirmedStatus = found.status;
+          } catch {
+            // ถ้า check ไม่ได้ถือว่ายังหลุด
+          }
+          if (stillDisconnected) {
+            alertSentRef.current.printer = true;
+            try {
+              await invoke("send_device_alert", {
+                deviceType: "printer",
+                deviceName: capturedPrinterName,
+                availableDevices: capturedAvailableNames,
+                deviceStatus: confirmedStatus || undefined,
+              });
+            } catch { /* ignore */ }
+            logError(
+              "printer_disconnect",
+              `Printer disconnected: ${capturedPrinterName} (status: ${confirmedStatus})`,
+              undefined,
+              "critical"
+            );
+            if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
+          } else {
+            console.log("[useDeviceCheck] Printer reconnected within debounce window, ignoring transient disconnect");
+          }
+        }, PRINTER_DISCONNECT_DEBOUNCE_MS);
       }
 
       // Printer reconnect transition
@@ -254,23 +262,32 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         !prevState.printerConnected &&
         printerConnected
       ) {
-        alertSentRef.current.printer = false;
-        try {
-          await invoke("send_device_reconnected", {
-            deviceType: "printer",
-            deviceName: `Main: ${printerName}`,
-          });
-        } catch {
-          /* ignore */
+        if (printerDisconnectTimerRef.current) {
+          // Reconnect มาภายใน debounce window = DS-RX1 brief re-enum
+          // ยกเลิก timer เงียบๆ ไม่ยิง reconnect noti (เพราะไม่เคยยิง disconnect)
+          clearTimeout(printerDisconnectTimerRef.current);
+          printerDisconnectTimerRef.current = null;
+          console.log("[useDeviceCheck] Printer back within debounce window — transient disconnect ignored");
+        } else {
+          // alert disconnect ถูกส่งไปแล้ว → ส่ง reconnect notification
+          alertSentRef.current.printer = false;
+          try {
+            await invoke("send_device_reconnected", {
+              deviceType: "printer",
+              deviceName: `Main: ${printerName}`,
+            });
+          } catch { /* ignore */ }
         }
       }
     }
 
-    // เมื่ออุปกรณ์ที่ตั้งค่าไว้ยังหลุดอยู่ ให้แจ้ง maintenance (รวมกรณี dashboard ปิด maintenance แล้ว overlay หาย — จะได้โชว์แจ้งเตือนกล้อง/เครื่องปริ้นอีกครั้ง)
+    // เมื่ออุปกรณ์ที่ตั้งค่าไว้ยังหลุดอยู่ ให้แจ้ง maintenance
+    // (printer: รอ debounce ผ่านก่อน เพื่อไม่โชว์ overlay จาก DS-RX1 brief re-enum)
     if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES) {
+      const printerReallyDisconnected = isConfiguredPrinter && !printerConnected && !printerDisconnectTimerRef.current;
       if (
         (isConfiguredCamera && !cameraConnected) ||
-        (isConfiguredPrinter && !printerConnected)
+        printerReallyDisconnected
       ) {
         if (onMaintenanceNeeded) onMaintenanceNeeded();
       }
@@ -299,6 +316,10 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
 
     return () => {
       clearInterval(timer);
+      if (printerDisconnectTimerRef.current) {
+        clearTimeout(printerDisconnectTimerRef.current);
+        printerDisconnectTimerRef.current = null;
+      }
       try {
         navigator.mediaDevices?.removeEventListener("devicechange", handleDeviceChange);
       } catch {

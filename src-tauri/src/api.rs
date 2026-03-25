@@ -649,21 +649,27 @@ pub async fn send_device_alert(
     device_type: String,
     device_name: String,
     available_devices: Vec<String>,
+    device_status: Option<String>,
 ) -> Result<ApiResponse, String> {
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
     let client = &state.http_client;
     let url = format!("{}/api/machines-public/device-alert", API_BASE_URL);
 
+    let mut body = serde_json::json!({
+        "deviceType": device_type,
+        "deviceName": device_name,
+        "availableDevices": available_devices
+    });
+    if let Some(status) = device_status {
+        body["deviceStatus"] = serde_json::Value::String(status);
+    }
+
     let res = client
         .post(&url)
         .header("X-Machine-Port", &machine_port)
         .query(&[("machineId", &machine_id)])
-        .json(&serde_json::json!({
-            "deviceType": device_type,
-            "deviceName": device_name,
-            "availableDevices": available_devices
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;
