@@ -9,6 +9,11 @@ import { COUNTDOWN } from "../config/appConfig";
 import { setPrinting } from "../utils/printingState";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+import {
+  ACTIVE_PAPER_TYPE,
+  getPaperConfig,
+  getSelectedPrinter,
+} from "../config/printProfile";
 
 interface Props {
   theme: ThemeData;
@@ -456,19 +461,15 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         let verticalOffset = 0;
         let horizontalOffset = 0;
         try {
-          const key = isLandscape
-            ? "paperConfigLandscape"
-            : "paperConfigPortrait";
-          const saved = localStorage.getItem(key);
-          if (saved) {
-            const config = JSON.parse(saved);
+          const config = getPaperConfig(isLandscape ? "landscape" : "portrait");
+          if (config) {
             scale = config.scale ?? 100;
             verticalOffset = config.vertical ?? 0;
             horizontalOffset = config.horizontal ?? 0;
           }
         } catch {}
 
-        let printerName = localStorage.getItem("selectedPrinter") || "";
+        let printerName = getSelectedPrinter();
 
         if (!printerName) {
           const printers: any[] = await invoke("get_printers");
@@ -493,6 +494,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
                 imagePath: printPath,
                 printerName,
                 frameType,
+                paperType: ACTIVE_PAPER_TYPE,
                 scale,
                 verticalOffset,
                 horizontalOffset,

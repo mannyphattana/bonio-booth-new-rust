@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DEVICE_CHECK } from "../config/appConfig";
 import { logError } from "../utils/logger";
+import { getSelectedPrinter } from "../config/printProfile";
 
 // DS-RX1 และ printer บางรุ่นจะ re-enumerate USB ชั่วคราว (2-3 วิ) ระหว่าง wakeup/ribbon load
 // ใช้ debounce ก่อนยิง alert เพื่อกรอง false disconnect ออก
@@ -92,7 +93,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     }
 
     // --- Check printer ---
-    const savedPrinter = localStorage.getItem("selectedPrinter") || "";
+    const savedPrinter = getSelectedPrinter();
     printerName = savedPrinter;
     const isConfiguredPrinter = !!savedPrinter;
 

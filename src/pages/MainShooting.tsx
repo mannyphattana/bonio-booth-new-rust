@@ -358,6 +358,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
   // 🚨 เปลี่ยนมาใช้ MediaRecorder แบบ Native แท้ๆ ตัด RecordRTC ทิ้ง
   const startRecording = useCallback(() => {
+    if (cameraTypeRef.current === "canon") return;
     if (!streamRef.current || isRecordingRef.current) return;
 
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
@@ -385,6 +386,19 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       console.error("Start recording failed:", err);
     }
   }, []);
+
+  const startCanonMovieRecording = useCallback(async () => {
+    if (isRecordingRef.current) return;
+
+    isRecordingRef.current = true;
+    setIsRecording(true);
+
+    const ok = await canonCamera.startMovieRecording();
+    if (!ok) {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    }
+  }, [canonCamera]);
 
   // 🚨 เปลี่ยนการคืนค่าของ waitForVideo ให้ใช้ Native
   const waitForVideo = useCallback((): Promise<{
@@ -510,7 +524,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       setShowGetReady(false);
     }
 
-      if (streamRef.current) {
+      if (cameraTypeRef.current !== "canon" && streamRef.current) {
         console.log("[Warm-up] อุ่นเครื่อง Video Encoder...");
         try {
           // 🚨 ปรับบิตเรตและ Codec ตอนวอร์มให้ตรงกับการอัดจริง
@@ -527,6 +541,21 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           }
         } catch (e) {
           console.error("Warmup failed", e);
+        }
+      } else if (cameraTypeRef.current === "canon") {
+        console.log("[Canon Warm-up] Prime movie mode...");
+        try {
+          const warmupStarted = await canonCamera.startMovieRecording();
+          if (warmupStarted) {
+            await new Promise((r) => setTimeout(r, 600));
+            const warmupStopped = await canonCamera.stopMovieRecordingFast();
+            if (warmupStopped) {
+              await canonCamera.finalizeMovieDownload();
+            }
+          }
+          await new Promise((r) => setTimeout(r, 200));
+        } catch (e) {
+          console.error("[Canon Warm-up] failed", e);
         }
       }
       
@@ -550,10 +579,17 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         let currentCount = cameraCountdown; 
         setCountdown(currentCount);
 
-        const startRecordAt = Math.min(currentCount, 3); // เริ่มอัดเมื่อเหลือ 3 วิ
+        const startRecordAt = Math.min(
+          currentCount,
+          cameraTypeRef.current === "canon" && i === 0 ? 4 : 3,
+        ); // Canon ช็อตแรกเริ่มอัดเร็วขึ้น 1 วิ เพื่อลด first-frame lag
 
         if (currentCount <= startRecordAt && !isRecordingRef.current) {
-          startRecording();
+          if (cameraTypeRef.current === "canon") {
+            void startCanonMovieRecording();
+          } else {
+            startRecording();
+          }
         }
 
         const timer = setInterval(() => {
@@ -561,7 +597,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           setCountdown(currentCount);
 
           if (currentCount <= startRecordAt && !isRecordingRef.current) {
-            startRecording();
+            if (cameraTypeRef.current === "canon") {
+              void startCanonMovieRecording();
+            } else {
+              startRecording();
+            }
           }
 
           if (currentCount <= 0) {
@@ -572,7 +612,17 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       });
 
       // 🚨 สั่งหยุดวิดีโอ
-      const recordingPromise = waitForVideo();
+      const recordingPromise =
+        cameraTypeRef.current === "canon"
+          ? Promise.resolve({ url: "", blob: null as Blob | null })
+          : waitForVideo();
+
+      let canonMovieStopped = false;
+      if (cameraTypeRef.current === "canon" && isRecordingRef.current) {
+        canonMovieStopped = await canonCamera.stopMovieRecordingFast();
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      }
 
       // 👇👇👇 🚨 จุดเปลี่ยนสำคัญ: เว้นระยะให้ CPU หายใจ 100ms เพื่อแพ็คไฟล์เฟรมสุดท้ายให้เสร็จสมบูรณ์ ก่อนกล้องจะดึงพลังไปถ่ายรูป
       await new Promise((r) => setTimeout(r, 100));
@@ -582,7 +632,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       let capturePromise: Promise<string>;
       if (cameraTypeRef.current === "canon") {
         canonDisconnectSuppressUntilRef.current = Date.now() + 2500;
-        capturePromise = canonCamera.takePicture();
+        capturePromise = canonMovieStopped
+          ? canonCamera.takePictureQuick()
+          : canonCamera.takePicture();
       } else {
         capturePromise = takePhoto();
       }
@@ -611,6 +663,19 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       let blobSize = recordingResult.blob?.size ?? 0;
       let missingReason = "";
 
+      if (cameraTypeRef.current === "canon") {
+        if (!canonMovieStopped) {
+          missingReason = "canon_stop_movie_record_fast_failed";
+        } else {
+          videoPath = await canonCamera.finalizeMovieDownload();
+          if (videoPath && videoPath.length > 0) {
+            blobSize = 2000;
+          } else {
+            missingReason = "canon_finalize_movie_download_failed";
+          }
+        }
+      }
+
       const FORCE_TEST_MISSING_VIDEO = false; 
       const isTargetBrokenIndex = i === 1 || i === (totalCaptures - 1);
 
@@ -619,7 +684,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         missingReason = "TEST_MODE_FORCED_MISSING";
         videoPath = ""; 
       } 
-      else {
+      else if (cameraTypeRef.current !== "canon") {
         if (!recordingResult.blob) {
           missingReason = "recording_blob_null";
         } else if (blobSize <= 1000) {
@@ -691,6 +756,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     totalCaptures,
     cameraCountdown,
     startRecording,
+    startCanonMovieRecording,
     waitForVideo,
     takePhoto,
     saveVideoToTemp,

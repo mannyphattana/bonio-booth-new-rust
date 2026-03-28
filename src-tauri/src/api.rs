@@ -3,7 +3,30 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
 
-const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+const API_BASE_URL: &str = "http://localhost:3000";
+const DEFAULT_MACHINE_ID: &str = "69b1938827766fd8efb50396";
+const DEFAULT_MACHINE_PORT: &str = "33332";
+const DEFAULT_MACHINE_API_BASE_URL: &str = "http://localhost:3000/api";
+
+fn normalize_api_base_url(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return DEFAULT_MACHINE_API_BASE_URL.to_string();
+    }
+    if trimmed.ends_with("/api") {
+        trimmed.to_string()
+    } else {
+        format!("{}/api", trimmed)
+    }
+}
+
+fn extract_backend_message(body: &Value) -> String {
+    body.get("message")
+        .and_then(|m| m.as_str())
+        .or_else(|| body.get("error").and_then(|e| e.as_str()))
+        .unwrap_or("Unknown backend error")
+        .to_string()
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaperPositionConfig {
@@ -25,6 +48,7 @@ impl Default for PaperPositionConfig {
 pub struct AppState {
     pub machine_id: Mutex<String>,
     pub machine_port: Mutex<String>,
+    pub machine_api_base_url: Mutex<String>,
     pub machine_data: Mutex<Option<Value>>,
     pub theme_data: Mutex<Option<Value>>,
     pub camera_type: Mutex<String>, // "webcam" or "canon"
@@ -39,8 +63,9 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            machine_id: Mutex::new(String::new()),
-            machine_port: Mutex::new("44444".to_string()),
+            machine_id: Mutex::new(DEFAULT_MACHINE_ID.to_string()),
+            machine_port: Mutex::new(DEFAULT_MACHINE_PORT.to_string()),
+            machine_api_base_url: Mutex::new(DEFAULT_MACHINE_API_BASE_URL.to_string()),
             machine_data: Mutex::new(None),
             theme_data: Mutex::new(None),
             camera_type: Mutex::new("webcam".to_string()),
@@ -69,21 +94,40 @@ pub async fn verify_machine(
     machine_id: String,
 ) -> Result<ApiResponse, String> {
     let machine_port = state.machine_port.lock().unwrap().clone();
+    let machine_api_base_url = state.machine_api_base_url.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = format!("{}/api/machines-public/verify", API_BASE_URL);
+    let base = normalize_api_base_url(&machine_api_base_url);
+    let url = format!("{}/machines-public/verify", base);
+
+    let request_url = format!(
+        "{}?machineId={}&port={}",
+        url,
+        machine_id,
+        machine_port
+    );
+    log::info!("[API] verify_machine request: GET {}", request_url);
 
     let res = client
         .get(&url)
         .header("X-Machine-Port", &machine_port)
-        .query(&[("machineId", &machine_id)])
+        .query(&[("machineId", &machine_id), ("port", &machine_port)])
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
     let status = res.status();
     let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let body_str = serde_json::to_string(&body).unwrap_or_default();
+    log::info!(
+        "[API] verify_machine response: status={} body={}",
+        status,
+        body_str
+    );
 
-    if status.is_success() {
+    let backend_success = body.get("success").and_then(|v| v.as_bool()).unwrap_or(status.is_success());
+    let is_success = status.is_success() && backend_success;
+
+    if is_success {
         // Save machine_id
         *state.machine_id.lock().unwrap() = machine_id;
         Ok(ApiResponse {
@@ -92,10 +136,11 @@ pub async fn verify_machine(
             error: None,
         })
     } else {
+        let backend_message = extract_backend_message(&body);
         Ok(ApiResponse {
             success: false,
             data: Some(body),
-            error: Some(format!("Status: {}", status)),
+            error: Some(backend_message),
         })
     }
 }
@@ -106,14 +151,24 @@ pub async fn init_machine(
 ) -> Result<ApiResponse, String> {
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
+    let machine_api_base_url = state.machine_api_base_url.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = format!("{}/api/machines-public/init", API_BASE_URL);
+    let base = normalize_api_base_url(&machine_api_base_url);
+    let url = format!("{}/machines-public/init", base);
+
+    let request_url = format!(
+        "{}?machineId={}&port={}",
+        url,
+        machine_id,
+        machine_port
+    );
+    log::info!("[API] init_machine request: GET {}", request_url);
 
     let res = client
         .get(&url)
         .header("X-Machine-Id", &machine_id)
         .header("X-Machine-Port", &machine_port)
-        .query(&[("machineId", &machine_id)])
+        .query(&[("machineId", &machine_id), ("port", &machine_port)])
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;
@@ -156,10 +211,11 @@ pub async fn init_machine(
             error: None,
         })
     } else {
+        let backend_message = extract_backend_message(&body);
         Ok(ApiResponse {
             success: false,
             data: Some(body),
-            error: Some(format!("Status: {}", status)),
+            error: Some(backend_message),
         })
     }
 }
@@ -837,9 +893,13 @@ pub async fn set_machine_config(
     state: tauri::State<'_, AppState>,
     machine_id: String,
     machine_port: String,
+    machine_api_base_url: Option<String>,
 ) -> Result<ApiResponse, String> {
     *state.machine_id.lock().unwrap() = machine_id;
     *state.machine_port.lock().unwrap() = machine_port;
+    if let Some(base_url) = machine_api_base_url {
+        *state.machine_api_base_url.lock().unwrap() = normalize_api_base_url(&base_url);
+    }
     Ok(ApiResponse {
         success: true,
         data: None,
