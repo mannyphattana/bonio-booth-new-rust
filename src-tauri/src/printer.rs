@@ -138,6 +138,7 @@ fn win32_gdi_print(
     image_path: &str,
     frame_type: &str,
     paper_type: Option<&str>,
+    cut_mode: Option<&str>,
 ) -> Result<(), String> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Graphics::Printing::{
@@ -146,7 +147,16 @@ fn win32_gdi_print(
     use windows::Win32::Foundation::{HANDLE, HWND};
     use windows::core::PCWSTR;
 
-    let needs_cut = frame_type == "2x6" || frame_type == "6x2";
+    let frame_needs_cut = frame_type == "2x6" || frame_type == "6x2";
+    let cut_mode_normalized = cut_mode
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let needs_cut = match cut_mode_normalized.as_str() {
+        "cut" => true,
+        "no-cut" | "nocut" | "no_cut" => false,
+        _ => frame_needs_cut,
+    };
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
     // Auto-switch drivers: if needs_cut, try various CUT driver name patterns
@@ -255,13 +265,29 @@ fn win32_gdi_print(
 
         let paper_mode = paper_type.unwrap_or("photo_4x6").to_ascii_lowercase();
 
-        let selected = if paper_mode == "a4" {
-            // Customer mode: prefer A4 media on regular office printers.
+        let selected = if needs_cut {
+            // For cut jobs, prioritize CUT media names regardless of high-level paper mode.
+            // This keeps 2x6/6x2 reliable even when frontend profile uses A4/A3 defaults.
             paper_sizes.iter().find(|(_, n)| {
                 let lower = n.to_lowercase();
-                lower.contains("a4")
+                lower.contains("cut") || lower.contains("2x6") || lower.contains("6x2")
             }).or_else(|| {
-                // Fallback to any non-cut media if explicit A4 label is missing.
+                // Fallback to photo-size media if explicit CUT name is unavailable.
+                paper_sizes.iter().find(|(_, n)| {
+                    let lower = n.to_lowercase();
+                    lower.contains("4x6") || lower.contains("6x4")
+                })
+            }).or_else(|| {
+                // Last resort: use any listed media and let driver defaults handle it.
+                paper_sizes.first()
+            })
+        } else if paper_mode == "a4" || paper_mode == "a3" {
+            // Customer mode: prefer explicit A4/A3 media on regular office printers.
+            paper_sizes.iter().find(|(_, n)| {
+                let lower = n.to_lowercase();
+                lower.contains(&paper_mode)
+            }).or_else(|| {
+                // Fallback to any non-cut media if explicit size label is missing.
                 paper_sizes.iter().find(|(_, n)| {
                     let lower = n.to_lowercase();
                     !lower.contains("cut") && !lower.contains("2x6")
@@ -719,6 +745,7 @@ pub async fn print_photo(
     printer_name: String,
     frame_type: String,
     paper_type: Option<String>,
+    cut_mode: Option<String>,
     scale: Option<f64>,
     vertical_offset: Option<f64>,
     horizontal_offset: Option<f64>,
@@ -844,6 +871,7 @@ pub async fn print_photo(
             &temp_path_str,
             &frame_type,
             paper_type.as_deref(),
+            cut_mode.as_deref(),
         )
             .map(|_| true)
     }
@@ -869,6 +897,7 @@ pub async fn print_test_photo(
     app: tauri::AppHandle,
     printer_name: String,
     paper_type: Option<String>,
+    cut_mode: Option<String>,
     scale: f64,
     vertical_offset: f64,
     horizontal_offset: f64,
@@ -943,6 +972,7 @@ pub async fn print_test_photo(
         printer_name,
         frame_type,
         paper_type,
+        cut_mode,
         Some(scale),
         Some(vertical_offset),
         Some(horizontal_offset),

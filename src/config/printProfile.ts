@@ -1,5 +1,6 @@
 export type PrintProfile = "legacy_4x6" | "customer_a4";
-export type PaperType = "photo_4x6" | "a4";
+export type PaperType = "photo_4x6" | "a4" | "a3";
+export type PaperSizeOption = "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3";
 
 export interface PaperConfig {
   scale: number;
@@ -96,7 +97,7 @@ export const setPaperConfig = (
 
 export const getPaperSize = (
   orientation: PrintOrientation,
-): "2x6" | "4x6" | "6x2" | "6x4" | "a4" | null => {
+): PaperSizeOption | null => {
   const activeKey =
     orientation === "landscape"
       ? PRINT_STORAGE_KEYS.paperSizeLandscape
@@ -112,12 +113,12 @@ export const getPaperSize = (
       ? localStorage.getItem(activeKey)
       : readStorageWithFallback(activeKey, legacyKey);
   if (!value) return null;
-  return value as "2x6" | "4x6" | "6x2" | "6x4" | "a4";
+  return value as PaperSizeOption;
 };
 
 export const setPaperSize = (
   orientation: PrintOrientation,
-  value: "2x6" | "4x6" | "6x2" | "6x4" | "a4",
+  value: PaperSizeOption,
 ): void => {
   const key =
     orientation === "landscape"
@@ -125,6 +126,15 @@ export const setPaperSize = (
       : PRINT_STORAGE_KEYS.paperSizePortrait;
 
   localStorage.setItem(key, value);
+};
+
+export const getPaperTypeByOrientation = (
+  orientation: PrintOrientation,
+): PaperType => {
+  const selected = getPaperSize(orientation);
+  if (selected === "a3") return "a3";
+  if (selected === "a4") return "a4";
+  return ACTIVE_PAPER_TYPE;
 };
 
 export const clearActivePrintConfig = (): void => {

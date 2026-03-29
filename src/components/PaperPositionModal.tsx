@@ -18,6 +18,8 @@ import img6x4Land from "../assets/print_6x4_land.png";
 import img6x2Land from "../assets/print_6x2_land.png";
 import imgA4Port from "../assets/images/print_a4_port.png";
 import imgA4Land from "../assets/images/print_a4_land.png";
+import imgA3Port from "../assets/images/print_a3_port.png";
+import imgA3Land from "../assets/images/print_a3_land.png";
 
 interface Props {
   open: boolean;
@@ -34,8 +36,8 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<"portrait" | "landscape">("portrait");
   const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
   const [landscapeConfig, setLandscapeConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
-  const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6" | "a4">("a4");
-  const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4" | "a4">("a4");
+  const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6" | "a4" | "a3">("a4");
+  const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4" | "a4" | "a3">("a4");
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
@@ -54,8 +56,8 @@ export default function PaperPositionModal({ open, onClose }: Props) {
       if (savedLandscape) setLandscapeConfig(savedLandscape);
       else setLandscapeConfig({ ...DEFAULT_CONFIG });
 
-      setPortraitPaperSize((getPaperSize("portrait") as "2x6" | "4x6" | "a4") || "a4");
-      setLandscapePaperSize((getPaperSize("landscape") as "6x2" | "6x4" | "a4") || "a4");
+      setPortraitPaperSize((getPaperSize("portrait") as "2x6" | "4x6" | "a4" | "a3") || "a4");
+      setLandscapePaperSize((getPaperSize("landscape") as "6x2" | "6x4" | "a4" | "a3") || "a4");
     } catch {
       setPortraitConfig({ ...DEFAULT_CONFIG });
       setLandscapeConfig({ ...DEFAULT_CONFIG });
@@ -101,12 +103,24 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     }
 
     const selectedPaper = tab === "portrait" ? portraitPaperSize : landscapePaperSize;
-    const frameType = selectedPaper === "a4"
+    const frameType = selectedPaper === "a4" || selectedPaper === "a3"
       ? (tab === "portrait" ? "4x6" : "6x4")
       : selectedPaper;
     const displayPaper = selectedPaper === "a4"
       ? (tab === "portrait" ? "A4 Portrait" : "A4 Landscape")
+      : selectedPaper === "a3"
+        ? (tab === "portrait" ? "A3 Portrait" : "A3 Landscape")
       : selectedPaper;
+
+    const selectedPaperType = selectedPaper === "a3"
+      ? "a3"
+      : selectedPaper === "a4"
+        ? "a4"
+        : ACTIVE_PAPER_TYPE;
+
+    const cutMode = selectedPaper === "2x6" || selectedPaper === "6x2"
+      ? "cut"
+      : "no-cut";
 
     setPrinting(true);
     setSavedMessage(`🖨️ กำลัง Test Print (${displayPaper})...`);
@@ -123,7 +137,8 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         verticalOffset: currentConfig.vertical,
         horizontalOffset: currentConfig.horizontal,
         frameType,
-        paperType: ACTIVE_PAPER_TYPE,
+        paperType: selectedPaperType,
+        cutMode,
       });
       try {
         await invoke("reduce_paper_level", { copies: 1 });
@@ -149,10 +164,17 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     setCurrentConfig((prev) => ({ ...prev, [key]: value }));
   };
 
-  const renderA4SheetPreview = (landscape = false) => (
+  const renderSheetPreview = (
+    size: "a4" | "a3",
+    landscape = false,
+  ) => (
     <img
-      src={landscape ? imgA4Land : imgA4Port}
-      alt={landscape ? "A4 Landscape" : "A4 Portrait"}
+      src={
+        size === "a3"
+          ? (landscape ? imgA3Land : imgA3Port)
+          : (landscape ? imgA4Land : imgA4Port)
+      }
+      alt={`${size.toUpperCase()} ${landscape ? "Landscape" : "Portrait"}`}
       style={{
         width: "100%",
         height: "100%",
@@ -202,6 +224,18 @@ export default function PaperPositionModal({ open, onClose }: Props) {
                 A4 (แนวตั้ง)
               </button>
               <button
+                onClick={() => setPortraitPaperSize("a3")}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
+                  borderColor: portraitPaperSize === "a3" ? "#9775fa" : "#555",
+                  background: portraitPaperSize === "a3" ? "rgba(151,117,250,0.15)" : "transparent",
+                  color: portraitPaperSize === "a3" ? "#9775fa" : "#aaa",
+                  fontWeight: 600, cursor: "pointer", fontSize: 13,
+                }}
+              >
+                A3 (แนวตั้ง)
+              </button>
+              <button
                 onClick={() => setPortraitPaperSize("4x6")}
                 style={{
                   flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
@@ -239,6 +273,18 @@ export default function PaperPositionModal({ open, onClose }: Props) {
                 }}
               >
                 A4 (แนวนอน)
+              </button>
+              <button
+                onClick={() => setLandscapePaperSize("a3")}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
+                  borderColor: landscapePaperSize === "a3" ? "#9775fa" : "#555",
+                  background: landscapePaperSize === "a3" ? "rgba(151,117,250,0.15)" : "transparent",
+                  color: landscapePaperSize === "a3" ? "#9775fa" : "#aaa",
+                  fontWeight: 600, cursor: "pointer", fontSize: 13,
+                }}
+              >
+                A3 (แนวนอน)
               </button>
               <button
                 onClick={() => setLandscapePaperSize("6x4")}
@@ -435,7 +481,9 @@ export default function PaperPositionModal({ open, onClose }: Props) {
                       <img src={img2x6Port} alt="2x6 right" style={{ width: "50%", height: "100%", objectFit: "fill" }} />
                     </>
                   ) : portraitPaperSize === "a4" ? (
-                    renderA4SheetPreview(false)
+                    renderSheetPreview("a4", false)
+                  ) : portraitPaperSize === "a3" ? (
+                    renderSheetPreview("a3", false)
                   ) : (
                     // แนวตั้ง 4x6 (1 รูปเต็มกรอบ)
                     <img src={img4x6Port} alt="4x6" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
@@ -448,7 +496,9 @@ export default function PaperPositionModal({ open, onClose }: Props) {
                       <img src={img6x2Land} alt="6x2 bottom" style={{ width: "100%", height: "50%", objectFit: "fill" }} />
                     </>
                   ) : landscapePaperSize === "a4" ? (
-                    renderA4SheetPreview(true)
+                    renderSheetPreview("a4", true)
+                  ) : landscapePaperSize === "a3" ? (
+                    renderSheetPreview("a3", true)
                   ) : (
                     // แนวนอน 6x4 (1 รูปเต็มกรอบ)
                     <img src={img6x4Land} alt="6x4" style={{ width: "100%", height: "100%", objectFit: "fill" }} />

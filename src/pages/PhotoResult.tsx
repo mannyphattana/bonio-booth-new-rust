@@ -10,8 +10,9 @@ import { setPrinting } from "../utils/printingState";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import {
-  ACTIVE_PAPER_TYPE,
+  getPaperTypeByOrientation,
   getPaperConfig,
+  getPaperSize,
   getSelectedPrinter,
 } from "../config/printProfile";
 
@@ -460,8 +461,15 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         let scale = 100;
         let verticalOffset = 0;
         let horizontalOffset = 0;
+        const orientationKey = isLandscape ? "landscape" : "portrait";
+        const selectedPaperSize = getPaperSize(orientationKey);
+        const cutMode =
+          (frameType === "2x6" && selectedPaperSize === "2x6") ||
+          (frameType === "6x2" && selectedPaperSize === "6x2")
+            ? "cut"
+            : "no-cut";
         try {
-          const config = getPaperConfig(isLandscape ? "landscape" : "portrait");
+          const config = getPaperConfig(orientationKey);
           if (config) {
             scale = config.scale ?? 100;
             verticalOffset = config.vertical ?? 0;
@@ -494,7 +502,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
                 imagePath: printPath,
                 printerName,
                 frameType,
-                paperType: ACTIVE_PAPER_TYPE,
+                paperType: getPaperTypeByOrientation(
+                  orientationKey,
+                ),
+                cutMode,
                 scale,
                 verticalOffset,
                 horizontalOffset,

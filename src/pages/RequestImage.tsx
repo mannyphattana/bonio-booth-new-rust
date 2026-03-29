@@ -8,7 +8,7 @@ import { setPrinting } from "../utils/printingState";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import {
-  ACTIVE_PAPER_TYPE,
+  getPaperTypeByOrientation,
   getPaperConfig,
   getSelectedPrinter,
 } from "../config/printProfile";
@@ -109,6 +109,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
     try {
       const isPortraitCut = orientation === "portrait-cut";
       const isLandscapeCut = orientation === "landscape-cut";
+      const cutMode = isPortraitCut || isLandscapeCut ? "cut" : "no-cut";
 
       // Determine frameType - Rust print_photo handles duplication for 2x6/6x2 internally
       let frameType = "4x6";
@@ -163,7 +164,10 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
             imagePath: tempPath,
             printerName: selectedPrinter,
             frameType,
-            paperType: ACTIVE_PAPER_TYPE,
+            paperType: getPaperTypeByOrientation(
+              isLandscape ? "landscape" : "portrait",
+            ),
+            cutMode,
             scale,
             verticalOffset,
             horizontalOffset,

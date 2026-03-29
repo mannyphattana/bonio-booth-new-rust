@@ -141,6 +141,11 @@ fn check_error(error: EdsError) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn is_transient_live_view_error(error: EdsError) -> bool {
+    matches!(error, EDS_ERR_DEVICE_BUSY | EDS_ERR_OBJECT_NOTREADY)
+}
+
 /// Resolve EDSDK.dll path — tries multiple locations
 fn resolve_dll_path(app: &tauri::AppHandle) -> String {
     // Helper: check both "EDSDK/Dll/EDSDK.dll" (dev) and "EDSDK/EDSDK.dll" (bundled/flat)
@@ -265,6 +270,24 @@ unsafe extern "system" fn object_event_handler(
     object: EdsBaseRef,
     _context: *mut c_void,
 ) -> EdsError {
+    // EDSDK retains object refs before dispatching callbacks.
+    // Always release once on callback exit to avoid camera-side ref leaks.
+    struct ObjectRefGuard {
+        object: EdsBaseRef,
+    }
+
+    impl Drop for ObjectRefGuard {
+        fn drop(&mut self) {
+            if !self.object.is_null() {
+                unsafe {
+                    EdsRelease(self.object);
+                }
+            }
+        }
+    }
+
+    let _object_guard = ObjectRefGuard { object };
+
     // --- Movie recording: DirItemCreated when camera saves movie to SD card ---
     if event == kEdsObjectEvent_DirItemCreated && IS_MOVIE_RECORDING.load(Ordering::SeqCst) {
         info!("[Canon] Movie DirItemCreated event received");
@@ -1345,15 +1368,41 @@ pub fn canon_start_live_view() -> Result<bool, String> {
         }
 
         unsafe {
+            // Keep camera session awake before touching live view properties.
+            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+
             let evf_output: EdsUInt32 = kEdsEvfOutputDevice_PC;
-            let error = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_Evf_OutputDevice,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &evf_output as *const _ as *const c_void,
-            );
-            check_error(error)?;
+            let mut last_error = EDS_ERR_OK;
+
+            for attempt in 1..=6 {
+                let error = EdsSetPropertyData(
+                    camera_ref,
+                    kEdsPropID_Evf_OutputDevice,
+                    0,
+                    std::mem::size_of::<EdsUInt32>() as u32,
+                    &evf_output as *const _ as *const c_void,
+                );
+
+                if error == EDS_ERR_OK {
+                    last_error = EDS_ERR_OK;
+                    break;
+                }
+
+                last_error = error;
+                if !is_transient_live_view_error(error) {
+                    check_error(error)?;
+                }
+
+                warn!(
+                    "[Canon] Start live view transient error (attempt {}/6): {}",
+                    attempt,
+                    error_to_string(error)
+                );
+                let _ = EdsGetEvent();
+                std::thread::sleep(std::time::Duration::from_millis(120));
+            }
+
+            check_error(last_error)?;
         }
 
         info!("[Canon] Live view started");
@@ -1388,14 +1437,37 @@ pub fn canon_stop_live_view() -> Result<bool, String> {
 
         unsafe {
             let evf_output: EdsUInt32 = 0;
-            let error = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_Evf_OutputDevice,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &evf_output as *const _ as *const c_void,
-            );
-            check_error(error)?;
+            let mut last_error = EDS_ERR_OK;
+
+            for attempt in 1..=4 {
+                let error = EdsSetPropertyData(
+                    camera_ref,
+                    kEdsPropID_Evf_OutputDevice,
+                    0,
+                    std::mem::size_of::<EdsUInt32>() as u32,
+                    &evf_output as *const _ as *const c_void,
+                );
+
+                if error == EDS_ERR_OK {
+                    last_error = EDS_ERR_OK;
+                    break;
+                }
+
+                last_error = error;
+                if !is_transient_live_view_error(error) {
+                    check_error(error)?;
+                }
+
+                warn!(
+                    "[Canon] Stop live view transient error (attempt {}/4): {}",
+                    attempt,
+                    error_to_string(error)
+                );
+                let _ = EdsGetEvent();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
+
+            check_error(last_error)?;
         }
 
         info!("[Canon] Live view stopped");
@@ -1457,8 +1529,41 @@ pub fn canon_get_live_view_frame() -> Result<Option<LiveViewFrame>, String> {
                 return Ok(None);
             }
 
-            let error = EdsDownloadEvfImage(camera_ref, evf_image);
-            if error != EDS_ERR_OK {
+            let mut download_error = EDS_ERR_OK;
+            let mut got_frame = false;
+
+            for attempt in 1..=4 {
+                // Keep session awake to reduce wake-up related busy spikes.
+                let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+
+                let error = EdsDownloadEvfImage(camera_ref, evf_image);
+                if error == EDS_ERR_OK {
+                    download_error = EDS_ERR_OK;
+                    got_frame = true;
+                    break;
+                }
+
+                download_error = error;
+                if !is_transient_live_view_error(error) {
+                    break;
+                }
+
+                warn!(
+                    "[Canon] Live view frame transient error (attempt {}/4): {}",
+                    attempt,
+                    error_to_string(error)
+                );
+                let _ = EdsGetEvent();
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+
+            if !got_frame {
+                if !is_transient_live_view_error(download_error) {
+                    warn!(
+                        "[Canon] Live view frame failed: {}",
+                        error_to_string(download_error)
+                    );
+                }
                 EdsRelease(evf_image);
                 EdsRelease(stream);
                 return Ok(None);

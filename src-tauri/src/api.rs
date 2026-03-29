@@ -3,10 +3,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
 
-const API_BASE_URL: &str = "http://localhost:3000";
+const API_BASE_URL: &str = if cfg!(debug_assertions) {
+    "https://api-booth.boniolabs.com"
+} else {
+    "http://localhost:3000"
+};
 const DEFAULT_MACHINE_ID: &str = "69b1938827766fd8efb50396";
 const DEFAULT_MACHINE_PORT: &str = "33332";
-const DEFAULT_MACHINE_API_BASE_URL: &str = "http://localhost:3000/api";
+const DEFAULT_MACHINE_API_BASE_URL: &str = if cfg!(debug_assertions) {
+    "https://api-booth.boniolabs.com/api"
+} else {
+    "http://localhost:3000/api"
+};
 
 fn normalize_api_base_url(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
