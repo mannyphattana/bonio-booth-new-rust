@@ -5,12 +5,10 @@ interface Props {
   onVerified: (data: any) => void;
 }
 
-const DEFAULT_API_BASE_URL = import.meta.env.DEV
-  ? "https://api-booth.boniolabs.com/api"
-  : "http://localhost:3000/api";
+const DEFAULT_API_BASE_URL = "http://localhost:3000/api";
 const DEFAULT_MACHINE_ID = "69b1938827766fd8efb50396";
 const DEFAULT_MACHINE_PORT = "33332";
-const FORCE_TEST_MACHINE_CONFIG = !import.meta.env.DEV;
+const FORCE_TEST_MACHINE_CONFIG = true;
 
 const getBackendMessage = (payload: any): string => {
   return (

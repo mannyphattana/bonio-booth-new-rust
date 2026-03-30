@@ -28,12 +28,10 @@ import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
 import "./App.css";
 
-const DEFAULT_API_BASE_URL = import.meta.env.DEV
-  ? "https://api-booth.boniolabs.com/api"
-  : "http://localhost:3000/api";
+const DEFAULT_API_BASE_URL = "http://localhost:3000/api";
 const DEFAULT_MACHINE_ID = "69b1938827766fd8efb50396";
 const DEFAULT_MACHINE_PORT = "33332";
-const FORCE_TEST_MACHINE_CONFIG = !import.meta.env.DEV;
+const FORCE_TEST_MACHINE_CONFIG = true;
 
 export interface ThemeData {
   background: string;
@@ -212,19 +210,9 @@ function App() {
               } else {
                 setPendingPaperOut(true); // ฝากคิวไว้ก่อน ค่อยไปโชว์ตอนถึงหน้า Home
               }
-            } else {
-              setPendingPaperOut(false);
-
-              // Dashboard ปิด maintenance แล้ว ต้องยุบ overlay ทันทีโดยไม่ต้อง restart app
-              if (maintenanceFromBackend && maintenanceConfig === null) {
-                setShowMaintenance(false);
-                setMaintenanceFromBackend(false);
-              }
-
-              if (maintenanceConfig === "paper") {
+            } else if (!backendMaintenance && paperLevel > 0 && maintenanceConfig === "paper") {
                 setShowMaintenance(false);
                 setMaintenanceConfig(null);
-              }
             }
           } else {
             throw new Error("init_machine returned unsuccessful response");
@@ -244,11 +232,7 @@ function App() {
         setMaintenanceFromBackend(false);
       }
     },
-    [
-      maintenanceConfig,
-      maintenanceFromBackend,
-      shouldIgnoreStaleMaintenanceRefresh,
-    ],
+    [maintenanceConfig, shouldIgnoreStaleMaintenanceRefresh],
   );
 
   useEffect(() => {
@@ -346,26 +330,10 @@ function App() {
           } else {
             setPendingPaperOut(true);
           }
-        } else {
-          setPendingPaperOut(false);
-
-          if (maintenanceFromBackend && maintenanceConfig === null) {
-            setShowMaintenance(false);
-            setMaintenanceFromBackend(false);
-          }
-
-          if (maintenanceConfig === "paper") {
-            setShowMaintenance(false);
-            setMaintenanceConfig(null);
-          }
         }
       }
     },
-    [
-      maintenanceConfig,
-      maintenanceFromBackend,
-      shouldIgnoreStaleMaintenanceRefresh,
-    ],
+    [shouldIgnoreStaleMaintenanceRefresh],
   );
 
   // 🚨 [พระเอกของงานนี้] ทำงานทันทีที่พอลูกค้ากลับมาถึงหน้า Home 
