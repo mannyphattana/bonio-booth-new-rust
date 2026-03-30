@@ -133,7 +133,12 @@ fn win32_printer_exists(printer_name: &str) -> bool {
 /// No PowerShell, no popup windows, full control over paper size and orientation.
 /// Auto-switches to "{printer_name} (CUT)" driver for cut frames if available.
 #[cfg(target_os = "windows")]
-fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Result<(), String> {
+fn win32_gdi_print(
+    printer_name: &str,
+    image_path: &str,
+    frame_type: &str,
+    paper_type: Option<&str>,
+) -> Result<(), String> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Graphics::Printing::{
         OpenPrinterW, ClosePrinter, DocumentPropertiesW,
@@ -248,29 +253,52 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
             log::info!("[Printer]   id={} name=\"{}\"", id, name);
         }
 
-        // Always select 4x6 (or 6x4) paper size — even for cut frames.
-        // The CUT driver handles cutting automatically; we just need to
-        // print the full 4x6 sheet and let the printer cut it.
-        let selected = paper_sizes.iter().find(|(_, n)| {
-            let lower = n.to_lowercase();
-            (lower.contains("4x6") || lower.contains("6x4"))
-                && !lower.contains("cut") && !lower.contains("2x6")
-        }).or_else(|| {
-            // Fallback: if no explicit 4x6 name, try any paper without "cut" keyword
+        let paper_mode = paper_type.unwrap_or("photo_4x6").to_ascii_lowercase();
+
+        let selected = if paper_mode == "a4" {
+            // Customer mode: prefer A4 media on regular office printers.
             paper_sizes.iter().find(|(_, n)| {
                 let lower = n.to_lowercase();
-                !lower.contains("cut") && !lower.contains("2x6")
+                lower.contains("a4")
+            }).or_else(|| {
+                // Fallback to any non-cut media if explicit A4 label is missing.
+                paper_sizes.iter().find(|(_, n)| {
+                    let lower = n.to_lowercase();
+                    !lower.contains("cut") && !lower.contains("2x6")
+                })
             })
-        });
+        } else {
+            // Legacy behavior: always target 4x6 media for dye-sub printers.
+            paper_sizes.iter().find(|(_, n)| {
+                let lower = n.to_lowercase();
+                (lower.contains("4x6") || lower.contains("6x4"))
+                    && !lower.contains("cut") && !lower.contains("2x6")
+            }).or_else(|| {
+                // Fallback: if no explicit 4x6 name, try any paper without cut keyword.
+                paper_sizes.iter().find(|(_, n)| {
+                    let lower = n.to_lowercase();
+                    !lower.contains("cut") && !lower.contains("2x6")
+                })
+            })
+        };
 
         let dm = &mut *dm_ptr;
 
         if let Some((paper_id, paper_name)) = selected {
             dm.Anonymous1.Anonymous1.dmPaperSize = *paper_id;
             dm.dmFields |= DM_PAPERSIZE;
-            log::info!("[Printer] Selected paper: \"{}\" (id={})", paper_name, paper_id);
+            log::info!(
+                "[Printer] Selected paper (mode={}): \"{}\" (id={})",
+                paper_mode,
+                paper_name,
+                paper_id
+            );
         } else {
-            log::warn!("[Printer] No matching paper for frame_type={}, using driver default", frame_type);
+            log::warn!(
+                "[Printer] No matching paper for frame_type={}, mode={}, using driver default",
+                frame_type,
+                paper_mode
+            );
         }
 
         // Set orientation
@@ -690,6 +718,7 @@ pub async fn print_photo(
     image_path: String,
     printer_name: String,
     frame_type: String,
+    paper_type: Option<String>,
     scale: Option<f64>,
     vertical_offset: Option<f64>,
     horizontal_offset: Option<f64>,
@@ -810,7 +839,12 @@ pub async fn print_photo(
     // Print using native Win32 GDI API - no PowerShell, no popup windows
     #[cfg(target_os = "windows")]
     {
-        win32_gdi_print(&printer_name, &temp_path_str, &frame_type)
+        win32_gdi_print(
+            &printer_name,
+            &temp_path_str,
+            &frame_type,
+            paper_type.as_deref(),
+        )
             .map(|_| true)
     }
 
@@ -834,6 +868,7 @@ pub async fn print_photo(
 pub async fn print_test_photo(
     app: tauri::AppHandle,
     printer_name: String,
+    paper_type: Option<String>,
     scale: f64,
     vertical_offset: f64,
     horizontal_offset: f64,
@@ -907,6 +942,7 @@ pub async fn print_test_photo(
         test_image_path,
         printer_name,
         frame_type,
+        paper_type,
         Some(scale),
         Some(vertical_offset),
         Some(horizontal_offset),
