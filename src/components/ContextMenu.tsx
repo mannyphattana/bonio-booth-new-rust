@@ -13,10 +13,6 @@ import {
   setCloseAppPin,
   setMenuPin,
 } from "../config/appConfig";
-import {
-  clearActivePrintConfig,
-  getSelectedPrinter,
-} from "../config/printProfile";
 
 interface Props {
   open: boolean;
@@ -97,7 +93,7 @@ export default function ContextMenu({
     }
 
     // Printer status
-    const printer = getSelectedPrinter();
+    const printer = localStorage.getItem("selectedPrinter");
     setPrinterStatus(printer || "ยังไม่ได้เลือก");
   }, [open]);
 
@@ -109,8 +105,10 @@ export default function ContextMenu({
     localStorage.removeItem("selectedWebcamId");
     localStorage.removeItem("selectedCameraLabel");
     localStorage.removeItem("selectedCameraName");
-    clearActivePrintConfig();
+    localStorage.removeItem("selectedPrinter");
     localStorage.removeItem("paperConfig");
+    localStorage.removeItem("paperConfigPortrait");
+    localStorage.removeItem("paperConfigLandscape");
 
     onFormatReset();
     onClose();

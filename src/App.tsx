@@ -28,11 +28,6 @@ import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
 import "./App.css";
 
-const DEFAULT_API_BASE_URL = "http://localhost:3000/api";
-const DEFAULT_MACHINE_ID = "69b1938827766fd8efb50396";
-const DEFAULT_MACHINE_PORT = "33332";
-const FORCE_TEST_MACHINE_CONFIG = true;
-
 export interface ThemeData {
   background: string;
   backgroundSecond: string;
@@ -112,19 +107,8 @@ function App() {
   const [isOnHomePage, setIsOnHomePage] = useState(true);
   const isOnHomePageRef = useRef(true); // 🚨 Ref สำหรับใช้เช็คสถานะแบบเรียลไทม์ ป้องกันค่าไม่อัปเดต
   const [pendingPaperOut, setPendingPaperOut] = useState(false);
-  const maintenanceSignalRef = useRef<boolean | null>(null);
-  const maintenanceSignalUntilRef = useRef(0);
 
   const initRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const shouldIgnoreStaleMaintenanceRefresh = useCallback(
-    (backendMaintenance: boolean) => {
-      if (maintenanceSignalRef.current === null) return false;
-      if (Date.now() > maintenanceSignalUntilRef.current) return false;
-      return maintenanceSignalRef.current !== backendMaintenance;
-    },
-    [],
-  );
 
   const handleRouteChange = useCallback((path: string) => {
     const isHome = path === "/";
@@ -140,38 +124,20 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const savedMachineId = FORCE_TEST_MACHINE_CONFIG
-      ? DEFAULT_MACHINE_ID
-      : localStorage.getItem("machineId") || DEFAULT_MACHINE_ID;
-    const savedMachinePort = FORCE_TEST_MACHINE_CONFIG
-      ? DEFAULT_MACHINE_PORT
-      : localStorage.getItem("machinePort") || DEFAULT_MACHINE_PORT;
-    const savedApiBaseUrl = FORCE_TEST_MACHINE_CONFIG
-      ? DEFAULT_API_BASE_URL
-      : localStorage.getItem("apiBaseUrl") || DEFAULT_API_BASE_URL;
-
-    localStorage.setItem("machineId", savedMachineId);
-    localStorage.setItem("machinePort", savedMachinePort);
-    localStorage.setItem("apiBaseUrl", savedApiBaseUrl);
-
-    initMachine(savedMachineId);
+    const savedMachineId = localStorage.getItem("machineId");
+    if (savedMachineId) {
+      initMachine(savedMachineId);
+    }
   }, []);
 
   const initMachine = useCallback(
     async (machineId: string) => {
       try {
         await invoke("set_machine_config", {
-          machineId: FORCE_TEST_MACHINE_CONFIG ? DEFAULT_MACHINE_ID : machineId,
-          machinePort: FORCE_TEST_MACHINE_CONFIG
-            ? DEFAULT_MACHINE_PORT
-            : localStorage.getItem("machinePort") || DEFAULT_MACHINE_PORT,
-          machineApiBaseUrl: FORCE_TEST_MACHINE_CONFIG
-            ? DEFAULT_API_BASE_URL
-            : localStorage.getItem("apiBaseUrl") || DEFAULT_API_BASE_URL,
+          machineId,
+          machinePort: localStorage.getItem("machinePort") || "44444",
         });
-        const verifyResult: any = await invoke("verify_machine", {
-          machineId: FORCE_TEST_MACHINE_CONFIG ? DEFAULT_MACHINE_ID : machineId,
-        });
+        const verifyResult: any = await invoke("verify_machine", { machineId });
         if (verifyResult.success) {
           const initResult: any = await invoke("init_machine");
           if (initResult.success && initResult.data?.machine) {
@@ -192,10 +158,6 @@ function App() {
 
             const backendMaintenance = !!initResult.data.machine?.isMaintenanceMode;
             const paperLevel = initResult.data.paperLevel ?? initResult.data.machine?.paperLevel ?? -1;
-
-            if (shouldIgnoreStaleMaintenanceRefresh(backendMaintenance)) {
-              return;
-            }
 
             if (backendMaintenance) {
               setShowMaintenance(true);
@@ -218,12 +180,7 @@ function App() {
             throw new Error("init_machine returned unsuccessful response");
           }
         } else {
-          throw new Error(
-            verifyResult?.error ||
-              verifyResult?.data?.message ||
-              verifyResult?.data?.error ||
-              "verify_machine failed",
-          );
+          throw new Error("verify_machine failed");
         }
       } catch (err) {
         console.error("Init error:", err);
@@ -232,7 +189,7 @@ function App() {
         setMaintenanceFromBackend(false);
       }
     },
-    [maintenanceConfig, shouldIgnoreStaleMaintenanceRefresh],
+    [maintenanceConfig],
   );
 
   useEffect(() => {
@@ -260,12 +217,9 @@ function App() {
   }, [maintenanceConfig, initMachine]);
 
   const handleMaintenanceMode = useCallback((enabled: boolean) => {
-    maintenanceSignalRef.current = enabled;
-    maintenanceSignalUntilRef.current = Date.now() + 15_000;
-
     setShowMaintenance(enabled);
     setMaintenanceFromBackend(enabled);
-    setMaintenanceConfig(null);
+    if (enabled) setMaintenanceConfig(null); 
   }, []);
 
   const handleConfigUpdated = useCallback(
@@ -313,10 +267,6 @@ function App() {
         const newMaintenanceMode = !!data.machine?.isMaintenanceMode;
         const newPaperLevel = data.paperLevel ?? data.machine?.paperLevel ?? -1;
 
-        if (shouldIgnoreStaleMaintenanceRefresh(newMaintenanceMode)) {
-          return;
-        }
-
         if (newMaintenanceMode) {
           setShowMaintenance(true);
           setMaintenanceFromBackend(true);
@@ -333,7 +283,7 @@ function App() {
         }
       }
     },
-    [shouldIgnoreStaleMaintenanceRefresh],
+    [],
   );
 
   // 🚨 [พระเอกของงานนี้] ทำงานทันทีที่พอลูกค้ากลับมาถึงหน้า Home 
@@ -378,9 +328,6 @@ function App() {
   });
 
   const handleMaintenanceResolved = useCallback(() => {
-    maintenanceSignalRef.current = null;
-    maintenanceSignalUntilRef.current = 0;
-
     setShowMaintenance(false);
     setMaintenanceFromBackend(false);
     setMaintenanceConfig(null);

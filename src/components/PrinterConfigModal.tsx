@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  getSelectedPrinter as getProfileSelectedPrinter,
-  setSelectedPrinter as setProfileSelectedPrinter,
-} from "../config/printProfile";
 
 interface PrinterInfo {
   name: string;
@@ -26,7 +22,7 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
   // Load current config
   useEffect(() => {
     if (!open) return;
-    setSelectedPrinter(getProfileSelectedPrinter());
+    setSelectedPrinter(localStorage.getItem("selectedPrinter") || "");
     setSavedMessage("");
     loadPrinters();
   }, [open]);
@@ -46,7 +42,7 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
     setSaving(true);
     try {
       await invoke("set_selected_printer", { printerName: selectedPrinter });
-      setProfileSelectedPrinter(selectedPrinter);
+      localStorage.setItem("selectedPrinter", selectedPrinter);
       setSavedMessage("✅ บันทึกสำเร็จ!");
       setTimeout(() => setSavedMessage(""), 2000);
     } catch {

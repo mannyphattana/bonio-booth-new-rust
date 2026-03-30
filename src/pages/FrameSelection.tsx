@@ -7,7 +7,6 @@ import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
-import { A4_ONE_PIECE_FRAME } from "../config/testFrames";
 
 interface Props {
   theme: ThemeData;
@@ -70,16 +69,13 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
         const frameList = Array.isArray(result.data)
           ? result.data
           : result.data.frames || [];
-        const mergedFrames = [A4_ONE_PIECE_FRAME, ...frameList];
-        setFrames(mergedFrames);
-        if (mergedFrames.length > 0) {
-          setSelectedFrame(mergedFrames[0]);
+        setFrames(frameList);
+        if (frameList.length > 0) {
+          setSelectedFrame(frameList[0]);
         }
       }
     } catch (err) {
       console.error("Load frames error:", err);
-      setFrames([A4_ONE_PIECE_FRAME]);
-      setSelectedFrame(A4_ONE_PIECE_FRAME);
     }
     setLoading(false);
   };

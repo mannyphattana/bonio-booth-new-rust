@@ -7,11 +7,6 @@ import type { ThemeData } from "../App";
 import { setPrinting } from "../utils/printingState";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
-import {
-  ACTIVE_PAPER_TYPE,
-  getPaperConfig,
-  getSelectedPrinter,
-} from "../config/printProfile";
 
 interface Props {
   theme: ThemeData;
@@ -95,7 +90,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
     }
 
     // ดึงเครื่องปริ้นจากแหล่งเดียวกับปริ้นเทส (localStorage) — ไม่ใช้แค่ state เพื่อให้ได้ค่าที่ตั้งไว้แล้ว
-    const selectedPrinter = getSelectedPrinter();
+    const selectedPrinter = localStorage.getItem("selectedPrinter") || "";
     if (!selectedPrinter) {
       setPrintStatus("error");
       setErrorMessage("ไม่พบเครื่องพิมพ์ กรุณาตั้งค่าเครื่องพิมพ์ก่อน");
@@ -128,8 +123,10 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
       let verticalOffset = 0;
       let horizontalOffset = 0;
       try {
-        const config = getPaperConfig(isLandscape ? "landscape" : "portrait");
-        if (config) {
+        const configKey = isLandscape ? "paperConfigLandscape" : "paperConfigPortrait";
+        const saved = localStorage.getItem(configKey);
+        if (saved) {
+          const config = JSON.parse(saved);
           const s = Number(config.scale);
           const v = Number(config.vertical);
           const h = Number(config.horizontal);
@@ -163,7 +160,6 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
             imagePath: tempPath,
             printerName: selectedPrinter,
             frameType,
-            paperType: ACTIVE_PAPER_TYPE,
             scale,
             verticalOffset,
             horizontalOffset,

@@ -1,23 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { setPrinting as setPrintingState } from "../utils/printingState";
-import {
-  ACTIVE_PAPER_TYPE,
-  getPaperConfig,
-  getPaperSize,
-  getSelectedPrinter,
-  setPaperConfig,
-  setPaperSize,
-  type PaperConfig,
-} from "../config/printProfile";
 
 // ✅ นำเข้ารูปภาพทั้ง 4 แบบ จากโฟลเดอร์ assets
 import img4x6Port from "../assets/print_4x6_port.png";
 import img2x6Port from "../assets/print_2x6_port.png";
 import img6x4Land from "../assets/print_6x4_land.png";
 import img6x2Land from "../assets/print_6x2_land.png";
-import imgA4Port from "../assets/images/print_a4_port.png";
-import imgA4Land from "../assets/images/print_a4_land.png";
+
+interface PaperConfig {
+  scale: number;
+  vertical: number;
+  horizontal: number;
+}
 
 interface Props {
   open: boolean;
@@ -34,8 +29,8 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<"portrait" | "landscape">("portrait");
   const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
   const [landscapeConfig, setLandscapeConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
-  const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6" | "a4">("a4");
-  const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4" | "a4">("a4");
+  const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6">("4x6");
+  const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4">("6x4");
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
@@ -46,16 +41,16 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     try {
-      const savedPortrait = getPaperConfig("portrait");
-      if (savedPortrait) setPortraitConfig(savedPortrait);
+      const savedPortrait = localStorage.getItem("paperConfigPortrait");
+      if (savedPortrait) setPortraitConfig(JSON.parse(savedPortrait));
       else setPortraitConfig({ ...DEFAULT_CONFIG });
 
-      const savedLandscape = getPaperConfig("landscape");
-      if (savedLandscape) setLandscapeConfig(savedLandscape);
+      const savedLandscape = localStorage.getItem("paperConfigLandscape");
+      if (savedLandscape) setLandscapeConfig(JSON.parse(savedLandscape));
       else setLandscapeConfig({ ...DEFAULT_CONFIG });
 
-      setPortraitPaperSize((getPaperSize("portrait") as "2x6" | "4x6" | "a4") || "a4");
-      setLandscapePaperSize((getPaperSize("landscape") as "6x2" | "6x4" | "a4") || "a4");
+      setPortraitPaperSize((localStorage.getItem("paperSizePortrait") as "2x6" | "4x6") || "4x6");
+      setLandscapePaperSize((localStorage.getItem("paperSizeLandscape") as "6x2" | "6x4") || "6x4");
     } catch {
       setPortraitConfig({ ...DEFAULT_CONFIG });
       setLandscapeConfig({ ...DEFAULT_CONFIG });
@@ -79,10 +74,10 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         horizontal: landscapeConfig.horizontal,
       });
 
-      setPaperConfig("portrait", portraitConfig);
-      setPaperConfig("landscape", landscapeConfig);
-      setPaperSize("portrait", portraitPaperSize);
-      setPaperSize("landscape", landscapePaperSize);
+      localStorage.setItem("paperConfigPortrait", JSON.stringify(portraitConfig));
+      localStorage.setItem("paperConfigLandscape", JSON.stringify(landscapeConfig));
+      localStorage.setItem("paperSizePortrait", portraitPaperSize);
+      localStorage.setItem("paperSizeLandscape", landscapePaperSize);
 
       setSavedMessage("✅ บันทึกสำเร็จ!");
       setTimeout(() => setSavedMessage(""), 2000);
@@ -93,23 +88,17 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   };
 
   const handleTestPrint = useCallback(async () => {
-    const selectedPrinter = getSelectedPrinter();
+    const selectedPrinter = localStorage.getItem("selectedPrinter");
     if (!selectedPrinter) {
       setSavedMessage("⚠️ กรุณาเลือกเครื่องปริ้นก่อน");
       setTimeout(() => setSavedMessage(""), 3000);
       return;
     }
 
-    const selectedPaper = tab === "portrait" ? portraitPaperSize : landscapePaperSize;
-    const frameType = selectedPaper === "a4"
-      ? (tab === "portrait" ? "4x6" : "6x4")
-      : selectedPaper;
-    const displayPaper = selectedPaper === "a4"
-      ? (tab === "portrait" ? "A4 Portrait" : "A4 Landscape")
-      : selectedPaper;
+    const frameType = tab === "portrait" ? portraitPaperSize : landscapePaperSize;
 
     setPrinting(true);
-    setSavedMessage(`🖨️ กำลัง Test Print (${displayPaper})...`);
+    setSavedMessage(`🖨️ กำลัง Test Print (${frameType})...`);
     
     setPrintingState(true, 45000); 
     console.log("[PaperPositionModal] Printing state set to true before test print");
@@ -123,7 +112,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         verticalOffset: currentConfig.vertical,
         horizontalOffset: currentConfig.horizontal,
         frameType,
-        paperType: ACTIVE_PAPER_TYPE,
       });
       try {
         await invoke("reduce_paper_level", { copies: 1 });
@@ -145,21 +133,28 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     setCurrentConfig({ ...DEFAULT_CONFIG });
   };
 
+  const handleShowPaperSizes = async () => {
+    const selectedPrinter = localStorage.getItem("selectedPrinter");
+    if (!selectedPrinter) {
+      setSavedMessage("⚠️ กรุณาเลือกเครื่องปริ้นก่อน");
+      setTimeout(() => setSavedMessage(""), 3000);
+      return;
+    }
+    setSavedMessage("🔍 กำลังดึงข้อมูล Paper Sizes...");
+    try {
+      const sizes = await invoke<string[]>("get_printer_paper_sizes", { printerName: selectedPrinter });
+      const list = sizes.length > 0 ? sizes.join("\n") : "(ไม่พบ paper sizes)";
+      alert(`Paper Sizes ของ '${selectedPrinter}':\n\n${list}`);
+      setSavedMessage("");
+    } catch (err: any) {
+      setSavedMessage(`❌ ${err?.toString()?.slice(0, 80)}`);
+      setTimeout(() => setSavedMessage(""), 5000);
+    }
+  };
+
   const updateValue = (key: keyof PaperConfig, value: number) => {
     setCurrentConfig((prev) => ({ ...prev, [key]: value }));
   };
-
-  const renderA4SheetPreview = (landscape = false) => (
-    <img
-      src={landscape ? imgA4Land : imgA4Port}
-      alt={landscape ? "A4 Landscape" : "A4 Portrait"}
-      style={{
-        width: "100%",
-        height: "100%",
-        objectFit: "fill",
-      }}
-    />
-  );
 
   if (!open) return null;
 
@@ -190,18 +185,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
           {tab === "portrait" ? (
             <>
               <button
-                onClick={() => setPortraitPaperSize("a4")}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
-                  borderColor: portraitPaperSize === "a4" ? "#4dabf7" : "#555",
-                  background: portraitPaperSize === "a4" ? "rgba(77,171,247,0.15)" : "transparent",
-                  color: portraitPaperSize === "a4" ? "#4dabf7" : "#aaa",
-                  fontWeight: 600, cursor: "pointer", fontSize: 13,
-                }}
-              >
-                A4 (แนวตั้ง)
-              </button>
-              <button
                 onClick={() => setPortraitPaperSize("4x6")}
                 style={{
                   flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
@@ -228,18 +211,6 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             </>
           ) : (
             <>
-              <button
-                onClick={() => setLandscapePaperSize("a4")}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
-                  borderColor: landscapePaperSize === "a4" ? "#4dabf7" : "#555",
-                  background: landscapePaperSize === "a4" ? "rgba(77,171,247,0.15)" : "transparent",
-                  color: landscapePaperSize === "a4" ? "#4dabf7" : "#aaa",
-                  fontWeight: 600, cursor: "pointer", fontSize: 13,
-                }}
-              >
-                A4 (แนวนอน)
-              </button>
               <button
                 onClick={() => setLandscapePaperSize("6x4")}
                 style={{
@@ -428,47 +399,46 @@ export default function PaperPositionModal({ open, onClose }: Props) {
               >
                 {/* เงื่อนไขแสดงรูป: เช็คแท็บและขนาดที่เลือก */}
                 {tab === "portrait" ? (
-                  portraitPaperSize === "2x6" ? (
+                  portraitPaperSize === "4x6" ? (
+                    // แนวตั้ง 4x6 (1 รูปเต็มกรอบ)
+                    <img src={img4x6Port} alt="4x6" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+                  ) : (
                     // แนวตั้ง 2x6 (2 รูปประกบซ้าย-ขวา)
                     <>
                       <img src={img2x6Port} alt="2x6 left" style={{ width: "50%", height: "100%", objectFit: "fill", borderRight: "1px dashed rgba(255,255,255,0.2)" }} />
                       <img src={img2x6Port} alt="2x6 right" style={{ width: "50%", height: "100%", objectFit: "fill" }} />
                     </>
-                  ) : portraitPaperSize === "a4" ? (
-                    renderA4SheetPreview(false)
-                  ) : (
-                    // แนวตั้ง 4x6 (1 รูปเต็มกรอบ)
-                    <img src={img4x6Port} alt="4x6" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
                   )
                 ) : (
-                  landscapePaperSize === "6x2" ? (
+                  landscapePaperSize === "6x4" ? (
+                    // แนวนอน 6x4 (1 รูปเต็มกรอบ)
+                    <img src={img6x4Land} alt="6x4" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
+                  ) : (
                     // แนวนอน 6x2 (2 รูปประกบบน-ล่าง)
                     <>
                       <img src={img6x2Land} alt="6x2 top" style={{ width: "100%", height: "50%", objectFit: "fill", borderBottom: "1px dashed rgba(255,255,255,0.2)" }} />
                       <img src={img6x2Land} alt="6x2 bottom" style={{ width: "100%", height: "50%", objectFit: "fill" }} />
                     </>
-                  ) : landscapePaperSize === "a4" ? (
-                    renderA4SheetPreview(true)
-                  ) : (
-                    // แนวนอน 6x4 (1 รูปเต็มกรอบ)
-                    <img src={img6x4Land} alt="6x4" style={{ width: "100%", height: "100%", objectFit: "fill" }} />
                   )
                 )}
               </div>
             </div>
 
             <p style={{ fontSize: 11, opacity: 0.5, marginTop: 45 }}>
-              ตัวอย่างตำแหน่งรูปบนกระดาษ ({
-                (tab === "portrait" ? portraitPaperSize : landscapePaperSize) === "a4"
-                  ? (tab === "portrait" ? "A4 Portrait" : "A4 Landscape")
-                  : (tab === "portrait" ? portraitPaperSize : landscapePaperSize)
-              })
+              ตัวอย่างตำแหน่งรูปบนกระดาษ ({tab === "portrait" ? portraitPaperSize : landscapePaperSize})
             </p>
           </div>
 
           <div className="config-actions-row">
             <button className="config-reset-btn" onClick={handleReset}>
               🔄 Reset ค่าเริ่มต้น
+            </button>
+            <button
+              className="config-debug-btn"
+              onClick={handleShowPaperSizes}
+              style={{ fontSize: "0.8em", opacity: 0.7 }}
+            >
+              🔍 Paper Sizes
             </button>
             <button
               className="config-test-print-btn"

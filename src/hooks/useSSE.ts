@@ -143,30 +143,7 @@ export function useSSE(options: UseSSEOptions) {
             case "maintenance":
               if (callbacks.onMaintenanceMode) {
                 const data = sseEvent.data as Record<string, unknown>;
-                const raw =
-                  data?.enabled ??
-                  data?.isMaintenanceMode ??
-                  data?.maintenanceMode ??
-                  data?.isEnabled ??
-                  data?.value;
-
-                let enabled = true;
-                if (typeof raw === "boolean") {
-                  enabled = raw;
-                } else if (typeof raw === "number") {
-                  enabled = raw !== 0;
-                } else if (typeof raw === "string") {
-                  const normalized = raw.trim().toLowerCase();
-                  enabled = ![
-                    "false",
-                    "0",
-                    "off",
-                    "disable",
-                    "disabled",
-                  ].includes(normalized);
-                }
-
-                callbacks.onMaintenanceMode(enabled);
+                callbacks.onMaintenanceMode(data?.enabled !== false);
               }
               break;
             case "maintenance-on":

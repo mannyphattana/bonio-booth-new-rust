@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
-import { getSelectedPrinter } from "../config/printProfile";
 
 interface DeviceStatus {
   cameraOk: boolean;
@@ -94,7 +93,7 @@ export default function Maintenance({
 
     // Check printer — must match useDeviceCheck logic:
     // check both name exists AND is_online (WorkOffline=false, PrinterStatus=Normal)
-    const savedPrinter = getSelectedPrinter();
+    const savedPrinter = localStorage.getItem("selectedPrinter");
     if (savedPrinter) {
       try {
         const printers: any[] = await invoke("get_printers");

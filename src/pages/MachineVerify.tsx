@@ -5,35 +5,12 @@ interface Props {
   onVerified: (data: any) => void;
 }
 
-const DEFAULT_API_BASE_URL = "http://localhost:3000/api";
-const DEFAULT_MACHINE_ID = "69b1938827766fd8efb50396";
-const DEFAULT_MACHINE_PORT = "33332";
-const FORCE_TEST_MACHINE_CONFIG = true;
-
-const getBackendMessage = (payload: any): string => {
-  return (
-    payload?.error ||
-    payload?.data?.message ||
-    payload?.data?.error ||
-    "Unknown backend error"
-  );
-};
-
 export default function MachineVerify({ onVerified }: Props) {
   const [machineId, setMachineId] = useState(
-    FORCE_TEST_MACHINE_CONFIG
-      ? DEFAULT_MACHINE_ID
-      : localStorage.getItem("machineId") || DEFAULT_MACHINE_ID
+    localStorage.getItem("machineId") || ""
   );
   const [machinePort, setMachinePort] = useState(
-    FORCE_TEST_MACHINE_CONFIG
-      ? DEFAULT_MACHINE_PORT
-      : localStorage.getItem("machinePort") || DEFAULT_MACHINE_PORT
-  );
-  const [apiBaseUrl, setApiBaseUrl] = useState(
-    FORCE_TEST_MACHINE_CONFIG
-      ? DEFAULT_API_BASE_URL
-      : localStorage.getItem("apiBaseUrl") || DEFAULT_API_BASE_URL,
+    localStorage.getItem("machinePort") || "44444"
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -47,44 +24,25 @@ export default function MachineVerify({ onVerified }: Props) {
     setError("");
 
     try {
-      const actualMachineId = FORCE_TEST_MACHINE_CONFIG ? DEFAULT_MACHINE_ID : machineId;
-      const actualMachinePort = FORCE_TEST_MACHINE_CONFIG ? DEFAULT_MACHINE_PORT : machinePort;
-      const actualApiBaseUrl = FORCE_TEST_MACHINE_CONFIG ? DEFAULT_API_BASE_URL : apiBaseUrl;
+      await invoke("set_machine_config", { machineId, machinePort });
 
-      await invoke("set_machine_config", {
-        machineId: actualMachineId,
-        machinePort: actualMachinePort,
-        machineApiBaseUrl: actualApiBaseUrl,
-      });
-
-      const verifyResult: any = await invoke("verify_machine", { machineId: actualMachineId });
-      console.log("[MachineVerify] verify result:", {
-        url: `${actualApiBaseUrl}/machines-public/verify?machineId=${actualMachineId}&port=${actualMachinePort}`,
-        statusCode: verifyResult?.data?.statusCode,
-        body: verifyResult?.data,
-      });
+      const verifyResult: any = await invoke("verify_machine", { machineId });
       if (!verifyResult.success) {
-        setError(getBackendMessage(verifyResult));
+        setError("Machine verification failed. Please check your Machine ID.");
         setLoading(false);
         return;
       }
 
       const initResult: any = await invoke("init_machine");
-      console.log("[MachineVerify] init result:", {
-        url: `${actualApiBaseUrl}/machines-public/init?machineId=${actualMachineId}&port=${actualMachinePort}`,
-        statusCode: initResult?.data?.statusCode,
-        body: initResult?.data,
-      });
       if (initResult.success && initResult.data?.machine) {
-        localStorage.setItem("machineId", actualMachineId);
-        localStorage.setItem("machinePort", actualMachinePort);
-        localStorage.setItem("apiBaseUrl", actualApiBaseUrl);
+        localStorage.setItem("machineId", machineId);
+        localStorage.setItem("machinePort", machinePort);
         onVerified(initResult.data);
       } else {
-        setError(getBackendMessage(initResult));
+        setError("Machine init failed. Please try again.");
       }
     } catch (err: any) {
-      setError(err?.message || err?.toString() || "Connection error");
+      setError(err?.toString() || "Connection error");
     }
     setLoading(false);
   };
@@ -108,23 +66,6 @@ export default function MachineVerify({ onVerified }: Props) {
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, width: 360 }}>
-        <label style={{ fontSize: 14, color: "#ccc" }}>API Base URL</label>
-        <input
-          type="text"
-          value={apiBaseUrl}
-          onChange={(e) => setApiBaseUrl(e.target.value)}
-          placeholder="http://localhost:3000/api"
-          style={{
-            padding: "14px 16px",
-            borderRadius: 10,
-            border: "1px solid #444",
-            background: "#1a1a2e",
-            color: "#fff",
-            fontSize: 16,
-            outline: "none",
-          }}
-        />
-
         <label style={{ fontSize: 14, color: "#ccc" }}>Machine ID</label>
         <input
           type="text"
