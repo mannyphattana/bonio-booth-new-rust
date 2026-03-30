@@ -2,6 +2,9 @@ export type PrintProfile = "legacy_4x6" | "customer_a4";
 export type PaperType = "photo_4x6" | "a4" | "a3";
 export type PaperSizeOption = "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3";
 
+// Temporary rollout switch: hide office-paper menu (A4/A3) until customer enables it.
+export const ENABLE_OFFICE_PAPER_MENU = false;
+
 export interface PaperConfig {
   scale: number;
   vertical: number;
@@ -56,6 +59,10 @@ export const getSelectedPrinter = (): string => {
 
 export const setSelectedPrinter = (printerName: string): void => {
   localStorage.setItem(PRINT_STORAGE_KEYS.selectedPrinter, printerName);
+  // Keep legacy key in sync so values survive profile toggles/reverts.
+  if (PRINT_STORAGE_KEYS.selectedPrinter !== LEGACY_KEYS.selectedPrinter) {
+    localStorage.setItem(LEGACY_KEYS.selectedPrinter, printerName);
+  }
 };
 
 export const getPaperConfig = (orientation: PrintOrientation): PaperConfig | null => {
@@ -92,7 +99,15 @@ export const setPaperConfig = (
       ? PRINT_STORAGE_KEYS.paperConfigLandscape
       : PRINT_STORAGE_KEYS.paperConfigPortrait;
 
+  const legacyKey =
+    orientation === "landscape"
+      ? LEGACY_KEYS.paperConfigLandscape
+      : LEGACY_KEYS.paperConfigPortrait;
+
   localStorage.setItem(key, JSON.stringify(config));
+  if (key !== legacyKey) {
+    localStorage.setItem(legacyKey, JSON.stringify(config));
+  }
 };
 
 export const getPaperSize = (
@@ -107,11 +122,7 @@ export const getPaperSize = (
       ? LEGACY_KEYS.paperSizeLandscape
       : LEGACY_KEYS.paperSizePortrait;
 
-  // For A4 customer profile, keep paper-size selection isolated from legacy keys.
-  const value =
-    ACTIVE_PRINT_PROFILE === "customer_a4"
-      ? localStorage.getItem(activeKey)
-      : readStorageWithFallback(activeKey, legacyKey);
+  const value = readStorageWithFallback(activeKey, legacyKey);
   if (!value) return null;
   return value as PaperSizeOption;
 };
@@ -125,12 +136,24 @@ export const setPaperSize = (
       ? PRINT_STORAGE_KEYS.paperSizeLandscape
       : PRINT_STORAGE_KEYS.paperSizePortrait;
 
+  const legacyKey =
+    orientation === "landscape"
+      ? LEGACY_KEYS.paperSizeLandscape
+      : LEGACY_KEYS.paperSizePortrait;
+
   localStorage.setItem(key, value);
+  if (key !== legacyKey) {
+    localStorage.setItem(legacyKey, value);
+  }
 };
 
 export const getPaperTypeByOrientation = (
   orientation: PrintOrientation,
 ): PaperType => {
+  if (!ENABLE_OFFICE_PAPER_MENU) {
+    return "photo_4x6";
+  }
+
   const selected = getPaperSize(orientation);
   if (selected === "a3") return "a3";
   if (selected === "a4") return "a4";

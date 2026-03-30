@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { setPrinting as setPrintingState } from "../utils/printingState";
 import {
   ACTIVE_PAPER_TYPE,
+  ENABLE_OFFICE_PAPER_MENU,
   getPaperConfig,
   getPaperSize,
   getSelectedPrinter,
@@ -32,6 +33,17 @@ const DEFAULT_CONFIG: PaperConfig = {
   horizontal: 0,
 };
 
+const normalizePaperSelection = (
+  orientation: "portrait" | "landscape",
+  value: "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3" | null,
+): "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3" => {
+  if (!value) return orientation === "portrait" ? "4x6" : "6x4";
+  if (!ENABLE_OFFICE_PAPER_MENU && (value === "a4" || value === "a3")) {
+    return orientation === "portrait" ? "4x6" : "6x4";
+  }
+  return value;
+};
+
 export default function PaperPositionModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<"portrait" | "landscape">("portrait");
   const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
@@ -56,8 +68,18 @@ export default function PaperPositionModal({ open, onClose }: Props) {
       if (savedLandscape) setLandscapeConfig(savedLandscape);
       else setLandscapeConfig({ ...DEFAULT_CONFIG });
 
-      setPortraitPaperSize((getPaperSize("portrait") as "2x6" | "4x6" | "a4" | "a3") || "a4");
-      setLandscapePaperSize((getPaperSize("landscape") as "6x2" | "6x4" | "a4" | "a3") || "a4");
+      setPortraitPaperSize(
+        normalizePaperSelection(
+          "portrait",
+          getPaperSize("portrait") as "2x6" | "4x6" | "a4" | "a3" | null,
+        ) as "2x6" | "4x6" | "a4" | "a3",
+      );
+      setLandscapePaperSize(
+        normalizePaperSelection(
+          "landscape",
+          getPaperSize("landscape") as "6x2" | "6x4" | "a4" | "a3" | null,
+        ) as "6x2" | "6x4" | "a4" | "a3",
+      );
     } catch {
       setPortraitConfig({ ...DEFAULT_CONFIG });
       setLandscapeConfig({ ...DEFAULT_CONFIG });
@@ -211,30 +233,34 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         <div style={{ display: "flex", gap: 8, padding: "10px 20px 0" }}>
           {tab === "portrait" ? (
             <>
-              <button
-                onClick={() => setPortraitPaperSize("a4")}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
-                  borderColor: portraitPaperSize === "a4" ? "#4dabf7" : "#555",
-                  background: portraitPaperSize === "a4" ? "rgba(77,171,247,0.15)" : "transparent",
-                  color: portraitPaperSize === "a4" ? "#4dabf7" : "#aaa",
-                  fontWeight: 600, cursor: "pointer", fontSize: 13,
-                }}
-              >
-                A4 (แนวตั้ง)
-              </button>
-              <button
-                onClick={() => setPortraitPaperSize("a3")}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
-                  borderColor: portraitPaperSize === "a3" ? "#9775fa" : "#555",
-                  background: portraitPaperSize === "a3" ? "rgba(151,117,250,0.15)" : "transparent",
-                  color: portraitPaperSize === "a3" ? "#9775fa" : "#aaa",
-                  fontWeight: 600, cursor: "pointer", fontSize: 13,
-                }}
-              >
-                A3 (แนวตั้ง)
-              </button>
+              {ENABLE_OFFICE_PAPER_MENU && (
+                <>
+                  <button
+                    onClick={() => setPortraitPaperSize("a4")}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
+                      borderColor: portraitPaperSize === "a4" ? "#4dabf7" : "#555",
+                      background: portraitPaperSize === "a4" ? "rgba(77,171,247,0.15)" : "transparent",
+                      color: portraitPaperSize === "a4" ? "#4dabf7" : "#aaa",
+                      fontWeight: 600, cursor: "pointer", fontSize: 13,
+                    }}
+                  >
+                    A4 (แนวตั้ง)
+                  </button>
+                  <button
+                    onClick={() => setPortraitPaperSize("a3")}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
+                      borderColor: portraitPaperSize === "a3" ? "#9775fa" : "#555",
+                      background: portraitPaperSize === "a3" ? "rgba(151,117,250,0.15)" : "transparent",
+                      color: portraitPaperSize === "a3" ? "#9775fa" : "#aaa",
+                      fontWeight: 600, cursor: "pointer", fontSize: 13,
+                    }}
+                  >
+                    A3 (แนวตั้ง)
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => setPortraitPaperSize("4x6")}
                 style={{
@@ -262,30 +288,34 @@ export default function PaperPositionModal({ open, onClose }: Props) {
             </>
           ) : (
             <>
-              <button
-                onClick={() => setLandscapePaperSize("a4")}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
-                  borderColor: landscapePaperSize === "a4" ? "#4dabf7" : "#555",
-                  background: landscapePaperSize === "a4" ? "rgba(77,171,247,0.15)" : "transparent",
-                  color: landscapePaperSize === "a4" ? "#4dabf7" : "#aaa",
-                  fontWeight: 600, cursor: "pointer", fontSize: 13,
-                }}
-              >
-                A4 (แนวนอน)
-              </button>
-              <button
-                onClick={() => setLandscapePaperSize("a3")}
-                style={{
-                  flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
-                  borderColor: landscapePaperSize === "a3" ? "#9775fa" : "#555",
-                  background: landscapePaperSize === "a3" ? "rgba(151,117,250,0.15)" : "transparent",
-                  color: landscapePaperSize === "a3" ? "#9775fa" : "#aaa",
-                  fontWeight: 600, cursor: "pointer", fontSize: 13,
-                }}
-              >
-                A3 (แนวนอน)
-              </button>
+              {ENABLE_OFFICE_PAPER_MENU && (
+                <>
+                  <button
+                    onClick={() => setLandscapePaperSize("a4")}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
+                      borderColor: landscapePaperSize === "a4" ? "#4dabf7" : "#555",
+                      background: landscapePaperSize === "a4" ? "rgba(77,171,247,0.15)" : "transparent",
+                      color: landscapePaperSize === "a4" ? "#4dabf7" : "#aaa",
+                      fontWeight: 600, cursor: "pointer", fontSize: 13,
+                    }}
+                  >
+                    A4 (แนวนอน)
+                  </button>
+                  <button
+                    onClick={() => setLandscapePaperSize("a3")}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, border: "2px solid",
+                      borderColor: landscapePaperSize === "a3" ? "#9775fa" : "#555",
+                      background: landscapePaperSize === "a3" ? "rgba(151,117,250,0.15)" : "transparent",
+                      color: landscapePaperSize === "a3" ? "#9775fa" : "#aaa",
+                      fontWeight: 600, cursor: "pointer", fontSize: 13,
+                    }}
+                  >
+                    A3 (แนวนอน)
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => setLandscapePaperSize("6x4")}
                 style={{
