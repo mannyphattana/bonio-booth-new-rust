@@ -107,6 +107,11 @@ function App() {
   
   const [isOnHomePage, setIsOnHomePage] = useState(true);
   const isOnHomePageRef = useRef(true); // 🚨 Ref สำหรับใช้เช็คสถานะแบบเรียลไทม์ ป้องกันค่าไม่อัปเดต
+  const showMaintenanceRef = useRef(false);
+  const maintenanceFromBackendRef = useRef(false);
+  const maintenanceConfigRef = useRef<
+    "camera" | "printer" | "network" | "paper" | null
+  >(null);
   const [pendingPaperOut, setPendingPaperOut] = useState(false);
 
   const initRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -116,6 +121,18 @@ function App() {
     setIsOnHomePage(isHome);
     isOnHomePageRef.current = isHome;
   }, []);
+
+  useEffect(() => {
+    showMaintenanceRef.current = showMaintenance;
+  }, [showMaintenance]);
+
+  useEffect(() => {
+    maintenanceFromBackendRef.current = maintenanceFromBackend;
+  }, [maintenanceFromBackend]);
+
+  useEffect(() => {
+    maintenanceConfigRef.current = maintenanceConfig;
+  }, [maintenanceConfig]);
 
   useEffect(() => {
     hydratePrintProfileFromDisk().catch(() => {});
@@ -157,7 +174,7 @@ function App() {
             );
             setIsVerified(true);
 
-            if (maintenanceConfig === "network") {
+            if (maintenanceConfigRef.current === "network") {
               setMaintenanceConfig(null);
               setShowMaintenance(false);
             }
@@ -174,6 +191,7 @@ function App() {
               setMaintenanceFromBackend(true);
               setMaintenanceConfig(null);
             } else if (paperLevel === 0) {
+              setMaintenanceFromBackend(false);
               // 🚨 ถ้ากระดาษเหลือ 0 ให้เช็คว่าอยู่หน้า Home ไหม
               if (isOnHomePageRef.current) {
                 setShowMaintenance(true);
@@ -182,9 +200,17 @@ function App() {
               } else {
                 setPendingPaperOut(true); // ฝากคิวไว้ก่อน ค่อยไปโชว์ตอนถึงหน้า Home
               }
-            } else if (!backendMaintenance && paperLevel > 0 && maintenanceConfig === "paper") {
+            } else if (!backendMaintenance && paperLevel > 0 && maintenanceConfigRef.current === "paper") {
                 setShowMaintenance(false);
                 setMaintenanceConfig(null);
+                setMaintenanceFromBackend(false);
+                setPendingPaperOut(false);
+            } else if (!backendMaintenance && paperLevel > 0) {
+                setMaintenanceFromBackend(false);
+                setPendingPaperOut(false);
+                if (maintenanceFromBackendRef.current && maintenanceConfigRef.current === null) {
+                  setShowMaintenance(false);
+                }
             }
           } else {
             throw new Error("init_machine returned unsuccessful response");
@@ -199,7 +225,7 @@ function App() {
         setMaintenanceFromBackend(false);
       }
     },
-    [maintenanceConfig],
+    [],
   );
 
   useEffect(() => {
@@ -229,7 +255,11 @@ function App() {
   const handleMaintenanceMode = useCallback((enabled: boolean) => {
     setShowMaintenance(enabled);
     setMaintenanceFromBackend(enabled);
-    if (enabled) setMaintenanceConfig(null); 
+    if (enabled) {
+      setMaintenanceConfig(null);
+    } else if (maintenanceConfigRef.current === null) {
+      setPendingPaperOut(false);
+    }
   }, []);
 
   const handleConfigUpdated = useCallback(
@@ -238,6 +268,9 @@ function App() {
       const savedMachineId = localStorage.getItem("machineId");
       if (savedMachineId) {
         initMachine(savedMachineId);
+        setTimeout(() => {
+          initMachine(savedMachineId);
+        }, 1200);
       }
     },
     [initMachine],
@@ -282,6 +315,7 @@ function App() {
           setMaintenanceFromBackend(true);
           setMaintenanceConfig(null);
         } else if (newPaperLevel === 0) {
+          setMaintenanceFromBackend(false);
           // 🚨 กันเหนียว: เช็คว่าอยู่หน้าแรกจริงๆ ไหม
           if (isOnHomePageRef.current) {
             setShowMaintenance(true);
@@ -289,6 +323,12 @@ function App() {
             setMaintenanceConfig("paper");
           } else {
             setPendingPaperOut(true);
+          }
+        } else {
+          setMaintenanceFromBackend(false);
+          setPendingPaperOut(false);
+          if (maintenanceFromBackendRef.current && maintenanceConfigRef.current === null) {
+            setShowMaintenance(false);
           }
         }
       }
