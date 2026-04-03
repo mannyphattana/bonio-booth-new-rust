@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 export type PrintProfile = "legacy_4x6" | "customer_a4";
 export type PaperType = "photo_4x6" | "a4" | "a3";
 export type PaperSizeOption = "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3";
@@ -31,6 +33,14 @@ const PROFILE_PREFIX_BY_PROFILE: Record<PrintProfile, string> = {
 
 const PROFILE_PREFIX = PROFILE_PREFIX_BY_PROFILE[ACTIVE_PRINT_PROFILE];
 
+interface PersistedPrintProfile {
+  selectedPrinter: string;
+  paperConfigPortrait: PaperConfig;
+  paperConfigLandscape: PaperConfig;
+  paperSizePortrait: string;
+  paperSizeLandscape: string;
+}
+
 export const PRINT_STORAGE_KEYS = {
   selectedPrinter: `${PROFILE_PREFIX}selectedPrinter`,
   paperConfigPortrait: `${PROFILE_PREFIX}paperConfigPortrait`,
@@ -39,8 +49,29 @@ export const PRINT_STORAGE_KEYS = {
   paperSizeLandscape: `${PROFILE_PREFIX}paperSizeLandscape`,
 } as const;
 
-export const ACTIVE_PAPER_TYPE: PaperType =
-  ACTIVE_PRINT_PROFILE === "customer_a4" ? "a4" : "photo_4x6";
+const persistPrintProfileToDisk = (): void => {
+  const payload: PersistedPrintProfile = {
+    selectedPrinter: getSelectedPrinter(),
+    paperConfigPortrait: getPaperConfig("portrait") || { scale: 100, vertical: 0, horizontal: 0 },
+    paperConfigLandscape: getPaperConfig("landscape") || { scale: 100, vertical: 0, horizontal: 0 },
+    paperSizePortrait: getPaperSize("portrait") || "",
+    paperSizeLandscape: getPaperSize("landscape") || "",
+  };
+
+  invoke("save_print_profile", { profile: payload }).catch(() => {
+    // Keep UX non-blocking if disk persistence fails; localStorage still works as fallback.
+  });
+};
+
+const writeStorageWithLegacy = (activeKey: string, legacyKey: string, value: string): void => {
+  localStorage.setItem(activeKey, value);
+  if (activeKey !== legacyKey) {
+    localStorage.setItem(legacyKey, value);
+  }
+};
+
+// Keep legacy 4x6 as base behavior. A4/A3 are explicit choices only.
+export const ACTIVE_PAPER_TYPE: PaperType = "photo_4x6";
 
 const readStorageWithFallback = (activeKey: string, legacyKey: string): string | null => {
   const activeValue = localStorage.getItem(activeKey);
@@ -58,11 +89,12 @@ export const getSelectedPrinter = (): string => {
 };
 
 export const setSelectedPrinter = (printerName: string): void => {
-  localStorage.setItem(PRINT_STORAGE_KEYS.selectedPrinter, printerName);
-  // Keep legacy key in sync so values survive profile toggles/reverts.
-  if (PRINT_STORAGE_KEYS.selectedPrinter !== LEGACY_KEYS.selectedPrinter) {
-    localStorage.setItem(LEGACY_KEYS.selectedPrinter, printerName);
-  }
+  writeStorageWithLegacy(
+    PRINT_STORAGE_KEYS.selectedPrinter,
+    LEGACY_KEYS.selectedPrinter,
+    printerName,
+  );
+  persistPrintProfileToDisk();
 };
 
 export const getPaperConfig = (orientation: PrintOrientation): PaperConfig | null => {
@@ -104,10 +136,8 @@ export const setPaperConfig = (
       ? LEGACY_KEYS.paperConfigLandscape
       : LEGACY_KEYS.paperConfigPortrait;
 
-  localStorage.setItem(key, JSON.stringify(config));
-  if (key !== legacyKey) {
-    localStorage.setItem(legacyKey, JSON.stringify(config));
-  }
+  writeStorageWithLegacy(key, legacyKey, JSON.stringify(config));
+  persistPrintProfileToDisk();
 };
 
 export const getPaperSize = (
@@ -141,10 +171,8 @@ export const setPaperSize = (
       ? LEGACY_KEYS.paperSizeLandscape
       : LEGACY_KEYS.paperSizePortrait;
 
-  localStorage.setItem(key, value);
-  if (key !== legacyKey) {
-    localStorage.setItem(legacyKey, value);
-  }
+  writeStorageWithLegacy(key, legacyKey, value);
+  persistPrintProfileToDisk();
 };
 
 export const getPaperTypeByOrientation = (
@@ -166,6 +194,7 @@ export const clearActivePrintConfig = (): void => {
   localStorage.removeItem(PRINT_STORAGE_KEYS.paperConfigLandscape);
   localStorage.removeItem(PRINT_STORAGE_KEYS.paperSizePortrait);
   localStorage.removeItem(PRINT_STORAGE_KEYS.paperSizeLandscape);
+  persistPrintProfileToDisk();
 };
 
 export const clearLegacyPrintConfig = (): void => {
@@ -174,4 +203,53 @@ export const clearLegacyPrintConfig = (): void => {
   localStorage.removeItem(LEGACY_KEYS.paperConfigLandscape);
   localStorage.removeItem(LEGACY_KEYS.paperSizePortrait);
   localStorage.removeItem(LEGACY_KEYS.paperSizeLandscape);
+  persistPrintProfileToDisk();
+};
+
+export const hydratePrintProfileFromDisk = async (): Promise<void> => {
+  try {
+    const profile = await invoke<PersistedPrintProfile>("load_print_profile");
+
+    if (profile.selectedPrinter) {
+      writeStorageWithLegacy(
+        PRINT_STORAGE_KEYS.selectedPrinter,
+        LEGACY_KEYS.selectedPrinter,
+        profile.selectedPrinter,
+      );
+    }
+
+    if (profile.paperConfigPortrait) {
+      writeStorageWithLegacy(
+        PRINT_STORAGE_KEYS.paperConfigPortrait,
+        LEGACY_KEYS.paperConfigPortrait,
+        JSON.stringify(profile.paperConfigPortrait),
+      );
+    }
+
+    if (profile.paperConfigLandscape) {
+      writeStorageWithLegacy(
+        PRINT_STORAGE_KEYS.paperConfigLandscape,
+        LEGACY_KEYS.paperConfigLandscape,
+        JSON.stringify(profile.paperConfigLandscape),
+      );
+    }
+
+    if (profile.paperSizePortrait) {
+      writeStorageWithLegacy(
+        PRINT_STORAGE_KEYS.paperSizePortrait,
+        LEGACY_KEYS.paperSizePortrait,
+        profile.paperSizePortrait,
+      );
+    }
+
+    if (profile.paperSizeLandscape) {
+      writeStorageWithLegacy(
+        PRINT_STORAGE_KEYS.paperSizeLandscape,
+        LEGACY_KEYS.paperSizeLandscape,
+        profile.paperSizeLandscape,
+      );
+    }
+  } catch {
+    // First run or corrupted file: ignore and keep existing localStorage behavior.
+  }
 };

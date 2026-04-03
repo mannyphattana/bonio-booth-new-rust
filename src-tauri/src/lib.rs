@@ -313,6 +313,8 @@ pub fn run() {
             api::get_selected_printer,
             api::set_paper_config,
             api::get_paper_config,
+            api::save_print_profile,
+            api::load_print_profile,
             api::download_image_from_url,
             // Image processing
             image_processing::get_available_filters,

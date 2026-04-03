@@ -1010,10 +1010,35 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
 
         info!("[Canon] Sending TakePicture command...");
 
-        // Send take picture command
-        let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+        // Send take picture command with transient busy retry.
+        // Some bodies briefly report DEVICE_BUSY/OBJECT_NOTREADY right after
+        // live-view/mode transitions; pump events and retry a few times.
+        let mut take_error = EDS_ERR_OK;
+        let mut take_ok = false;
+        for attempt in 1..=8 {
+            take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+            if take_error == EDS_ERR_OK {
+                take_ok = true;
+                break;
+            }
 
-        if take_error != EDS_ERR_OK {
+            if !is_transient_live_view_error(take_error) {
+                break;
+            }
+
+            warn!(
+                "[Canon] TakePicture transient error (attempt {}/8): {}",
+                attempt,
+                error_to_string(take_error)
+            );
+            unsafe {
+                let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+                let _ = EdsGetEvent();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+
+        if !take_ok {
             error!("[Canon] TakePicture command failed: {}", error_to_string(take_error));
             return Ok(CaptureResult {
                 success: false,
@@ -1209,9 +1234,32 @@ pub fn canon_send_shutter() -> Result<CaptureResult, String> {
             let _ = EdsSetCapacity(camera_ref, capacity);
         }
 
-        let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+        let mut take_error = EDS_ERR_OK;
+        let mut take_ok = false;
+        for attempt in 1..=8 {
+            take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+            if take_error == EDS_ERR_OK {
+                take_ok = true;
+                break;
+            }
 
-        if take_error != EDS_ERR_OK {
+            if !is_transient_live_view_error(take_error) {
+                break;
+            }
+
+            warn!(
+                "[Canon] Shutter transient error (attempt {}/8): {}",
+                attempt,
+                error_to_string(take_error)
+            );
+            unsafe {
+                let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+                let _ = EdsGetEvent();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+
+        if !take_ok {
             return Ok(CaptureResult {
                 success: false,
                 error: Some(format!(

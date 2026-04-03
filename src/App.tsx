@@ -26,6 +26,7 @@ import { useDeviceCheck } from "./hooks/useDeviceCheck";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
+import { hydratePrintProfileFromDisk } from "./config/printProfile";
 import "./App.css";
 
 export interface ThemeData {
@@ -117,9 +118,18 @@ function App() {
   }, []);
 
   useEffect(() => {
+    hydratePrintProfileFromDisk().catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const savedCameraType = localStorage.getItem("cameraType");
     if (savedCameraType) {
-      invoke("set_camera_type", { cameraType: savedCameraType }).catch(() => {});
+      const normalizedCameraType =
+        savedCameraType === "webcam" ? "webcam" : "canon";
+      if (normalizedCameraType !== savedCameraType) {
+        localStorage.setItem("cameraType", normalizedCameraType);
+      }
+      invoke("set_camera_type", { cameraType: normalizedCameraType }).catch(() => {});
     }
   }, []);
 

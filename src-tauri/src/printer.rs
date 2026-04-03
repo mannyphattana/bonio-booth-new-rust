@@ -281,20 +281,8 @@ fn win32_gdi_print(
                 // Last resort: use any listed media and let driver defaults handle it.
                 paper_sizes.first()
             })
-        } else if paper_mode == "a4" || paper_mode == "a3" {
-            // Customer mode: prefer explicit A4/A3 media on regular office printers.
-            paper_sizes.iter().find(|(_, n)| {
-                let lower = n.to_lowercase();
-                lower.contains(&paper_mode)
-            }).or_else(|| {
-                // Fallback to any non-cut media if explicit size label is missing.
-                paper_sizes.iter().find(|(_, n)| {
-                    let lower = n.to_lowercase();
-                    !lower.contains("cut") && !lower.contains("2x6")
-                })
-            })
         } else {
-            // Legacy behavior: always target 4x6 media for dye-sub printers.
+            // Bugfix branch: always target photo media and ignore A3/A4 requests.
             paper_sizes.iter().find(|(_, n)| {
                 let lower = n.to_lowercase();
                 (lower.contains("4x6") || lower.contains("6x4"))
@@ -990,7 +978,7 @@ pub async fn reduce_paper_level(
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = "https://api-booth.boniolabs.com/api/machines-public/paper-level/reduce";
+    let url = "https://api-booth-test.boniolabs.com/api/machines-public/paper-level/reduce";
 
     let res = client
         .post(url)

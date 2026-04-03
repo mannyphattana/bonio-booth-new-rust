@@ -48,8 +48,8 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<"portrait" | "landscape">("portrait");
   const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
   const [landscapeConfig, setLandscapeConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
-  const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6" | "a4" | "a3">("a4");
-  const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4" | "a4" | "a3">("a4");
+  const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6" | "a4" | "a3">("4x6");
+  const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4" | "a4" | "a3">("6x4");
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
@@ -230,7 +230,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: 8, padding: "10px 20px 0" }}>
+        <div style={{ display: "flex", gap: 8, padding: "10px 20px 0", flexWrap: "wrap" }}>
           {tab === "portrait" ? (
             <>
               {ENABLE_OFFICE_PAPER_MENU && (

@@ -30,7 +30,11 @@ export default function CameraConfigModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     const savedType = localStorage.getItem("cameraType") || "webcam";
-    setTab(savedType as "webcam" | "canon");
+    const normalizedType = savedType === "webcam" ? "webcam" : "canon";
+    if (normalizedType !== savedType) {
+      localStorage.setItem("cameraType", normalizedType);
+    }
+    setTab(normalizedType);
     setSelectedWebcam(localStorage.getItem("selectedWebcamId") || "");
     setSelectedDslr(localStorage.getItem("selectedCameraName") || "");
     setSavedMessage("");

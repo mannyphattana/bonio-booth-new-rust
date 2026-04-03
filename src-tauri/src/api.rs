@@ -1,9 +1,11 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fs;
 use std::sync::Mutex;
+use tauri::Manager;
 
-const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+const API_BASE_URL: &str = "https://api-booth-test.boniolabs.com";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaperPositionConfig {
@@ -20,6 +22,57 @@ impl Default for PaperPositionConfig {
             horizontal: 0.0,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PersistedPrintProfile {
+    pub selected_printer: String,
+    pub paper_config_portrait: PaperPositionConfig,
+    pub paper_config_landscape: PaperPositionConfig,
+    pub paper_size_portrait: String,
+    pub paper_size_landscape: String,
+}
+
+impl Default for PersistedPrintProfile {
+    fn default() -> Self {
+        Self {
+            selected_printer: String::new(),
+            paper_config_portrait: PaperPositionConfig::default(),
+            paper_config_landscape: PaperPositionConfig::default(),
+            paper_size_portrait: String::new(),
+            paper_size_landscape: String::new(),
+        }
+    }
+}
+
+fn get_print_profile_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("print-profile.json"))
+}
+
+fn load_print_profile_from_disk(app: &tauri::AppHandle) -> PersistedPrintProfile {
+    let path = match get_print_profile_path(app) {
+        Ok(path) => path,
+        Err(_) => return PersistedPrintProfile::default(),
+    };
+
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(_) => return PersistedPrintProfile::default(),
+    };
+
+    serde_json::from_str::<PersistedPrintProfile>(&raw).unwrap_or_default()
+}
+
+fn save_print_profile_to_disk(
+    app: &tauri::AppHandle,
+    profile: &PersistedPrintProfile,
+) -> Result<(), String> {
+    let path = get_print_profile_path(app)?;
+    let raw = serde_json::to_string_pretty(profile).map_err(|e| e.to_string())?;
+    fs::write(path, raw).map_err(|e| e.to_string())
 }
 
 pub struct AppState {
@@ -852,7 +905,13 @@ pub async fn set_camera_type(
     state: tauri::State<'_, AppState>,
     camera_type: String,
 ) -> Result<ApiResponse, String> {
-    *state.camera_type.lock().unwrap() = camera_type;
+    let normalized = if camera_type.eq_ignore_ascii_case("webcam") {
+        "webcam".to_string()
+    } else {
+        "canon".to_string()
+    };
+
+    *state.camera_type.lock().unwrap() = normalized;
     Ok(ApiResponse {
         success: true,
         data: None,
@@ -910,9 +969,15 @@ pub async fn get_selected_camera_name(
 #[tauri::command]
 pub async fn set_selected_printer(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     printer_name: String,
 ) -> Result<ApiResponse, String> {
     *state.selected_printer.lock().unwrap() = printer_name;
+
+    let mut profile = load_print_profile_from_disk(&app);
+    profile.selected_printer = state.selected_printer.lock().unwrap().clone();
+    save_print_profile_to_disk(&app, &profile)?;
+
     Ok(ApiResponse {
         success: true,
         data: None,
@@ -923,13 +988,24 @@ pub async fn set_selected_printer(
 #[tauri::command]
 pub async fn get_selected_printer(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
-    Ok(state.selected_printer.lock().unwrap().clone())
+    let current = state.selected_printer.lock().unwrap().clone();
+    if !current.is_empty() {
+        return Ok(current);
+    }
+
+    let profile = load_print_profile_from_disk(&app);
+    if !profile.selected_printer.is_empty() {
+        *state.selected_printer.lock().unwrap() = profile.selected_printer.clone();
+    }
+    Ok(profile.selected_printer)
 }
 
 #[tauri::command]
 pub async fn set_paper_config(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     orientation: String,
     scale: f64,
     vertical: f64,
@@ -945,6 +1021,12 @@ pub async fn set_paper_config(
     } else {
         *state.paper_config_portrait.lock().unwrap() = config;
     }
+
+    let mut profile = load_print_profile_from_disk(&app);
+    profile.paper_config_portrait = state.paper_config_portrait.lock().unwrap().clone();
+    profile.paper_config_landscape = state.paper_config_landscape.lock().unwrap().clone();
+    save_print_profile_to_disk(&app, &profile)?;
+
     Ok(ApiResponse {
         success: true,
         data: None,
@@ -955,14 +1037,53 @@ pub async fn set_paper_config(
 #[tauri::command]
 pub async fn get_paper_config(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     orientation: String,
 ) -> Result<Value, String> {
+    {
+        let portrait_is_default = {
+            let portrait = state.paper_config_portrait.lock().unwrap();
+            portrait.scale == 100.0 && portrait.vertical == 0.0 && portrait.horizontal == 0.0
+        };
+
+        let landscape_is_default = {
+            let landscape = state.paper_config_landscape.lock().unwrap();
+            landscape.scale == 100.0
+                && landscape.vertical == 0.0
+                && landscape.horizontal == 0.0
+        };
+
+        if portrait_is_default && landscape_is_default {
+            let profile = load_print_profile_from_disk(&app);
+            *state.paper_config_portrait.lock().unwrap() = profile.paper_config_portrait.clone();
+            *state.paper_config_landscape.lock().unwrap() = profile.paper_config_landscape.clone();
+        }
+    }
+
     let config = if orientation == "landscape" {
         state.paper_config_landscape.lock().unwrap().clone()
     } else {
         state.paper_config_portrait.lock().unwrap().clone()
     };
     serde_json::to_value(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_print_profile(
+    app: tauri::AppHandle,
+    profile: PersistedPrintProfile,
+) -> Result<ApiResponse, String> {
+    save_print_profile_to_disk(&app, &profile)?;
+    Ok(ApiResponse {
+        success: true,
+        data: None,
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn load_print_profile(app: tauri::AppHandle) -> Result<PersistedPrintProfile, String> {
+    Ok(load_print_profile_from_disk(&app))
 }
 
 /// โหลดรูปจาก URL ทาง Rust (ไม่มี CORS) แล้วบันทึกเป็นไฟล์ชั่วคราว สำหรับปริ้นย้อนหลัง
