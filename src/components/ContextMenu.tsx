@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import CameraConfigModal from "./CameraConfigModal";
 import PrinterConfigModal from "./PrinterConfigModal";
 import PaperPositionModal from "./PaperPositionModal";
+import { clearPaperConfigs } from "../utils/paperStore";
 import {
   DEFAULT_CLOSE_APP_PIN,
   DEFAULT_MENU_PIN,
@@ -97,7 +98,7 @@ export default function ContextMenu({
     setPrinterStatus(printer || "ยังไม่ได้เลือก");
   }, [open]);
 
-  const handleFormatReset = () => {
+  const handleFormatReset = async () => {
     // Clear all config from localStorage
     localStorage.removeItem("machineId");
     localStorage.removeItem("machinePort");
@@ -107,8 +108,8 @@ export default function ContextMenu({
     localStorage.removeItem("selectedCameraName");
     localStorage.removeItem("selectedPrinter");
     localStorage.removeItem("paperConfig");
-    localStorage.removeItem("paperConfigPortrait");
-    localStorage.removeItem("paperConfigLandscape");
+    // Clear paper config from persistent store
+    await clearPaperConfigs().catch(() => {});
 
     onFormatReset();
     onClose();

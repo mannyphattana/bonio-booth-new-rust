@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { setPrinting as setPrintingState } from "../utils/printingState";
+import { loadPaperConfigs, savePaperConfigs, DEFAULT_PAPER_CONFIG } from "../utils/paperStore";
 
 // ✅ นำเข้ารูปภาพทั้ง 4 แบบ จากโฟลเดอร์ assets
 import img4x6Port from "../assets/print_4x6_port.png";
@@ -8,27 +9,17 @@ import img2x6Port from "../assets/print_2x6_port.png";
 import img6x4Land from "../assets/print_6x4_land.png";
 import img6x2Land from "../assets/print_6x2_land.png";
 
-interface PaperConfig {
-  scale: number;
-  vertical: number;
-  horizontal: number;
-}
+import type { PaperConfig } from "../utils/paperStore";
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-const DEFAULT_CONFIG: PaperConfig = {
-  scale: 100,
-  vertical: 0,
-  horizontal: 0,
-};
-
 export default function PaperPositionModal({ open, onClose }: Props) {
   const [tab, setTab] = useState<"portrait" | "landscape">("portrait");
-  const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
-  const [landscapeConfig, setLandscapeConfig] = useState<PaperConfig>({ ...DEFAULT_CONFIG });
+  const [portraitConfig, setPortraitConfig] = useState<PaperConfig>({ ...DEFAULT_PAPER_CONFIG });
+  const [landscapeConfig, setLandscapeConfig] = useState<PaperConfig>({ ...DEFAULT_PAPER_CONFIG });
   const [portraitPaperSize, setPortraitPaperSize] = useState<"2x6" | "4x6">("4x6");
   const [landscapePaperSize, setLandscapePaperSize] = useState<"6x2" | "6x4">("6x4");
   const [saving, setSaving] = useState(false);
@@ -40,21 +31,17 @@ export default function PaperPositionModal({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    try {
-      const savedPortrait = localStorage.getItem("paperConfigPortrait");
-      if (savedPortrait) setPortraitConfig(JSON.parse(savedPortrait));
-      else setPortraitConfig({ ...DEFAULT_CONFIG });
-
-      const savedLandscape = localStorage.getItem("paperConfigLandscape");
-      if (savedLandscape) setLandscapeConfig(JSON.parse(savedLandscape));
-      else setLandscapeConfig({ ...DEFAULT_CONFIG });
-
-      setPortraitPaperSize((localStorage.getItem("paperSizePortrait") as "2x6" | "4x6") || "4x6");
-      setLandscapePaperSize((localStorage.getItem("paperSizeLandscape") as "6x2" | "6x4") || "6x4");
-    } catch {
-      setPortraitConfig({ ...DEFAULT_CONFIG });
-      setLandscapeConfig({ ...DEFAULT_CONFIG });
-    }
+    loadPaperConfigs()
+      .then(({ portrait, landscape, portraitSize, landscapeSize }) => {
+        setPortraitConfig(portrait);
+        setLandscapeConfig(landscape);
+        setPortraitPaperSize(portraitSize);
+        setLandscapePaperSize(landscapeSize);
+      })
+      .catch(() => {
+        setPortraitConfig({ ...DEFAULT_PAPER_CONFIG });
+        setLandscapeConfig({ ...DEFAULT_PAPER_CONFIG });
+      });
     setSavedMessage("");
   }, [open]);
 
@@ -74,10 +61,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         horizontal: landscapeConfig.horizontal,
       });
 
-      localStorage.setItem("paperConfigPortrait", JSON.stringify(portraitConfig));
-      localStorage.setItem("paperConfigLandscape", JSON.stringify(landscapeConfig));
-      localStorage.setItem("paperSizePortrait", portraitPaperSize);
-      localStorage.setItem("paperSizeLandscape", landscapePaperSize);
+      await savePaperConfigs(portraitConfig, landscapeConfig, portraitPaperSize, landscapePaperSize);
 
       setSavedMessage("✅ บันทึกสำเร็จ!");
       setTimeout(() => setSavedMessage(""), 2000);
@@ -130,7 +114,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
   }, [currentConfig, tab, portraitPaperSize, landscapePaperSize]);
 
   const handleReset = () => {
-    setCurrentConfig({ ...DEFAULT_CONFIG });
+    setCurrentConfig({ ...DEFAULT_PAPER_CONFIG });
   };
 
   const handleShowPaperSizes = async () => {

@@ -255,7 +255,7 @@ function App() {
     onMaintenanceNeeded: handleMaintenanceNeeded,
   });
 
-  useAutoUpdate({ enabled: isVerified, isOnHomePage });
+  useAutoUpdate({ enabled: isVerified, isOnHomePage, scheduleHour: 4 });
 
   const handleMachineDataRefreshed = useCallback(
     (data: any) => {

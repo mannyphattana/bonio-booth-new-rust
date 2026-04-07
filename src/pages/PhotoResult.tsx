@@ -7,6 +7,7 @@ import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { setPrinting } from "../utils/printingState";
+import { getPaperConfigForPrint } from "../utils/paperStore";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 
@@ -456,16 +457,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         let verticalOffset = 0;
         let horizontalOffset = 0;
         try {
-          const key = isLandscape
-            ? "paperConfigLandscape"
-            : "paperConfigPortrait";
-          const saved = localStorage.getItem(key);
-          if (saved) {
-            const config = JSON.parse(saved);
-            scale = config.scale ?? 100;
-            verticalOffset = config.vertical ?? 0;
-            horizontalOffset = config.horizontal ?? 0;
-          }
+          const config = await getPaperConfigForPrint(isLandscape);
+          scale = config.scale;
+          verticalOffset = config.vertical;
+          horizontalOffset = config.horizontal;
         } catch {}
 
         let printerName = localStorage.getItem("selectedPrinter") || "";
