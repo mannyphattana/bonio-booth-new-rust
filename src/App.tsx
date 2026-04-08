@@ -104,6 +104,8 @@ function App() {
   >(null);
   const [lineUrl, setLineUrl] = useState<string>("");
   
+  const maintenanceFromBackendRef = useRef(false); // Ref เพื่อให้ callback ที่มี deps:[] อ่านค่าล่าสุดได้
+
   const [isOnHomePage, setIsOnHomePage] = useState(true);
   const isOnHomePageRef = useRef(true); // 🚨 Ref สำหรับใช้เช็คสถานะแบบเรียลไทม์ ป้องกันค่าไม่อัปเดต
   const [pendingPaperOut, setPendingPaperOut] = useState(false);
@@ -219,6 +221,7 @@ function App() {
   const handleMaintenanceMode = useCallback((enabled: boolean) => {
     setShowMaintenance(enabled);
     setMaintenanceFromBackend(enabled);
+    maintenanceFromBackendRef.current = enabled;
     if (enabled) setMaintenanceConfig(null); 
   }, []);
 
@@ -270,8 +273,18 @@ function App() {
         if (newMaintenanceMode) {
           setShowMaintenance(true);
           setMaintenanceFromBackend(true);
+          maintenanceFromBackendRef.current = true;
           setMaintenanceConfig(null);
-        } else if (newPaperLevel === 0) {
+        } else {
+          // 🔧 FIX: ถ้า backend ปิด maintenance แล้ว และเปิดอยู่จาก backend ให้ปิด overlay
+          if (maintenanceFromBackendRef.current) {
+            setShowMaintenance(false);
+            setMaintenanceFromBackend(false);
+            maintenanceFromBackendRef.current = false;
+            setMaintenanceConfig(null);
+          }
+        }
+        if (!newMaintenanceMode && newPaperLevel === 0) {
           // 🚨 กันเหนียว: เช็คว่าอยู่หน้าแรกจริงๆ ไหม
           if (isOnHomePageRef.current) {
             setShowMaintenance(true);
