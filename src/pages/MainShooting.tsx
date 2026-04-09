@@ -523,7 +523,15 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           await new Promise((r) => setTimeout(r, 800)); 
           
           if (warmupRecorder.state !== "inactive") {
-            warmupRecorder.stop();
+            // 🚨 ต้อง await ให้ warmup recorder หยุดจริงก่อน
+            // ไม่งั้น encoder ยัง draining อยู่ขณะที่ capture แรกเริ่ม
+            // → ทำให้ blob ช็อตแรกได้แค่ EBML header (110 bytes)
+            await new Promise<void>((resolve) => {
+              warmupRecorder.onstop = () => resolve();
+              warmupRecorder.stop();
+            });
+            // รอให้ encoder flush และ reset ก่อนเริ่ม capture จริง
+            await new Promise((r) => setTimeout(r, 300));
           }
         } catch (e) {
           console.error("Warmup failed", e);
