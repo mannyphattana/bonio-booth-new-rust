@@ -259,11 +259,11 @@ pub fn run() {
             canon::canon_initialize,
             canon::canon_terminate,
             canon::canon_is_initialized,
+            canon::canon_is_connected,
             canon::canon_get_camera_list,
             canon::canon_connect,
             canon::canon_open_session,
             canon::canon_close_session,
-            canon::canon_is_connected,
             canon::canon_take_picture,
             canon::canon_send_shutter,
             canon::canon_get_capture_result,
@@ -378,11 +378,16 @@ pub fn run() {
                                 sse_client.lock().unwrap().destroy();
                             }
 
-                            // Step 3: Small delay for TCP FIN
+                            // Step 3: Canon EDSDK teardown (stop LV, close session, terminate)
+                            let _ = canon::canon_stop_live_view();
+                            let _ = canon::canon_close_session();
+                            let _ = canon::canon_terminate();
+
+                            // Step 4: Small delay for TCP FIN
                             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         });
 
-                        // Step 4: Exit
+                        // Step 5: Exit
                         app_handle.exit(0);
                     });
                 }

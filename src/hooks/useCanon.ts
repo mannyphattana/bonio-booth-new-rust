@@ -521,15 +521,14 @@ export function useCanon() {
     });
   }, [stopLiveViewPolling]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — only stop live view; session and SDK stay alive
+  // for the lifetime of the app (terminate happens on CloseRequested in lib.rs)
   useEffect(() => {
     return () => {
       isCleanedUpRef.current = true;
       if (liveViewIntervalRef.current) clearInterval(liveViewIntervalRef.current);
-      // Best-effort async cleanup
+      // Best-effort: stop live view only — do NOT close session or terminate SDK
       invoke("canon_stop_live_view").catch(() => {});
-      invoke("canon_close_session").catch(() => {});
-      invoke("canon_terminate").catch(() => {});
     };
   }, []);
 

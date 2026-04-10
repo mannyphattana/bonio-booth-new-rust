@@ -229,27 +229,40 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   };
 
   const initCanon = async () => {
-    console.log("[Canon] Initializing SDK...");
-    const sdkOk = await canonCamera.initialize();
-    if (!sdkOk) {
-      setCameraError("Canon SDK initialization failed");
-      return;
+    // Check if the EDSDK session is already open from a previous visit to this page.
+    // If so, skip initialize + connect and jump straight to starting live view.
+    // This mirrors how DSLRBooth/LumaBooth work: initialize once, reuse the session.
+    const alreadyInitialized: boolean = await invoke("canon_is_initialized");
+    const alreadyConnected: boolean = await invoke("canon_is_connected");
+
+    if (!alreadyInitialized) {
+      console.log("[Canon] Initializing SDK...");
+      const sdkOk = await canonCamera.initialize();
+      if (!sdkOk) {
+        setCameraError("Canon SDK initialization failed");
+        return;
+      }
+    } else {
+      console.log("[Canon] SDK already initialized, skipping.");
     }
 
-    console.log("[Canon] Connecting to camera...");
-    let connOk = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      console.log(`[Canon] Connect attempt ${attempt}/3...`);
-      connOk = await canonCamera.connect(0);
-      if (connOk) break;
-      await new Promise((r) => setTimeout(r, 500));
+    if (!alreadyConnected) {
+      console.log("[Canon] Connecting to camera...");
+      let connOk = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        console.log(`[Canon] Connect attempt ${attempt}/3...`);
+        connOk = await canonCamera.connect(0);
+        if (connOk) break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!connOk) {
+        setCameraError("Cannot connect to Canon camera");
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    } else {
+      console.log("[Canon] Session already open, skipping connect.");
     }
-    if (!connOk) {
-      setCameraError("Cannot connect to Canon camera");
-      return;
-    }
-
-    await new Promise((r) => setTimeout(r, 300));
 
     let lvOk = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -259,7 +272,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       await new Promise((r) => setTimeout(r, attempt * 500));
     }
     if (!lvOk) {
-      await canonCamera.cleanup();
+      // Do not tear down the session — just report the error.
+      // The session stays alive so the next attempt doesn't need to reconnect.
       setCameraError("Cannot start Canon live view");
       return;
     }
@@ -354,7 +368,10 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const stopCamera = () => {
     if (canonDrawLoopRef.current) cancelAnimationFrame(canonDrawLoopRef.current);
     if (cameraTypeRef.current === "canon") {
-      canonCamera.cleanup();
+      // Only stop live view — keep EDSDK session alive for reuse.
+      // Full teardown (close session + terminate) happens at app exit via
+      // the CloseRequested handler in lib.rs.
+      canonCamera.stopLiveView();
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
