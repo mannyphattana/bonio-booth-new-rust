@@ -22,6 +22,21 @@ const CAPTURE_MAX_DIMENSION: u32 = 3600;
 /// JPEG quality for re-encoded captures (1–100).
 const CAPTURE_JPEG_QUALITY: u8 = 95;
 
+/// Number of retries when the camera returns EDS_ERR_DEVICE_BUSY during
+/// EdsOpenSession (camera may still be settling after power-on or session close).
+const DEVICE_BUSY_RETRIES_OPEN_SESSION: u32 = 5;
+/// Delay between EdsOpenSession retries (ms).
+const DEVICE_BUSY_DELAY_OPEN_SESSION_MS: u64 = 500;
+
+/// Number of retries when the camera returns EDS_ERR_DEVICE_BUSY while
+/// starting live view or issuing a shutter/TakePicture command.
+const DEVICE_BUSY_RETRIES_COMMAND: u32 = 3;
+/// Delay between live view / shutter command retries (ms).
+const DEVICE_BUSY_DELAY_COMMAND_MS: u64 = 200;
+/// Delay between live view start retries (ms) — slightly longer than shutter
+/// because the camera may still be flushing the session-open response.
+const DEVICE_BUSY_DELAY_LIVE_VIEW_MS: u64 = 300;
+
 #[cfg(target_os = "windows")]
 use crate::edsdk_sys::dynamic::*;
 #[cfg(target_os = "windows")]
@@ -739,7 +754,21 @@ pub fn canon_open_session() -> Result<bool, String> {
             .ok_or("No camera connected")?;
 
         unsafe {
-            let error = EdsOpenSession(camera_ref);
+            // Retry EdsOpenSession on EDS_ERR_DEVICE_BUSY — the camera may still be
+            // settling after a previous session close or power-on.
+            let mut error = EDS_ERR_OK;
+            for attempt in 0..DEVICE_BUSY_RETRIES_OPEN_SESSION {
+                error = EdsOpenSession(camera_ref);
+                if error != EDS_ERR_DEVICE_BUSY {
+                    break;
+                }
+                warn!(
+                    "[Canon] EdsOpenSession: device busy (attempt {}), retrying in {} ms...",
+                    attempt + 1,
+                    DEVICE_BUSY_DELAY_OPEN_SESSION_MS,
+                );
+                std::thread::sleep(std::time::Duration::from_millis(DEVICE_BUSY_DELAY_OPEN_SESSION_MS));
+            }
             check_error(error)?;
 
             // Set save target to host
@@ -987,8 +1016,23 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
 
         info!("[Canon] Sending TakePicture command...");
 
-        // Send take picture command
-        let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+        // Send take picture command — retry on EDS_ERR_DEVICE_BUSY (camera may still
+        // be processing the live view stop or a previous command).
+        let mut take_error = EDS_ERR_OK;
+        unsafe {
+            for attempt in 0..DEVICE_BUSY_RETRIES_COMMAND {
+                take_error = EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0);
+                if take_error != EDS_ERR_DEVICE_BUSY {
+                    break;
+                }
+                warn!(
+                    "[Canon] TakePicture: device busy (attempt {}), retrying in {} ms...",
+                    attempt + 1,
+                    DEVICE_BUSY_DELAY_COMMAND_MS,
+                );
+                std::thread::sleep(std::time::Duration::from_millis(DEVICE_BUSY_DELAY_COMMAND_MS));
+            }
+        }
 
         if take_error != EDS_ERR_OK {
             error!("[Canon] TakePicture command failed: {}", error_to_string(take_error));
@@ -1186,7 +1230,22 @@ pub fn canon_send_shutter() -> Result<CaptureResult, String> {
             let _ = EdsSetCapacity(camera_ref, capacity);
         }
 
-        let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+        // Retry on EDS_ERR_DEVICE_BUSY
+        let mut take_error = EDS_ERR_OK;
+        unsafe {
+            for attempt in 0..DEVICE_BUSY_RETRIES_COMMAND {
+                take_error = EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0);
+                if take_error != EDS_ERR_DEVICE_BUSY {
+                    break;
+                }
+                warn!(
+                    "[Canon] Shutter: device busy (attempt {}), retrying in {} ms...",
+                    attempt + 1,
+                    DEVICE_BUSY_DELAY_COMMAND_MS,
+                );
+                std::thread::sleep(std::time::Duration::from_millis(DEVICE_BUSY_DELAY_COMMAND_MS));
+            }
+        }
 
         if take_error != EDS_ERR_OK {
             return Ok(CaptureResult {
@@ -1346,13 +1405,27 @@ pub fn canon_start_live_view() -> Result<bool, String> {
 
         unsafe {
             let evf_output: EdsUInt32 = kEdsEvfOutputDevice_PC;
-            let error = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_Evf_OutputDevice,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &evf_output as *const _ as *const c_void,
-            );
+            // Retry on EDS_ERR_DEVICE_BUSY — the camera may still be processing
+            // the previous command (e.g., session open) when live view is requested.
+            let mut error = EDS_ERR_OK;
+            for attempt in 0..DEVICE_BUSY_RETRIES_COMMAND {
+                error = EdsSetPropertyData(
+                    camera_ref,
+                    kEdsPropID_Evf_OutputDevice,
+                    0,
+                    std::mem::size_of::<EdsUInt32>() as u32,
+                    &evf_output as *const _ as *const c_void,
+                );
+                if error != EDS_ERR_DEVICE_BUSY {
+                    break;
+                }
+                warn!(
+                    "[Canon] Start live view: device busy (attempt {}), retrying in {} ms...",
+                    attempt + 1,
+                    DEVICE_BUSY_DELAY_LIVE_VIEW_MS,
+                );
+                std::thread::sleep(std::time::Duration::from_millis(DEVICE_BUSY_DELAY_LIVE_VIEW_MS));
+            }
             check_error(error)?;
         }
 

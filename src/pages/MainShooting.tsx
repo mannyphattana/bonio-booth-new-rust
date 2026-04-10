@@ -237,7 +237,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }
 
     console.log("[Canon] Connecting to camera...");
-    const connOk = await canonCamera.connect(0);
+    let connOk = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[Canon] Connect attempt ${attempt}/3...`);
+      connOk = await canonCamera.connect(0);
+      if (connOk) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
     if (!connOk) {
       setCameraError("Cannot connect to Canon camera");
       return;
