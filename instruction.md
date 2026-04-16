@@ -1,5 +1,5 @@
 ช่วย Init project rust + react tauri ให้หน่อย โดยจะเป็น project photobooth ชื่อ bonio-booth-new-rust โดยให้ทำตามคำแนะนำนี้
-0. เข้าโปรแกรมครั้งแรกต้องให้ส่ง machineId เพื่อ verify machine ครับ คุณสามารถดู api docs ได้ที่ https://api-booth-test.boniolabs.com/api/docs#/
+0. เข้าโปรแกรมครั้งแรกต้องให้ส่ง machineId เพื่อ verify machine ครับ คุณสามารถดู api docs ได้ที่ https://api-booth.boniolabs.com/api/docs#/
     - ดูในส่วนของ machines-public ให้ยิง verify ก่อน verify เสร็จสิ้นให้ยิง init ต่อ
 1. มีหน้า home ให้คลิกตรงไหนก็ได้เพื่อเริ่มต้นโดยที่ ดูจากข้อมูลจาก API docs ส่วนของ machines-public theme
     {
