@@ -8,16 +8,9 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
 
-const FOCUS_ASSIST_STORAGE_KEY = "focusAssistEnabled";
-const FOCUS_ASSIST_MIN_SHARPNESS = 28;
-const FOCUS_ASSIST_CONSECUTIVE_PASS = 2;
-const FOCUS_ASSIST_MAX_WAIT_MS = 2800;
-const FOCUS_ASSIST_STEP_MS = 100;
-const FOCUS_ASSIST_SETTLE_MS = 240;
 const CANON_VIDEO_BITRATE = 14_000_000;
 const WEBCAM_VIDEO_BITRATE = 8_000_000;
 const CANON_MIN_COUNTDOWN_SECONDS = 3;
-const CANON_FINAL_FOCUS_SETTLE_MS = 180;
 
 function CropOverlay({
   slotWidth,
@@ -184,7 +177,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     height: 600,
   });
   const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
-  const [focusAssistMessage, setFocusAssistMessage] = useState("");
   useIdleTimeout();
 
   useEffect(() => {
@@ -365,99 +357,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       streamRef.current = null;
     }
   };
-
-  const getFocusAssistEnabled = useCallback(() => {
-    return localStorage.getItem(FOCUS_ASSIST_STORAGE_KEY) === "true";
-  }, []);
-
-  const estimateCanonSharpness = useCallback(async (frameDataUrl: string): Promise<number> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const w = 120;
-        const h = 90;
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        if (!ctx) {
-          resolve(0);
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, w, h);
-        const { data } = ctx.getImageData(0, 0, w, h);
-
-        let edgeSum = 0;
-        let sampleCount = 0;
-        for (let y = 1; y < h - 1; y += 2) {
-          for (let x = 1; x < w - 1; x += 2) {
-            const i = (y * w + x) * 4;
-            const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-            const grayX = (data[i + 4] + data[i + 5] + data[i + 6]) / 3;
-            const grayY = (data[i + w * 4] + data[i + w * 4 + 1] + data[i + w * 4 + 2]) / 3;
-            edgeSum += Math.abs(gray - grayX) + Math.abs(gray - grayY);
-            sampleCount++;
-          }
-        }
-
-        resolve(sampleCount > 0 ? edgeSum / sampleCount : 0);
-      };
-      img.onerror = () => resolve(0);
-      img.src = frameDataUrl;
-    });
-  }, []);
-
-  const waitForFocusAssist = useCallback(async () => {
-    const enabled = getFocusAssistEnabled();
-    if (cameraTypeRef.current !== "canon" || !enabled) {
-      setFocusAssistMessage("");
-      return;
-    }
-
-    setFocusAssistMessage("กำลังตรวจความชัด...");
-    let elapsed = 0;
-    let bestSharpness = 0;
-    let consecutivePass = 0;
-
-    while (elapsed < FOCUS_ASSIST_MAX_WAIT_MS) {
-      const frame = canonCamera.getLatestFrame();
-      if (frame) {
-        const sharpness = await estimateCanonSharpness(frame);
-        if (sharpness > bestSharpness) {
-          bestSharpness = sharpness;
-        }
-
-        setFocusAssistMessage(
-          `กำลังตรวจความชัด... ${sharpness.toFixed(1)}/${FOCUS_ASSIST_MIN_SHARPNESS}`
-        );
-
-        if (sharpness >= FOCUS_ASSIST_MIN_SHARPNESS) {
-          consecutivePass += 1;
-        } else {
-          consecutivePass = 0;
-        }
-
-        if (consecutivePass >= FOCUS_ASSIST_CONSECUTIVE_PASS) {
-          setFocusAssistMessage("โฟกัสพร้อม กำลังถ่าย...");
-          await new Promise((r) => setTimeout(r, FOCUS_ASSIST_SETTLE_MS));
-          setFocusAssistMessage("");
-          return;
-        }
-      }
-
-      await new Promise((r) => setTimeout(r, FOCUS_ASSIST_STEP_MS));
-      elapsed += FOCUS_ASSIST_STEP_MS;
-    }
-
-    setFocusAssistMessage("");
-    logError(
-      "canon_focus_assist_soft_fail",
-      `[FocusAssist] low sharpness before capture: ${bestSharpness.toFixed(2)}`,
-      undefined,
-      "warning"
-    );
-  }, [canonCamera, estimateCanonSharpness, getFocusAssistEnabled]);
 
   const getRecordingProfile = useCallback(() => {
     const preferredMimeTypes = cameraTypeRef.current === "canon"
@@ -700,14 +599,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     for (let i = 0; i < totalCaptures; i++) {
       console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
 
-      const focusAssistEnabled = getFocusAssistEnabled();
-      if (cameraTypeRef.current === "canon" && focusAssistEnabled) {
-        setFocusAssistMessage("กำลังปรับโฟกัสก่อนนับถอยหลัง...");
-        await canonCamera.preFocusBeforeShot();
-      }
-
-      await waitForFocusAssist();
-      
       isRecordingRef.current = false;
       setIsRecording(false);
       setPhase("countdown");
@@ -748,12 +639,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       // 👇👇👇 🚨 จุดเปลี่ยนสำคัญ: เว้นระยะให้ CPU หายใจ 100ms เพื่อแพ็คไฟล์เฟรมสุดท้ายให้เสร็จสมบูรณ์ ก่อนกล้องจะดึงพลังไปถ่ายรูป
       await new Promise((r) => setTimeout(r, 100));
       // 👆👆👆
-
-      // Final short pre-focus right before shutter for Canon
-      if (cameraTypeRef.current === "canon" && getFocusAssistEnabled()) {
-        await canonCamera.preFocusBeforeShot();
-        await new Promise((r) => setTimeout(r, CANON_FINAL_FOCUS_SETTLE_MS));
-      }
 
       // 🚨 สั่งถ่ายภาพ
       let capturePromise: Promise<string>;
@@ -895,8 +780,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     saveVideoToTemp,
     navigate,
     state,
-    waitForFocusAssist,
-    getFocusAssistEnabled
   ]);
 
   useEffect(() => {
@@ -1206,33 +1089,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     }}
                   >
                     กำลังบันทึกภาพ...
-                  </div>
-                </div>
-              )}
-
-              {focusAssistMessage && (
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    bottom: 16,
-                    display: "flex",
-                    justifyContent: "center",
-                    zIndex: 26,
-                  }}
-                >
-                  <div
-                    style={{
-                      background: "rgba(0,0,0,0.6)",
-                      color: "#fff",
-                      padding: "8px 14px",
-                      borderRadius: 12,
-                      fontSize: 14,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {focusAssistMessage}
                   </div>
                 </div>
               )}

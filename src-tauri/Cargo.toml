@@ -1,6 +1,6 @@
 [package]
 name = "bonio-booth"
-version = "2.3.19"
+version = "2.3.12"
 description = "Bonio Photobooth - Rust + React Tauri"
 authors = ["BonioLabs"]
 edition = "2021"

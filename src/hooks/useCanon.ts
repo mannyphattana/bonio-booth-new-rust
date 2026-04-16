@@ -162,26 +162,6 @@ export function useCanon() {
   }, [stopLiveViewPolling]);
 
   /**
-   * Best-effort AF assist before countdown.
-   * Runs a short SDK pre-focus pulse, then resumes live view polling.
-   */
-  const preFocusBeforeShot = useCallback(async (): Promise<boolean> => {
-    try {
-      stopLiveViewPolling();
-      const focused = await invokeWithTimeout<boolean>("canon_focus_assist", 1500);
-      if (!isCleanedUpRef.current) {
-        startLiveViewPolling();
-      }
-      return !!focused;
-    } catch {
-      if (!isCleanedUpRef.current) {
-        startLiveViewPolling();
-      }
-      return false;
-    }
-  }, [invokeWithTimeout, startLiveViewPolling, stopLiveViewPolling]);
-
-  /**
    * Take a picture — returns base64 JPEG data URL.
    *
    * Flow:
@@ -569,7 +549,6 @@ export function useCanon() {
     connect,
     startLiveView,
     stopLiveView,
-    preFocusBeforeShot,
     takePicture,
     getLatestFrame,
     startFrameRecording,

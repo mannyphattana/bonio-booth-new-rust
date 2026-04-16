@@ -277,7 +277,6 @@ pub fn run() {
             canon::canon_is_connected,
             canon::canon_take_picture,
             canon::canon_send_shutter,
-            canon::canon_focus_assist,
             canon::canon_get_capture_result,
             canon::canon_process_events,
             canon::canon_start_live_view,
