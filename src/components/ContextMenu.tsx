@@ -15,6 +15,8 @@ import {
   setMenuPin,
 } from "../config/appConfig";
 
+const FOCUS_ASSIST_STORAGE_KEY = "focusAssistEnabled";
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -57,6 +59,7 @@ export default function ContextMenu({
   const [cameraStatus, setCameraStatus] = useState("");
   const [printerStatus, setPrinterStatus] = useState("");
   const [appVersion, setAppVersion] = useState("");
+  const [focusAssistEnabled, setFocusAssistEnabled] = useState(false);
 
   // Load status summaries when menu opens
   useEffect(() => {
@@ -79,6 +82,7 @@ export default function ContextMenu({
     setPinChangeSuccess("");
     setMenuPinState(getMenuPin());
     setCloseAppPinState(getCloseAppPin());
+    setFocusAssistEnabled(localStorage.getItem(FOCUS_ASSIST_STORAGE_KEY) === "true");
 
     // Get app version
     getVersion().then(v => setAppVersion(v)).catch(console.error);
@@ -121,6 +125,12 @@ export default function ContextMenu({
     } catch {
       window.close();
     }
+  };
+
+  const toggleFocusAssist = () => {
+    const next = !focusAssistEnabled;
+    setFocusAssistEnabled(next);
+    localStorage.setItem(FOCUS_ASSIST_STORAGE_KEY, String(next));
   };
 
   // 🚨 ฟังก์ชันจัดการปุ่มกดรหัสสำหรับ "เข้าเมนู (7053)"
@@ -555,6 +565,31 @@ export default function ContextMenu({
             </div>
           </div>
           <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+        </button>
+
+        <button
+          className="context-menu-item context-menu-config-item"
+          onClick={toggleFocusAssist}
+        >
+          <span style={{ fontSize: 24 }}>🎯</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>Focus Assist (ทดสอบ)</div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
+              {focusAssistEnabled ? "เปิดอยู่" : "ปิดอยู่"}
+            </div>
+          </div>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: focusAssistEnabled ? "#4cd964" : "#888",
+              background: "#1e1e1e",
+              borderRadius: 10,
+              padding: "2px 8px",
+            }}
+          >
+            {focusAssistEnabled ? "ON" : "OFF"}
+          </span>
         </button>
 
         <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />

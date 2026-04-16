@@ -8,6 +8,17 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
 
+const FOCUS_ASSIST_STORAGE_KEY = "focusAssistEnabled";
+const FOCUS_ASSIST_MIN_SHARPNESS = 28;
+const FOCUS_ASSIST_CONSECUTIVE_PASS = 2;
+const FOCUS_ASSIST_MAX_WAIT_MS = 2800;
+const FOCUS_ASSIST_STEP_MS = 100;
+const FOCUS_ASSIST_SETTLE_MS = 240;
+const CANON_VIDEO_BITRATE = 14_000_000;
+const WEBCAM_VIDEO_BITRATE = 8_000_000;
+const CANON_MIN_COUNTDOWN_SECONDS = 3;
+const CANON_FINAL_FOCUS_SETTLE_MS = 180;
+
 function CropOverlay({
   slotWidth,
   slotHeight,
@@ -173,6 +184,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     height: 600,
   });
   const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
+  const [focusAssistMessage, setFocusAssistMessage] = useState("");
   useIdleTimeout();
 
   useEffect(() => {
@@ -229,13 +241,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   };
 
   const initCanon = async () => {
-    console.log("[Canon] Initializing SDK...");
-    const sdkOk = await canonCamera.initialize();
-    if (!sdkOk) {
-      setCameraError("Canon SDK initialization failed");
-      return;
-    }
-
     console.log("[Canon] Connecting to camera...");
     const connOk = await canonCamera.connect(0);
     if (!connOk) {
@@ -264,7 +269,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       waitTime += 100;
     }
 
-    setVideoDimensions({ width: 1920, height: 1280 });
+    const liveViewW = canonLiveViewRef.current?.naturalWidth || 0;
+    const liveViewH = canonLiveViewRef.current?.naturalHeight || 0;
+    const targetW = liveViewW > 0 ? liveViewW : 1920;
+    const targetH = liveViewH > 0 ? liveViewH : 1280;
+
+    setVideoDimensions({ width: targetW, height: targetH });
     setCameraReady(true);
 
     setTimeout(() => {
@@ -274,8 +284,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       }
 
       if (canonCanvasRef.current) {
-        canonCanvasRef.current.width = 1920;
-        canonCanvasRef.current.height = 1280;
+        canonCanvasRef.current.width = targetW;
+        canonCanvasRef.current.height = targetH;
         streamRef.current = canonCanvasRef.current.captureStream(30);
         
         if (canonDrawLoopRef.current) cancelAnimationFrame(canonDrawLoopRef.current);
@@ -356,18 +366,130 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }
   };
 
+  const getFocusAssistEnabled = useCallback(() => {
+    return localStorage.getItem(FOCUS_ASSIST_STORAGE_KEY) === "true";
+  }, []);
+
+  const estimateCanonSharpness = useCallback(async (frameDataUrl: string): Promise<number> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const w = 120;
+        const h = 90;
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          resolve(0);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+
+        let edgeSum = 0;
+        let sampleCount = 0;
+        for (let y = 1; y < h - 1; y += 2) {
+          for (let x = 1; x < w - 1; x += 2) {
+            const i = (y * w + x) * 4;
+            const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            const grayX = (data[i + 4] + data[i + 5] + data[i + 6]) / 3;
+            const grayY = (data[i + w * 4] + data[i + w * 4 + 1] + data[i + w * 4 + 2]) / 3;
+            edgeSum += Math.abs(gray - grayX) + Math.abs(gray - grayY);
+            sampleCount++;
+          }
+        }
+
+        resolve(sampleCount > 0 ? edgeSum / sampleCount : 0);
+      };
+      img.onerror = () => resolve(0);
+      img.src = frameDataUrl;
+    });
+  }, []);
+
+  const waitForFocusAssist = useCallback(async () => {
+    const enabled = getFocusAssistEnabled();
+    if (cameraTypeRef.current !== "canon" || !enabled) {
+      setFocusAssistMessage("");
+      return;
+    }
+
+    setFocusAssistMessage("กำลังตรวจความชัด...");
+    let elapsed = 0;
+    let bestSharpness = 0;
+    let consecutivePass = 0;
+
+    while (elapsed < FOCUS_ASSIST_MAX_WAIT_MS) {
+      const frame = canonCamera.getLatestFrame();
+      if (frame) {
+        const sharpness = await estimateCanonSharpness(frame);
+        if (sharpness > bestSharpness) {
+          bestSharpness = sharpness;
+        }
+
+        setFocusAssistMessage(
+          `กำลังตรวจความชัด... ${sharpness.toFixed(1)}/${FOCUS_ASSIST_MIN_SHARPNESS}`
+        );
+
+        if (sharpness >= FOCUS_ASSIST_MIN_SHARPNESS) {
+          consecutivePass += 1;
+        } else {
+          consecutivePass = 0;
+        }
+
+        if (consecutivePass >= FOCUS_ASSIST_CONSECUTIVE_PASS) {
+          setFocusAssistMessage("โฟกัสพร้อม กำลังถ่าย...");
+          await new Promise((r) => setTimeout(r, FOCUS_ASSIST_SETTLE_MS));
+          setFocusAssistMessage("");
+          return;
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, FOCUS_ASSIST_STEP_MS));
+      elapsed += FOCUS_ASSIST_STEP_MS;
+    }
+
+    setFocusAssistMessage("");
+    logError(
+      "canon_focus_assist_soft_fail",
+      `[FocusAssist] low sharpness before capture: ${bestSharpness.toFixed(2)}`,
+      undefined,
+      "warning"
+    );
+  }, [canonCamera, estimateCanonSharpness, getFocusAssistEnabled]);
+
+  const getRecordingProfile = useCallback(() => {
+    const preferredMimeTypes = cameraTypeRef.current === "canon"
+      ? [
+          "video/webm;codecs=vp9",
+          "video/webm;codecs=vp8",
+          "video/webm",
+        ]
+      : [
+          "video/webm;codecs=vp8",
+          "video/webm;codecs=vp9",
+          "video/webm",
+        ];
+
+    const mimeType = preferredMimeTypes.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    const videoBitsPerSecond = cameraTypeRef.current === "canon"
+      ? CANON_VIDEO_BITRATE
+      : WEBCAM_VIDEO_BITRATE;
+
+    return { mimeType, videoBitsPerSecond };
+  }, []);
+
   // 🚨 เปลี่ยนมาใช้ MediaRecorder แบบ Native แท้ๆ ตัด RecordRTC ทิ้ง
   const startRecording = useCallback(() => {
     if (!streamRef.current || isRecordingRef.current) return;
 
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
-      ? "video/webm;codecs=vp8"
-      : "video/webm";
+    const { mimeType, videoBitsPerSecond } = getRecordingProfile();
 
     try {
       const recorder = new MediaRecorder(streamRef.current, {
         mimeType: mimeType as any,
-        videoBitsPerSecond: 5000000, // 5 Mbps ชัดและเบาพอดี
+        videoBitsPerSecond,
       });
 
       chunksRef.current = [];
@@ -384,7 +506,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     } catch (err) {
       console.error("Start recording failed:", err);
     }
-  }, []);
+  }, [getRecordingProfile]);
 
   // 🚨 เปลี่ยนการคืนค่าของ waitForVideo ให้ใช้ Native
   const waitForVideo = useCallback((): Promise<{
@@ -443,6 +565,32 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     ctx.drawImage(video, 0, 0, w, h);
     return canvas.toDataURL("image/jpeg", 0.92);
+  }, []);
+
+  const buildPhotoPreview = useCallback(async (photoDataUrl: string): Promise<string> => {
+    if (!photoDataUrl) return "";
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 420;
+        const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(photoDataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      };
+      img.onerror = () => resolve(photoDataUrl);
+      img.src = photoDataUrl;
+    });
   }, []);
 
   const saveVideoToTemp = useCallback(
@@ -513,10 +661,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       if (streamRef.current) {
         console.log("[Warm-up] อุ่นเครื่อง Video Encoder...");
         try {
+          const { mimeType, videoBitsPerSecond } = getRecordingProfile();
+
           // 🚨 ปรับบิตเรตและ Codec ตอนวอร์มให้ตรงกับการอัดจริง
           const warmupRecorder = new MediaRecorder(streamRef.current, {
-            mimeType: "video/webm;codecs=vp8",
-            videoBitsPerSecond: 5000000
+            mimeType: mimeType as any,
+            videoBitsPerSecond,
           });
           
           warmupRecorder.start();
@@ -549,13 +699,26 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     for (let i = 0; i < totalCaptures; i++) {
       console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
+
+      const focusAssistEnabled = getFocusAssistEnabled();
+      if (cameraTypeRef.current === "canon" && focusAssistEnabled) {
+        setFocusAssistMessage("กำลังปรับโฟกัสก่อนนับถอยหลัง...");
+        await canonCamera.preFocusBeforeShot();
+      }
+
+      await waitForFocusAssist();
       
       isRecordingRef.current = false;
       setIsRecording(false);
       setPhase("countdown");
 
       await new Promise<void>((resolve) => {
-        let currentCount = cameraCountdown; 
+        const effectiveCountdown =
+          cameraTypeRef.current === "canon"
+            ? Math.max(cameraCountdown, CANON_MIN_COUNTDOWN_SECONDS)
+            : cameraCountdown;
+
+        let currentCount = effectiveCountdown;
         setCountdown(currentCount);
 
         const startRecordAt = Math.min(currentCount, 3); // เริ่มอัดเมื่อเหลือ 3 วิ
@@ -586,6 +749,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       await new Promise((r) => setTimeout(r, 100));
       // 👆👆👆
 
+      // Final short pre-focus right before shutter for Canon
+      if (cameraTypeRef.current === "canon" && getFocusAssistEnabled()) {
+        await canonCamera.preFocusBeforeShot();
+        await new Promise((r) => setTimeout(r, CANON_FINAL_FOCUS_SETTLE_MS));
+      }
+
       // 🚨 สั่งถ่ายภาพ
       let capturePromise: Promise<string>;
       if (cameraTypeRef.current === "canon") {
@@ -610,6 +779,19 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         photoData = await capturePromise;
       } catch (err) {
         // fallback
+      }
+
+      if (!photoData) {
+        const fallbackFrame = canonCamera.getLatestFrame();
+        if (fallbackFrame) {
+          photoData = fallbackFrame;
+          logError(
+            "capture_photo_fallback_liveview",
+            `[Capture] shot ${i + 1}: fallback to latest live view frame`,
+            undefined,
+            "warning"
+          );
+        }
       }
 
       const recordingResult = await recordingPromise;
@@ -648,7 +830,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         cameraType: cameraTypeRef.current,
       });
 
-      const newCapture: Capture = { photo: photoData, video: videoUrl, videoPath };
+      const photoPreview = await buildPhotoPreview(photoData);
+      const newCapture: Capture = {
+        photo: photoData,
+        photoPreview,
+        video: videoUrl,
+        videoPath,
+      };
       localCaptures.push(newCapture);
       setCaptures([...localCaptures]);
       setCurrentCapture(i + 1);
@@ -698,12 +886,17 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   }, [
     totalCaptures,
     cameraCountdown,
+    canonCamera,
+    getRecordingProfile,
     startRecording,
     waitForVideo,
     takePhoto,
+    buildPhotoPreview,
     saveVideoToTemp,
     navigate,
-    state
+    state,
+    waitForFocusAssist,
+    getFocusAssistEnabled
   ]);
 
   useEffect(() => {
@@ -888,7 +1081,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     objectFit: "cover",
                     transform: "scaleX(-1)", 
                     borderRadius: 20,
-                    filter: "blur(1px)",
+                    imageRendering: "auto",
                   }}
                 />
               )}
@@ -1017,6 +1210,33 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                 </div>
               )}
 
+              {focusAssistMessage && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 16,
+                    display: "flex",
+                    justifyContent: "center",
+                    zIndex: 26,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "rgba(0,0,0,0.6)",
+                      color: "#fff",
+                      padding: "8px 14px",
+                      borderRadius: 12,
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {focusAssistMessage}
+                  </div>
+                </div>
+              )}
+
               {isRecording && (
                 <div
                   style={{
@@ -1129,8 +1349,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                 >
                   {captures[idx] ? (
                     <img
-                      src={captures[idx].photo}
+                      src={captures[idx].photoPreview || captures[idx].photo}
                       alt={`Capture ${idx + 1}`}
+                      decoding="async"
                       style={{
                         width: "100%",
                         height: "100%",

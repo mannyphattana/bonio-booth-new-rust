@@ -22,7 +22,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const state = (location.state as any) || {};
 
   const frameCaptures: Capture[] = state.frameCaptures || [];
-  const firstPhoto = frameCaptures[0]?.photo || "";
+  const firstPhoto = frameCaptures[0]?.photoPreview || frameCaptures[0]?.photo || "";
 
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
@@ -42,6 +42,10 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useIdleTimeout();
+
+  useEffect(() => {
+    setPreviewImage(firstPhoto);
+  }, [firstPhoto]);
 
   useEffect(() => {
     const resolvePaths = async () => {
@@ -70,7 +74,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
         const result: string = await invoke("apply_lut_filter_preview", {
           imageDataBase64: firstPhoto,
           lutFilePath: lutPath,
-          maxSize: 150,
+          maxSize: 180,
         });
         setFilterPreviews((prev) => ({ ...prev, [filter.id]: result }));
         previewCacheRef.current[filter.id] = result;
@@ -96,7 +100,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
           const result: string = await invoke("apply_lut_filter_preview", {
             imageDataBase64: firstPhoto,
             lutFilePath: lutPath,
-            maxSize: 800,
+            maxSize: 900,
           });
           setPreviewImage(result);
           previewCacheRef.current[`full_${filter.id}`] = result;
@@ -404,6 +408,12 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                           src={filterPreviews[filter.id] || firstPhoto}
                           alt={filter.name}
                           draggable={false}
+                          onError={(e) => {
+                            const img = e.currentTarget as HTMLImageElement;
+                            if (firstPhoto && img.src !== firstPhoto) {
+                              img.src = firstPhoto;
+                            }
+                          }}
                           style={{
                             position: "absolute",
                             top: 0,
@@ -509,6 +519,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 src={previewImage}
                 alt="Preview"
                 draggable={false}
+                onError={() => setPreviewImage(firstPhoto)}
                 style={{ 
                   display: "block", 
                   width: "auto",    

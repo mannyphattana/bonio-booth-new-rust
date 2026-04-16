@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
 
-const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+const API_BASE_URL: &str = "https://api-booth-test.boniolabs.com";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaperPositionConfig {

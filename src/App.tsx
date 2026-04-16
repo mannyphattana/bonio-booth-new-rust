@@ -76,6 +76,7 @@ export interface FrameData {
 
 export interface Capture {
   photo: string;
+  photoPreview?: string;
   video: string;
   videoPath?: string;
 }
