@@ -15,7 +15,7 @@ export interface CanonState {
  *
  * Lifecycle: initialize → connect → openSession → startLiveView → poll frames
  * Capture:   takePicture (stops LV internally, returns base64, restarts LV)
- * Cleanup:   stopLiveView → closeSession → terminate
+ * Cleanup:   stopLiveView → closeSession
  *
  * IMPORTANT — EDSDK is single-threaded COM:
  * ALL EDSDK FFI calls MUST be serialized (never two calls on different threads
@@ -48,6 +48,18 @@ export function useCanon() {
   const isRecordingRef = useRef(false);
   const recordedFramesRef = useRef<string[]>([]);
   const recordedTimestampsRef = useRef<number[]>([]);
+
+  const invokeWithTimeout = useCallback(async <T,>(
+    command: string,
+    timeoutMs = 20000
+  ): Promise<T> => {
+    return await Promise.race([
+      invoke<T>(command),
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(`${command} timeout`)), timeoutMs);
+      }),
+    ]);
+  }, []);
 
   // ----- Helper: start/stop LV frame polling -----
   // This is the ONLY polling interval.  The Rust function also calls
@@ -187,7 +199,7 @@ export function useCanon() {
 
       // 4. Take picture (Rust function blocks until image download completes,
       //    pumps EdsGetEvent internally)
-      const result = await invoke<{
+      const result = await invokeWithTimeout<{
         success: boolean;
         image_data?: string;
         error?: string;
@@ -228,7 +240,7 @@ export function useCanon() {
 
       return "";
     }
-  }, [stopLiveViewPolling, startLiveViewPolling]);
+  }, [stopLiveViewPolling, startLiveViewPolling, invokeWithTimeout]);
 
   /**
    * Take a picture immediately — no LV stop (already stopped by stopMovieRecordingFast).
@@ -252,7 +264,7 @@ export function useCanon() {
       // LV already stopped in Rust by canon_stop_movie_record_fast — skip stop_live_view + 50ms
 
       // Take picture directly (Rust pumps EdsGetEvent internally)
-      const result = await invoke<{
+      const result = await invokeWithTimeout<{
         success: boolean;
         image_data?: string;
         error?: string;
@@ -290,7 +302,7 @@ export function useCanon() {
       }
       return "";
     }
-  }, [startLiveViewPolling]);
+  }, [startLiveViewPolling, invokeWithTimeout]);
 
   /**
    * Take a photo WHILE the camera is still recording video.
@@ -316,7 +328,7 @@ export function useCanon() {
       // command handles EDSDK event pumping internally; concurrent LV
       // frame fetches will just get stale/empty frames which is fine.
 
-      const result = await invoke<{
+      const result = await invokeWithTimeout<{
         success: boolean;
         image_data?: string;
         error?: string;
@@ -357,7 +369,7 @@ export function useCanon() {
       }
       return "";
     }
-  }, [startLiveViewPolling, stopLiveViewPolling]);
+  }, [startLiveViewPolling, stopLiveViewPolling, invokeWithTimeout]);
 
   // Get the latest live view frame (instant, no async)
   const getLatestFrame = useCallback((): string => {
@@ -510,7 +522,6 @@ export function useCanon() {
 
     try { await invoke("canon_stop_live_view"); } catch { /* ignore */ }
     try { await invoke("canon_close_session"); } catch { /* ignore */ }
-    try { await invoke("canon_terminate"); } catch { /* ignore */ }
 
     setState({
       initialized: false,
@@ -529,7 +540,6 @@ export function useCanon() {
       // Best-effort async cleanup
       invoke("canon_stop_live_view").catch(() => {});
       invoke("canon_close_session").catch(() => {});
-      invoke("canon_terminate").catch(() => {});
     };
   }, []);
 

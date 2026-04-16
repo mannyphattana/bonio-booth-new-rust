@@ -8,6 +8,10 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
 
+const CANON_VIDEO_BITRATE = 14_000_000;
+const WEBCAM_VIDEO_BITRATE = 8_000_000;
+const CANON_MIN_COUNTDOWN_SECONDS = 3;
+
 function CropOverlay({
   slotWidth,
   slotHeight,
@@ -229,13 +233,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   };
 
   const initCanon = async () => {
-    console.log("[Canon] Initializing SDK...");
-    const sdkOk = await canonCamera.initialize();
-    if (!sdkOk) {
-      setCameraError("Canon SDK initialization failed");
-      return;
-    }
-
     console.log("[Canon] Connecting to camera...");
     const connOk = await canonCamera.connect(0);
     if (!connOk) {
@@ -264,7 +261,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       waitTime += 100;
     }
 
-    setVideoDimensions({ width: 1920, height: 1280 });
+    const liveViewW = canonLiveViewRef.current?.naturalWidth || 0;
+    const liveViewH = canonLiveViewRef.current?.naturalHeight || 0;
+    const targetW = liveViewW > 0 ? liveViewW : 1920;
+    const targetH = liveViewH > 0 ? liveViewH : 1280;
+
+    setVideoDimensions({ width: targetW, height: targetH });
     setCameraReady(true);
 
     setTimeout(() => {
@@ -274,8 +276,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       }
 
       if (canonCanvasRef.current) {
-        canonCanvasRef.current.width = 1920;
-        canonCanvasRef.current.height = 1280;
+        canonCanvasRef.current.width = targetW;
+        canonCanvasRef.current.height = targetH;
         streamRef.current = canonCanvasRef.current.captureStream(30);
         
         if (canonDrawLoopRef.current) cancelAnimationFrame(canonDrawLoopRef.current);
@@ -356,18 +358,37 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }
   };
 
+  const getRecordingProfile = useCallback(() => {
+    const preferredMimeTypes = cameraTypeRef.current === "canon"
+      ? [
+          "video/webm;codecs=vp9",
+          "video/webm;codecs=vp8",
+          "video/webm",
+        ]
+      : [
+          "video/webm;codecs=vp8",
+          "video/webm;codecs=vp9",
+          "video/webm",
+        ];
+
+    const mimeType = preferredMimeTypes.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+    const videoBitsPerSecond = cameraTypeRef.current === "canon"
+      ? CANON_VIDEO_BITRATE
+      : WEBCAM_VIDEO_BITRATE;
+
+    return { mimeType, videoBitsPerSecond };
+  }, []);
+
   // 🚨 เปลี่ยนมาใช้ MediaRecorder แบบ Native แท้ๆ ตัด RecordRTC ทิ้ง
   const startRecording = useCallback(() => {
     if (!streamRef.current || isRecordingRef.current) return;
 
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
-      ? "video/webm;codecs=vp8"
-      : "video/webm";
+    const { mimeType, videoBitsPerSecond } = getRecordingProfile();
 
     try {
       const recorder = new MediaRecorder(streamRef.current, {
         mimeType: mimeType as any,
-        videoBitsPerSecond: 5000000, // 5 Mbps ชัดและเบาพอดี
+        videoBitsPerSecond,
       });
 
       chunksRef.current = [];
@@ -384,7 +405,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     } catch (err) {
       console.error("Start recording failed:", err);
     }
-  }, []);
+  }, [getRecordingProfile]);
 
   // 🚨 เปลี่ยนการคืนค่าของ waitForVideo ให้ใช้ Native
   const waitForVideo = useCallback((): Promise<{
@@ -443,6 +464,32 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     ctx.drawImage(video, 0, 0, w, h);
     return canvas.toDataURL("image/jpeg", 0.92);
+  }, []);
+
+  const buildPhotoPreview = useCallback(async (photoDataUrl: string): Promise<string> => {
+    if (!photoDataUrl) return "";
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 420;
+        const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(photoDataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      };
+      img.onerror = () => resolve(photoDataUrl);
+      img.src = photoDataUrl;
+    });
   }, []);
 
   const saveVideoToTemp = useCallback(
@@ -513,10 +560,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       if (streamRef.current) {
         console.log("[Warm-up] อุ่นเครื่อง Video Encoder...");
         try {
+          const { mimeType, videoBitsPerSecond } = getRecordingProfile();
+
           // 🚨 ปรับบิตเรตและ Codec ตอนวอร์มให้ตรงกับการอัดจริง
           const warmupRecorder = new MediaRecorder(streamRef.current, {
-            mimeType: "video/webm;codecs=vp8",
-            videoBitsPerSecond: 5000000
+            mimeType: mimeType as any,
+            videoBitsPerSecond,
           });
           
           warmupRecorder.start();
@@ -549,13 +598,18 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     for (let i = 0; i < totalCaptures; i++) {
       console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
-      
+
       isRecordingRef.current = false;
       setIsRecording(false);
       setPhase("countdown");
 
       await new Promise<void>((resolve) => {
-        let currentCount = cameraCountdown; 
+        const effectiveCountdown =
+          cameraTypeRef.current === "canon"
+            ? Math.max(cameraCountdown, CANON_MIN_COUNTDOWN_SECONDS)
+            : cameraCountdown;
+
+        let currentCount = effectiveCountdown;
         setCountdown(currentCount);
 
         const startRecordAt = Math.min(currentCount, 3); // เริ่มอัดเมื่อเหลือ 3 วิ
@@ -612,6 +666,19 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         // fallback
       }
 
+      if (!photoData) {
+        const fallbackFrame = canonCamera.getLatestFrame();
+        if (fallbackFrame) {
+          photoData = fallbackFrame;
+          logError(
+            "capture_photo_fallback_liveview",
+            `[Capture] shot ${i + 1}: fallback to latest live view frame`,
+            undefined,
+            "warning"
+          );
+        }
+      }
+
       const recordingResult = await recordingPromise;
       let videoUrl = recordingResult.url;
       let videoPath = "";
@@ -648,7 +715,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         cameraType: cameraTypeRef.current,
       });
 
-      const newCapture: Capture = { photo: photoData, video: videoUrl, videoPath };
+      const photoPreview = await buildPhotoPreview(photoData);
+      const newCapture: Capture = {
+        photo: photoData,
+        photoPreview,
+        video: videoUrl,
+        videoPath,
+      };
       localCaptures.push(newCapture);
       setCaptures([...localCaptures]);
       setCurrentCapture(i + 1);
@@ -698,12 +771,15 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   }, [
     totalCaptures,
     cameraCountdown,
+    canonCamera,
+    getRecordingProfile,
     startRecording,
     waitForVideo,
     takePhoto,
+    buildPhotoPreview,
     saveVideoToTemp,
     navigate,
-    state
+    state,
   ]);
 
   useEffect(() => {
@@ -888,7 +964,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     objectFit: "cover",
                     transform: "scaleX(-1)", 
                     borderRadius: 20,
-                    filter: "blur(1px)",
+                    imageRendering: "auto",
                   }}
                 />
               )}
@@ -1129,8 +1205,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                 >
                   {captures[idx] ? (
                     <img
-                      src={captures[idx].photo}
+                      src={captures[idx].photoPreview || captures[idx].photo}
                       alt={`Capture ${idx + 1}`}
+                      decoding="async"
                       style={{
                         width: "100%",
                         height: "100%",

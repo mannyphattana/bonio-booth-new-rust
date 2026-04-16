@@ -141,6 +141,97 @@ fn check_error(error: EdsError) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn is_transient_live_view_error(error: EdsError) -> bool {
+    matches!(error, EDS_ERR_DEVICE_BUSY | EDS_ERR_OBJECT_NOTREADY)
+}
+
+#[cfg(target_os = "windows")]
+fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
+    // AF-only capture path:
+    // keep retrying AF shutter so we don't take a photo with stale/incorrect focus.
+    // This is bounded to avoid hanging forever when the scene is impossible to focus.
+    let mut last_error = EDS_ERR_TAKE_PICTURE_AF_NG;
+    for attempt in 1..=30 {
+        let af_shutter_error = unsafe {
+            EdsSendCommand(
+                camera_ref,
+                kEdsCameraCommand_PressShutterButton,
+                kEdsShutterButton_Completely as i32,
+            )
+        };
+        last_error = af_shutter_error;
+
+        if af_shutter_error == EDS_ERR_OK {
+            unsafe {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                let _ = EdsSendCommand(
+                    camera_ref,
+                    kEdsCameraCommand_PressShutterButton,
+                    kEdsShutterButton_OFF as i32,
+                );
+            }
+            return EDS_ERR_OK;
+        }
+
+        if af_shutter_error == EDS_ERR_TAKE_PICTURE_AF_NG {
+            warn!(
+                "[Canon] AF shutter returned AF_NG (attempt {}/30), retrying",
+                attempt
+            );
+            unsafe {
+                let _ = EdsSendCommand(
+                    camera_ref,
+                    kEdsCameraCommand_PressShutterButton,
+                    kEdsShutterButton_OFF as i32,
+                );
+                let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+                let _ = EdsGetEvent();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            continue;
+        }
+
+        warn!(
+            "[Canon] AF shutter error (attempt {}/30): {}",
+            attempt,
+            error_to_string(af_shutter_error)
+        );
+
+        unsafe {
+            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+            let _ = EdsGetEvent();
+            let _ = EdsSendCommand(
+                camera_ref,
+                kEdsCameraCommand_PressShutterButton,
+                kEdsShutterButton_OFF as i32,
+            );
+        }
+
+        // transient/live-view related errors retry a bit faster than AF_NG paths
+        let retry_wait_ms = if is_transient_live_view_error(af_shutter_error) {
+            120
+        } else {
+            180
+        };
+        std::thread::sleep(std::time::Duration::from_millis(retry_wait_ms));
+    }
+
+    unsafe {
+        let _ = EdsSendCommand(
+            camera_ref,
+            kEdsCameraCommand_PressShutterButton,
+            kEdsShutterButton_OFF as i32,
+        );
+    }
+
+    warn!(
+        "[Canon] AF-only shutter exhausted retries; final error: {}",
+        error_to_string(last_error)
+    );
+    last_error
+}
+
 /// Resolve EDSDK.dll path — tries multiple locations
 fn resolve_dll_path(app: &tauri::AppHandle) -> String {
     // Helper: check both "EDSDK/Dll/EDSDK.dll" (dev) and "EDSDK/EDSDK.dll" (bundled/flat)
@@ -265,6 +356,24 @@ unsafe extern "system" fn object_event_handler(
     object: EdsBaseRef,
     _context: *mut c_void,
 ) -> EdsError {
+    let guarded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> EdsError {
+    // EDSDK retains object refs for callback delivery; release once on exit.
+    struct ObjectRefGuard {
+        object: EdsBaseRef,
+    }
+
+    impl Drop for ObjectRefGuard {
+        fn drop(&mut self) {
+            if !self.object.is_null() {
+                unsafe {
+                    EdsRelease(self.object);
+                }
+            }
+        }
+    }
+
+    let _object_guard = ObjectRefGuard { object };
+
     // --- Movie recording: DirItemCreated when camera saves movie to SD card ---
     if event == kEdsObjectEvent_DirItemCreated && IS_MOVIE_RECORDING.load(Ordering::SeqCst) {
         info!("[Canon] Movie DirItemCreated event received");
@@ -464,6 +573,15 @@ unsafe extern "system" fn object_event_handler(
 
     EdsRelease(stream);
     EDS_ERR_OK
+    }));
+
+    match guarded {
+        Ok(code) => code,
+        Err(_) => {
+            error!("[Canon] object_event_handler panic recovered");
+            EDS_ERR_OK
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -472,6 +590,7 @@ unsafe extern "system" fn state_event_handler(
     _parameter: EdsUInt32,
     _context: *mut c_void,
 ) -> EdsError {
+    let guarded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> EdsError {
     if event == kEdsStateEvent_Shutdown {
         info!("[Canon] Camera shutdown/disconnect detected");
         if let Some(manager) = CAMERA_MANAGER.get() {
@@ -493,6 +612,15 @@ unsafe extern "system" fn state_event_handler(
         }
     }
     EDS_ERR_OK
+    }));
+
+    match guarded {
+        Ok(code) => code,
+        Err(_) => {
+            error!("[Canon] state_event_handler panic recovered");
+            EDS_ERR_OK
+        }
+    }
 }
 
 // =============================================================================
@@ -763,6 +891,17 @@ pub fn canon_open_session() -> Result<bool, String> {
                 &img_quality as *const _ as *const c_void,
             );
 
+            // Best-effort: prefer One-Shot AF mode in photo session for sharper stills.
+            // Not all camera bodies expose/write this property, so ignore failures.
+            let af_mode_one_shot: EdsUInt32 = 0;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_AFMode,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &af_mode_one_shot as *const _ as *const c_void,
+            );
+
             // Set capacity
             let capacity = EdsCapacity {
                 numberOfFreeClusters: 0x7FFFFFFF,
@@ -988,7 +1127,7 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
         info!("[Canon] Sending TakePicture command...");
 
         // Send take picture command
-        let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+        let take_error = send_non_af_shutter(camera_ref);
 
         if take_error != EDS_ERR_OK {
             error!("[Canon] TakePicture command failed: {}", error_to_string(take_error));
@@ -1186,7 +1325,7 @@ pub fn canon_send_shutter() -> Result<CaptureResult, String> {
             let _ = EdsSetCapacity(camera_ref, capacity);
         }
 
-        let take_error = unsafe { EdsSendCommand(camera_ref, kEdsCameraCommand_TakePicture, 0) };
+        let take_error = send_non_af_shutter(camera_ref);
 
         if take_error != EDS_ERR_OK {
             return Ok(CaptureResult {
@@ -1345,6 +1484,17 @@ pub fn canon_start_live_view() -> Result<bool, String> {
         }
 
         unsafe {
+            // Best-effort: request EVF high-quality mode where supported.
+            // Some camera models ignore/deny this property; do not fail live view start.
+            let evf_mode: EdsUInt32 = 1;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_Evf_Mode,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &evf_mode as *const _ as *const c_void,
+            );
+
             let evf_output: EdsUInt32 = kEdsEvfOutputDevice_PC;
             let error = EdsSetPropertyData(
                 camera_ref,
@@ -1722,7 +1872,7 @@ pub fn canon_start_movie_record() -> Result<bool, String> {
                 &mlu as *const _ as *const c_void,
             );
 
-             // 2d. Force JPEG Large (no RAW buffer overhead)
+             // 2d. Force JPEG Large Fine (no RAW buffer overhead)
             let quality: EdsUInt32 = 0x0010ff0f; // EdsImageQuality_LJ (Large Fine JPEG)
             let _ = EdsSetPropertyData(
                 camera_ref,

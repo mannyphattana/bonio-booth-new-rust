@@ -279,8 +279,9 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                   >
                     {captureIdx !== undefined && (
                       <img
-                        src={captures[captureIdx].photo}
+                        src={captures[captureIdx].photoPreview || captures[captureIdx].photo}
                         alt=""
+                        decoding="async"
                         style={{
                           width: "100%",
                           height: "100%",
@@ -335,8 +336,9 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                   }}
                 >
                   <img
-                    src={cap.photo}
+                    src={cap.photoPreview || cap.photo}
                     alt=""
+                    decoding="async"
                     style={{
                       width: "100%",
                       height: "100%",

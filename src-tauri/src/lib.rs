@@ -67,6 +67,12 @@ fn exit_app(
     }
     // Step 3: Small delay to ensure TCP FIN is sent
     std::thread::sleep(std::time::Duration::from_millis(500));
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = canon::canon_terminate();
+    }
+
     app.exit(0);
 }
 
@@ -235,6 +241,11 @@ pub fn run() {
                 shutdown_mgr.set_app_handle(app.handle().clone());
             }
 
+            #[cfg(target_os = "windows")]
+            {
+                let _ = canon::canon_initialize(app.handle().clone());
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -381,6 +392,11 @@ pub fn run() {
                             // Step 3: Small delay for TCP FIN
                             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         });
+
+                        #[cfg(target_os = "windows")]
+                        {
+                            let _ = canon::canon_terminate();
+                        }
 
                         // Step 4: Exit
                         app_handle.exit(0);
