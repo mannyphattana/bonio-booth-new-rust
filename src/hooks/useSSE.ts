@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+﻿import { useEffect, useRef, useCallback } from "react";
+import { appLogger } from "../utils/appLogger";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { logError } from "../utils/logger";
@@ -24,7 +25,7 @@ interface UseSSEOptions {
  *
  * The Rust backend maintains a persistent HTTP connection to the SSE endpoint.
  * When the app closes (or crashes), the TCP connection drops and the server
- * automatically detects the disconnect → sends Telegram notification.
+ * automatically detects the disconnect â†’ sends Telegram notification.
  *
  * Events from the server are forwarded to the frontend via Tauri events.
  */
@@ -72,22 +73,22 @@ export function useSSE(options: UseSSEOptions) {
     if (!machineId || !enabled) return;
     // Only connect if machineId actually changed
     if (currentMachineIdRef.current === machineId && listenersSetupRef.current) {
-      console.log("[SSE] MachineId unchanged, skipping reconnect");
+      appLogger.info(__CTX__, "[SSE] MachineId unchanged, skipping reconnect");
       return;
     }
-    console.log("[SSE] Requesting Rust backend to connect...");
+    appLogger.info(__CTX__, "[SSE] Requesting Rust backend to connect...");
     invoke("connect_sse").catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("[SSE] Failed to connect:", err);
+      appLogger.error(__CTX__, "[SSE] Failed to connect:", err);
       logError("sse_connect_failed", `SSE failed to connect: ${msg}`, undefined, "error");
     });
   }, [machineId, enabled]);
 
   // Destroy SSE (disconnect + cleanup, idempotent)
   const destroy = useCallback(() => {
-    console.log("[SSE] Requesting Rust backend to destroy...");
+    appLogger.info(__CTX__, "[SSE] Requesting Rust backend to destroy...");
     invoke("destroy_sse").catch((err: unknown) => {
-      console.error("[SSE] Failed to destroy:", err);
+      appLogger.error(__CTX__, "[SSE] Failed to destroy:", err);
     });
     listenersSetupRef.current = false;
     currentMachineIdRef.current = "";
@@ -121,7 +122,7 @@ export function useSSE(options: UseSSEOptions) {
         // Listen for SSE events
         const unlistenEvent = await listen<SSEEvent>("sse-event", (event) => {
           const sseEvent = event.payload;
-          console.log("[SSE] Event:", sseEvent);
+          appLogger.info(__CTX__, "[SSE] Event:", sseEvent);
 
           const callbacks = callbacksRef.current;
           if (callbacks.onEvent) callbacks.onEvent(sseEvent);
@@ -171,7 +172,7 @@ export function useSSE(options: UseSSEOptions) {
           (event) => {
             const { connected } = event.payload;
             connectedRef.current = connected;
-            console.log(`[SSE] Connection status: ${connected ? "connected" : "disconnected"}`);
+            appLogger.info(__CTX__, `[SSE] Connection status: ${connected ? "connected" : "disconnected"}`);
             const callbacks = callbacksRef.current;
             if (callbacks.onConnectionChange) callbacks.onConnectionChange(connected);
           }
@@ -211,3 +212,4 @@ export function useSSE(options: UseSSEOptions) {
 }
 
 export default useSSE;
+

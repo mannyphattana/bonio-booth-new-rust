@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from "react";
+﻿import React, { useState, useCallback } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import BackButton from "../components/BackButton";
@@ -35,7 +36,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
   } | null>(null);
 
   const handleCountdownComplete = useCallback(() => {
-    console.log("[RequestImage] Countdown completed, auto-navigating to home");
+    appLogger.info(__CTX__, "[RequestImage] Countdown completed, auto-navigating to home");
     navigate("/");
   }, [navigate]);
 
@@ -58,7 +59,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
     setImageError("");
     setImageDimensions({ width: w, height: h });
 
-    // ตั้ง default orientation ตามอัตราส่วนรูป (config ตามขนาดรูปที่ paste/โหลดมา)
+    // à¸•à¸±à¹‰à¸‡ default orientation à¸•à¸²à¸¡à¸­à¸±à¸•à¸£à¸²à¸ªà¹ˆà¸§à¸™à¸£à¸¹à¸› (config à¸•à¸²à¸¡à¸‚à¸™à¸²à¸”à¸£à¸¹à¸›à¸—à¸µà¹ˆ paste/à¹‚à¸«à¸¥à¸”à¸¡à¸²)
     const ratio = w / h;
     if (ratio > 1) {
       setOrientation(ratio >= 2 ? "landscape-cut" : "landscape");
@@ -71,7 +72,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
 
   const handleImageError = () => {
     setImageLoaded(false);
-    setImageError("ไม่สามารถโหลดรูปภาพได้ กรุณาตรวจสอบ URL");
+    setImageError("à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¸ à¸²à¸žà¹„à¸”à¹‰ à¸à¸£à¸¸à¸“à¸²à¸•à¸£à¸§à¸ˆà¸ªà¸­à¸š URL");
   };
 
   const handlePrint = async () => {
@@ -79,21 +80,21 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
 
     if (!imageUrl.trim()) {
       setPrintStatus("error");
-      setErrorMessage("กรุณาระบุ URL รูปภาพ");
+      setErrorMessage("à¸à¸£à¸¸à¸“à¸²à¸£à¸°à¸šà¸¸ URL à¸£à¸¹à¸›à¸ à¸²à¸ž");
       return;
     }
 
     if (!imageLoaded) {
       setPrintStatus("error");
-      setErrorMessage("กรุณารอให้รูปภาพโหลดเสร็จก่อน");
+      setErrorMessage("à¸à¸£à¸¸à¸“à¸²à¸£à¸­à¹ƒà¸«à¹‰à¸£à¸¹à¸›à¸ à¸²à¸žà¹‚à¸«à¸¥à¸”à¹€à¸ªà¸£à¹‡à¸ˆà¸à¹ˆà¸­à¸™");
       return;
     }
 
-    // ดึงเครื่องปริ้นจากแหล่งเดียวกับปริ้นเทส (localStorage) — ไม่ใช้แค่ state เพื่อให้ได้ค่าที่ตั้งไว้แล้ว
+    // à¸”à¸¶à¸‡à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸›à¸£à¸´à¹‰à¸™à¸ˆà¸²à¸à¹à¸«à¸¥à¹ˆà¸‡à¹€à¸”à¸µà¸¢à¸§à¸à¸±à¸šà¸›à¸£à¸´à¹‰à¸™à¹€à¸—à¸ª (localStorage) â€” à¹„à¸¡à¹ˆà¹ƒà¸Šà¹‰à¹à¸„à¹ˆ state à¹€à¸žà¸·à¹ˆà¸­à¹ƒà¸«à¹‰à¹„à¸”à¹‰à¸„à¹ˆà¸²à¸—à¸µà¹ˆà¸•à¸±à¹‰à¸‡à¹„à¸§à¹‰à¹à¸¥à¹‰à¸§
     const selectedPrinter = localStorage.getItem("selectedPrinter") || "";
     if (!selectedPrinter) {
       setPrintStatus("error");
-      setErrorMessage("ไม่พบเครื่องพิมพ์ กรุณาตั้งค่าเครื่องพิมพ์ก่อน");
+      setErrorMessage("à¹„à¸¡à¹ˆà¸žà¸šà¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸žà¸´à¸¡à¸žà¹Œ à¸à¸£à¸¸à¸“à¸²à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸žà¸´à¸¡à¸žà¹Œà¸à¹ˆà¸­à¸™");
       return;
     }
 
@@ -118,7 +119,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
         isLandscape = true;
       }
 
-      // ดึงการตั้งค่าการปริ้นจาก config เหมือนปริ้นเทส/PhotoResult
+      // à¸”à¸¶à¸‡à¸à¸²à¸£à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²à¸à¸²à¸£à¸›à¸£à¸´à¹‰à¸™à¸ˆà¸²à¸ config à¹€à¸«à¸¡à¸·à¸­à¸™à¸›à¸£à¸´à¹‰à¸™à¹€à¸—à¸ª/PhotoResult
       let scale = 100;
       let verticalOffset = 0;
       let horizontalOffset = 0;
@@ -138,16 +139,16 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
         /* use defaults */
       }
 
-      // โหลดรูปจาก URL ทาง Rust (ไม่มี CORS — แก้ "Failed to fetch" จาก fetch ในเบราว์เซอร์)
-      console.log("[RequestImage] Downloading image from URL via Rust...");
+      // à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¸ˆà¸²à¸ URL à¸—à¸²à¸‡ Rust (à¹„à¸¡à¹ˆà¸¡à¸µ CORS â€” à¹à¸à¹‰ "Failed to fetch" à¸ˆà¸²à¸ fetch à¹ƒà¸™à¹€à¸šà¸£à¸²à¸§à¹Œà¹€à¸‹à¸­à¸£à¹Œ)
+      appLogger.info(__CTX__, "[RequestImage] Downloading image from URL via Rust...");
       const tempPath: string = await invoke("download_image_from_url", { url: imageUrl });
-      console.log("[RequestImage] Image saved:", tempPath);
+      appLogger.info(__CTX__, "[RequestImage] Image saved:", tempPath);
 
       // Set printing state BEFORE printing to prevent device check notifications
       // Calculate timeout: 30 seconds per copy + 30 seconds buffer
       const printTimeout = copies * 30000 + 30000;
       setPrinting(true, printTimeout);
-      console.log(`[RequestImage] Printing state set to true (${copies} copies, timeout: ${printTimeout}ms)`);
+      appLogger.info(__CTX__, `[RequestImage] Printing state set to true (${copies} copies, timeout: ${printTimeout}ms)`);
       
       // Small delay to ensure printing state is set before device check runs
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -155,7 +156,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
       try {
         // Print for each copy
         for (let i = 0; i < copies; i++) {
-          console.log(`[RequestImage] Printing copy ${i + 1}/${copies}...`);
+          appLogger.info(__CTX__, `[RequestImage] Printing copy ${i + 1}/${copies}...`);
           await invoke("print_photo", {
             imagePath: tempPath,
             printerName: selectedPrinter,
@@ -167,17 +168,17 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
           });
         }
 
-        // ลด paper level ที่หลังบ้าน (เส้นเดียวกับ bonio-booth: POST paper-level/reduce)
+        // à¸¥à¸” paper level à¸—à¸µà¹ˆà¸«à¸¥à¸±à¸‡à¸šà¹‰à¸²à¸™ (à¹€à¸ªà¹‰à¸™à¹€à¸”à¸µà¸¢à¸§à¸à¸±à¸š bonio-booth: POST paper-level/reduce)
         try {
           await invoke("reduce_paper_level", { copies });
         } catch (e) {
-          console.warn("[RequestImage] reduce_paper_level failed (non-blocking):", e);
+          appLogger.warn(__CTX__, "[RequestImage] reduce_paper_level failed (non-blocking):", e);
         }
 
-        console.log("[RequestImage] Print successful!");
+        appLogger.info(__CTX__, "[RequestImage] Print successful!");
         setPrintStatus("success");
       } catch (error) {
-        console.error("[RequestImage] Error:", error);
+        appLogger.error(__CTX__, "[RequestImage] Error:", error);
         setPrintStatus("error");
         setErrorMessage(
           error instanceof Error ? error.message : "Unknown error occurred",
@@ -185,11 +186,11 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
       } finally {
         setIsPrinting(false);
         // Clear printing state after print completes (includes grace period)
-        console.log("[RequestImage] Print completed, clearing printing state");
+        appLogger.info(__CTX__, "[RequestImage] Print completed, clearing printing state");
         setPrinting(false);
       }
     } catch (error) {
-      console.error("[RequestImage] Error:", error);
+      appLogger.error(__CTX__, "[RequestImage] Error:", error);
       setPrintStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Unknown error occurred",
@@ -221,7 +222,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
       {/* Back button */}
       <BackButton onBackClick={handleBack} disabled={isPrinting} />
 
-      {/* Countdown — visible only while printing or after success */}
+      {/* Countdown â€” visible only while printing or after success */}
       <Countdown
         seconds={600}
         onComplete={handleCountdownComplete}
@@ -243,7 +244,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
             color: theme?.fontColor || "#2c2c2c",
           }}
         >
-          ปริ้นย้อนหลัง
+          à¸›à¸£à¸´à¹‰à¸™à¸¢à¹‰à¸­à¸™à¸«à¸¥à¸±à¸‡
         </h1>
       </div>
 
@@ -268,7 +269,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
               color: theme?.fontColor || "#2c2c2c",
             }}
           >
-            ระบุ URL รูปภาพ
+            à¸£à¸°à¸šà¸¸ URL à¸£à¸¹à¸›à¸ à¸²à¸ž
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <input
@@ -308,7 +309,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                 color: theme?.fontColor || "#2c2c2c",
               }}
             >
-              Preview รูปภาพ
+              Preview à¸£à¸¹à¸›à¸ à¸²à¸ž
             </h2>
             <div
               style={{
@@ -326,12 +327,12 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                 <div style={{ textAlign: "center", padding: 20 }}>
                   <div className="loading-spinner" />
                   <p style={{ marginTop: 8, color: "#666" }}>
-                    กำลังโหลดรูปภาพ...
+                    à¸à¸³à¸¥à¸±à¸‡à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¸ à¸²à¸ž...
                   </p>
                 </div>
               )}
               {imageError && (
-                <p style={{ color: "#e53e3e", padding: 20 }}>❌ {imageError}</p>
+                <p style={{ color: "#e53e3e", padding: 20 }}>âŒ {imageError}</p>
               )}
               <img
                 src={imageUrl}
@@ -376,7 +377,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                 color: "#2c2c2c",
               }}
             >
-              จำนวนที่จะพิมพ์:
+              à¸ˆà¸³à¸™à¸§à¸™à¸—à¸µà¹ˆà¸ˆà¸°à¸žà¸´à¸¡à¸žà¹Œ:
             </label>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <button
@@ -397,7 +398,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                   justifyContent: "center",
                 }}
               >
-                −
+                âˆ’
               </button>
               <span
                 style={{
@@ -433,7 +434,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
             </div>
           </div>
 
-          {/* ขนาดรูป + Orientation */}
+          {/* à¸‚à¸™à¸²à¸”à¸£à¸¹à¸› + Orientation */}
           {imageDimensions && (
             <div
               style={{
@@ -441,7 +442,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                 color: "#666",
               }}
             >
-              ขนาดรูป: {imageDimensions.width} × {imageDimensions.height} px
+              à¸‚à¸™à¸²à¸”à¸£à¸¹à¸›: {imageDimensions.width} Ã— {imageDimensions.height} px
             </div>
           )}
           <div
@@ -480,10 +481,10 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                 cursor: "pointer",
               }}
             >
-              <option value="portrait">Portrait (ตั้ง) 4x6</option>
-              <option value="portrait-cut">Portrait Cut (ตั้ง-ตัด) 2x6</option>
-              <option value="landscape">Landscape (นอน) 6x4</option>
-              <option value="landscape-cut">Landscape Cut (นอน-ตัด) 6x2</option>
+              <option value="portrait">Portrait (à¸•à¸±à¹‰à¸‡) 4x6</option>
+              <option value="portrait-cut">Portrait Cut (à¸•à¸±à¹‰à¸‡-à¸•à¸±à¸”) 2x6</option>
+              <option value="landscape">Landscape (à¸™à¸­à¸™) 6x4</option>
+              <option value="landscape-cut">Landscape Cut (à¸™à¸­à¸™-à¸•à¸±à¸”) 6x2</option>
             </select>
           </div>
 
@@ -498,18 +499,18 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
               }}
             >
               <div className="loading-spinner" />
-              <p style={{ margin: 0 }}>กำลังพิมพ์...</p>
+              <p style={{ margin: 0 }}>à¸à¸³à¸¥à¸±à¸‡à¸žà¸´à¸¡à¸žà¹Œ...</p>
             </div>
           )}
           {printStatus === "success" && (
             <p style={{ color: "#38a169", fontWeight: 600, margin: 0 }}>
-              ✅ พิมพ์สำเร็จ!
+              âœ… à¸žà¸´à¸¡à¸žà¹Œà¸ªà¸³à¹€à¸£à¹‡à¸ˆ!
             </p>
           )}
           {printStatus === "error" && (
             <div>
               <p style={{ color: "#e53e3e", fontWeight: 600, margin: 0 }}>
-                ❌ พิมพ์ไม่สำเร็จ
+                âŒ à¸žà¸´à¸¡à¸žà¹Œà¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ
               </p>
               {errorMessage && (
                 <p
@@ -539,7 +540,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                   : "pointer",
             }}
           >
-            {isPrinting ? "กำลังพิมพ์..." : `พิมพ์ ${copies} แผ่น`}
+            {isPrinting ? "à¸à¸³à¸¥à¸±à¸‡à¸žà¸´à¸¡à¸žà¹Œ..." : `à¸žà¸´à¸¡à¸žà¹Œ ${copies} à¹à¸œà¹ˆà¸™`}
           </button>
         </div>
       </div>
@@ -552,3 +553,4 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
     </div>
   );
 }
+

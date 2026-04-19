@@ -34,6 +34,10 @@ pub struct AppState {
     pub paper_config_portrait: Mutex<PaperPositionConfig>,
     pub paper_config_landscape: Mutex<PaperPositionConfig>,
     pub http_client: Client,
+    // Session tracking
+    pub session_id: Mutex<String>,
+    pub session_started_at: Mutex<String>,
+    pub clean_exit: Mutex<bool>, // true = clean exit, false = crash/unexpected
 }
 
 impl AppState {
@@ -50,6 +54,9 @@ impl AppState {
             paper_config_portrait: Mutex::new(PaperPositionConfig::default()),
             paper_config_landscape: Mutex::new(PaperPositionConfig::default()),
             http_client: Client::new(),
+            session_id: Mutex::new(String::new()),
+            session_started_at: Mutex::new(String::new()),
+            clean_exit: Mutex::new(false),
         }
     }
 }
@@ -865,6 +872,209 @@ pub async fn get_camera_type(
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     Ok(state.camera_type.lock().unwrap().clone())
+}
+
+// ============ App Session Log ============
+
+/// เริ่ม session ใหม่ — เรียกจาก frontend ตอน app เปิด
+#[tauri::command]
+pub async fn init_app_session(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    started_at: String,
+) -> Result<(), String> {
+    *state.session_id.lock().unwrap() = session_id.clone();
+    *state.session_started_at.lock().unwrap() = started_at.clone();
+    *state.clean_exit.lock().unwrap() = false;
+    log::info!("[Session] Initialized: {} at {}", session_id, started_at);
+    Ok(())
+}
+
+/// ส่ง session log ไปยัง backend — เรียกก่อน exit (clean) หรือตอน crash recovery
+pub async fn send_app_session_log_internal(
+    machine_id: &str,
+    machine_port: &str,
+    payload: serde_json::Value,
+) {
+    let client = Client::new();
+    let url = format!("{}/api/machines-public/app-session-log", API_BASE_URL);
+
+    log::info!(
+        "[Session] Sending session log to backend (machineId={})",
+        machine_id
+    );
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client
+            .post(&url)
+            .header("X-Machine-Port", machine_port)
+            .query(&[("machineId", machine_id)])
+            .json(&payload)
+            .send(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(res)) => {
+            if res.status().is_success() {
+                log::info!("[Session] Session log saved successfully");
+            } else {
+                log::warn!("[Session] Server rejected session log: {}", res.status());
+            }
+        }
+        Ok(Err(e)) => {
+            log::error!("[Session] Failed to send session log: {}", e);
+        }
+        Err(_) => {
+            log::warn!("[Session] Session log send timed out (10s)");
+        }
+    }
+}
+
+/// Tauri command version — เรียกจาก frontend ตอน clean exit
+#[tauri::command]
+pub async fn send_app_session_log(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    started_at: String,
+    ended_at: String,
+    duration_seconds: f64,
+    close_reason: String,
+    app_version: Option<String>,
+    entries: serde_json::Value,
+    summary: Option<String>,
+) -> Result<(), String> {
+    let machine_id = state.machine_id.lock().unwrap().clone();
+    let machine_port = state.machine_port.lock().unwrap().clone();
+
+    if machine_id.is_empty() {
+        log::warn!("[Session] send_app_session_log skipped: machine_id not set");
+        return Ok(());
+    }
+
+    // Mark as clean exit
+    *state.clean_exit.lock().unwrap() = true;
+
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "startedAt": started_at,
+        "endedAt": ended_at,
+        "durationSeconds": duration_seconds,
+        "closeReason": close_reason,
+        "appVersion": app_version,
+        "entries": entries,
+        "summary": summary,
+    });
+
+    send_app_session_log_internal(&machine_id, &machine_port, payload).await;
+    Ok(())
+}
+
+/// ส่ง crash session log จาก Rust (ไม่มี entries — แค่บอกว่า crash)
+pub async fn send_crash_session_log_internal(
+    machine_id: &str,
+    machine_port: &str,
+    session_id: &str,
+    started_at: &str,
+    app_version: Option<&str>,
+) {
+    let now = chrono_now_iso();
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "startedAt": started_at,
+        "endedAt": now,
+        "closeReason": "crash",
+        "appVersion": app_version,
+        "entries": [],
+        "summary": "App closed unexpectedly (crash or force-quit)",
+    });
+    send_app_session_log_internal(machine_id, machine_port, payload).await;
+}
+
+/// คืน ISO 8601 timestamp ปัจจุบัน (UTC)
+fn chrono_now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Format as RFC 3339 approximation without chrono dependency
+    let s = secs;
+    let days_since_epoch = s / 86400;
+    let time_of_day = s % 86400;
+    let hh = time_of_day / 3600;
+    let mm = (time_of_day % 3600) / 60;
+    let ss = time_of_day % 60;
+    // Convert days to date (approximate, good enough for crash log timestamp)
+    let (year, month, day) = days_to_date(days_since_epoch);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hh, mm, ss)
+}
+
+fn days_to_date(days: u64) -> (u64, u64, u64) {
+    // Gregorian calendar calculation from days since 1970-01-01
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z % 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// ส่ง transaction session note ไปยัง backend
+#[tauri::command]
+pub async fn update_transaction_session_note(
+    state: tauri::State<'_, AppState>,
+    transaction_code: String,
+    session_note: String,
+    close_reason: Option<String>,
+) -> Result<(), String> {
+    let machine_id = state.machine_id.lock().unwrap().clone();
+    let machine_port = state.machine_port.lock().unwrap().clone();
+
+    if machine_id.is_empty() {
+        log::warn!("[Session] update_transaction_session_note skipped: machine_id not set");
+        return Ok(());
+    }
+
+    let client = &state.http_client;
+    let url = format!("{}/api/machines-public/transaction-session-note", API_BASE_URL);
+
+    let mut payload = serde_json::json!({
+        "transactionCode": transaction_code,
+        "sessionNote": session_note,
+    });
+    if let Some(reason) = close_reason {
+        payload["closeReason"] = serde_json::Value::String(reason);
+    }
+
+    let result = client
+        .post(&url)
+        .header("X-Machine-Port", &machine_port)
+        .query(&[("machineId", &machine_id)])
+        .json(&payload)
+        .send()
+        .await;
+
+    match result {
+        Ok(res) => {
+            if res.status().is_success() {
+                log::info!("[Session] Transaction {} session note updated", transaction_code);
+            } else {
+                log::warn!("[Session] update_transaction_session_note server error: {}", res.status());
+            }
+        }
+        Err(e) => {
+            log::warn!("[Session] update_transaction_session_note failed: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

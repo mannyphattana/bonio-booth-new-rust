@@ -44,6 +44,9 @@ fn exit_app(
     state: tauri::State<'_, AppState>,
     sse_client: tauri::State<'_, Mutex<SseClient>>,
 ) {
+    // Mark as clean exit (ป้องกัน crash handler ใน RunEvent ยิง session log ซ้ำ)
+    *state.clean_exit.lock().unwrap() = true;
+
     // Step 1: Notify backend before exit (synchronous block_on for immediate notification)
     {
         let machine_id = state.machine_id.lock().unwrap().clone();
@@ -179,9 +182,21 @@ fn debug_paths(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new()
-            .level(log::LevelFilter::Info)
-            .build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    // เขียนลงไฟล์ใน log directory ของ OS (Windows: %APPDATA%\bonio-booth\logs\)
+                    tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::LogDir { file_name: None },
+                    ),
+                    // แสดงใน stdout (dev mode / terminal)
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    // ส่งไปยัง webview console (dev tools)
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -326,6 +341,10 @@ pub fn run() {
             api::set_paper_config,
             api::get_paper_config,
             api::download_image_from_url,
+            // Session log commands
+            api::init_app_session,
+            api::send_app_session_log,
+            api::update_transaction_session_note,
             // Image processing
             image_processing::get_available_filters,
             image_processing::apply_lut_filter,
@@ -379,6 +398,30 @@ pub fn run() {
                                 if !machine_id.is_empty() {
                                     api::notify_going_offline_internal(&machine_id, &machine_port)
                                         .await;
+
+                                    // ถ้ายังไม่ได้ mark clean_exit → หมายความว่าปิดแบบไม่คาดคิด
+                                    // ส่ง crash session log (ไม่มี entries)
+                                    let is_clean = *state.clean_exit.lock().unwrap();
+                                    if !is_clean {
+                                        let session_id =
+                                            state.session_id.lock().unwrap().clone();
+                                        let started_at =
+                                            state.session_started_at.lock().unwrap().clone();
+                                        if !session_id.is_empty() {
+                                            log::warn!(
+                                                "[App] Unexpected close detected — sending crash session log for session {}",
+                                                session_id
+                                            );
+                                            api::send_crash_session_log_internal(
+                                                &machine_id,
+                                                &machine_port,
+                                                &session_id,
+                                                &started_at,
+                                                None,
+                                            )
+                                            .await;
+                                        }
+                                    }
                                 }
                             }
 

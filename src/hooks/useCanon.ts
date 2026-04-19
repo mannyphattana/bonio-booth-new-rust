@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+﻿import { useState, useRef, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { logError } from "../utils/logger";
+import { appLogger } from "../utils/appLogger";
 
 export interface CanonState {
   initialized: boolean;
@@ -13,18 +14,18 @@ export interface CanonState {
 /**
  * Hook to manage Canon DSLR camera lifecycle via Tauri commands.
  *
- * Lifecycle: initialize → connect → openSession → startLiveView → poll frames
+ * Lifecycle: initialize â†’ connect â†’ openSession â†’ startLiveView â†’ poll frames
  * Capture:   takePicture (stops LV internally, returns base64, restarts LV)
- * Cleanup:   stopLiveView → closeSession
+ * Cleanup:   stopLiveView â†’ closeSession
  *
- * IMPORTANT — EDSDK is single-threaded COM:
+ * IMPORTANT â€” EDSDK is single-threaded COM:
  * ALL EDSDK FFI calls MUST be serialized (never two calls on different threads
  * at the same time).  We achieve this by:
- *   • Having only ONE polling interval active at a time (LV frame polling).
+ *   â€¢ Having only ONE polling interval active at a time (LV frame polling).
  *     The Rust side of canon_get_live_view_frame also pumps EdsGetEvent().
- *   • Stopping all polling BEFORE any other EDSDK invoke (start/stop LV,
+ *   â€¢ Stopping all polling BEFORE any other EDSDK invoke (start/stop LV,
  *     take picture, etc.) and restarting AFTER.
- *   • No separate event-polling interval — events are processed inside the
+ *   â€¢ No separate event-polling interval â€” events are processed inside the
  *     LV frame grab, and during capture the Rust event loop handles them.
  */
 export function useCanon() {
@@ -90,7 +91,7 @@ export function useCanon() {
           }
         }
       } catch {
-        // frame fetch failed — push last good frame to avoid gaps in recording
+        // frame fetch failed â€” push last good frame to avoid gaps in recording
         if (isRecordingRef.current && latestFrameRef.current) {
           recordedFramesRef.current.push(latestFrameRef.current);
           recordedTimestampsRef.current.push(Date.now());
@@ -114,7 +115,7 @@ export function useCanon() {
       return true;
     } catch (err: any) {
       const errorMsg = typeof err === "string" ? err : JSON.stringify(err);
-      console.error("[useCanon] SDK init error:", errorMsg);
+      appLogger.error("[useCanon]", `[useCanon] SDK init error:: ${errorMsg)}`);
       logError("canon_sdk_init", `SDK init error: ${errorMsg}`, undefined, "critical");
       setState((s) => ({ ...s, error: `SDK init error: ${errorMsg}` }));
       return false;
@@ -122,7 +123,7 @@ export function useCanon() {
   }, []);
 
   // Connect to a Canon camera by index
-  // NOTE: no polling is started here — polling begins only with startLiveView.
+  // NOTE: no polling is started here â€” polling begins only with startLiveView.
   const connect = useCallback(async (cameraIndex = 0): Promise<boolean> => {
     try {
       await invoke("canon_connect", { index: cameraIndex });
@@ -162,7 +163,7 @@ export function useCanon() {
   }, [stopLiveViewPolling]);
 
   /**
-   * Take a picture — returns base64 JPEG data URL.
+   * Take a picture â€” returns base64 JPEG data URL.
    *
    * Flow:
    * 1. Guard: prevent concurrent captures
@@ -174,7 +175,7 @@ export function useCanon() {
   const takePicture = useCallback(async (): Promise<string> => {
     // 1. Prevent concurrent captures
     if (isCapturingRef.current) {
-      console.warn("[useCanon] Capture already in progress, skipping");
+      appLogger.warn("[useCanon]", "[useCanon] Capture already in progress, skipping");
       return "";
     }
 
@@ -182,10 +183,10 @@ export function useCanon() {
     const captureNum = captureNumberRef.current;
     isCapturingRef.current = true;
 
-    console.log(`[useCanon] Starting capture #${captureNum}...`);
+    appLogger.info("[useCanon]", `[useCanon] Starting capture #${captureNum}...`);
 
     try {
-      // 2. Stop ALL polling first — no EDSDK calls from JS after this point
+      // 2. Stop ALL polling first â€” no EDSDK calls from JS after this point
       stopLiveViewPolling();
 
       // 3. Stop camera live view
@@ -220,14 +221,14 @@ export function useCanon() {
         const dataUrl = result.image_data.startsWith("data:")
           ? result.image_data
           : `data:image/jpeg;base64,${result.image_data}`;
-        console.log(`[useCanon] Capture #${captureNum} success`);
+        appLogger.info("[useCanon]", `[useCanon] Capture #${captureNum} success`);
         return dataUrl;
       }
 
-      console.error(`[useCanon] Capture #${captureNum} failed:`, result.error);
+      appLogger.error("[useCanon]", `[useCanon] Capture #${captureNum} failed:: ${result.error)}`);
       return "";
     } catch (err: any) {
-      console.error(`[useCanon] Capture #${captureNum} error:`, err);
+      appLogger.error("[useCanon]", `[useCanon] Capture #${captureNum} error:: ${err)}`);
 
       // Always try to recover
       isCapturingRef.current = false;
@@ -243,13 +244,13 @@ export function useCanon() {
   }, [stopLiveViewPolling, startLiveViewPolling, invokeWithTimeout]);
 
   /**
-   * Take a picture immediately — no LV stop (already stopped by stopMovieRecordingFast).
+   * Take a picture immediately â€” no LV stop (already stopped by stopMovieRecordingFast).
    * Skips the redundant canon_stop_live_view invoke and 50ms stabilization delay,
    * saving ~150ms of latency between countdown-end and shutter fire.
    */
   const takePictureQuick = useCallback(async (): Promise<string> => {
     if (isCapturingRef.current) {
-      console.warn("[useCanon] Capture already in progress, skipping");
+      appLogger.warn("[useCanon]", "[useCanon] Capture already in progress, skipping");
       return "";
     }
 
@@ -257,11 +258,11 @@ export function useCanon() {
     const captureNum = captureNumberRef.current;
     isCapturingRef.current = true;
 
-    console.log(`[useCanon] Starting quick capture #${captureNum}...`);
+    appLogger.info("[useCanon]", `[useCanon] Starting quick capture #${captureNum}...`);
 
     try {
-      // LV polling already stopped by stopMovieRecordingFast — no need to stop again
-      // LV already stopped in Rust by canon_stop_movie_record_fast — skip stop_live_view + 50ms
+      // LV polling already stopped by stopMovieRecordingFast â€” no need to stop again
+      // LV already stopped in Rust by canon_stop_movie_record_fast â€” skip stop_live_view + 50ms
 
       // Take picture directly (Rust pumps EdsGetEvent internally)
       const result = await invokeWithTimeout<{
@@ -285,14 +286,14 @@ export function useCanon() {
         const dataUrl = result.image_data.startsWith("data:")
           ? result.image_data
           : `data:image/jpeg;base64,${result.image_data}`;
-        console.log(`[useCanon] Quick capture #${captureNum} success`);
+        appLogger.info("[useCanon]", `[useCanon] Quick capture #${captureNum} success`);
         return dataUrl;
       }
 
-      console.error(`[useCanon] Quick capture #${captureNum} failed:`, result.error);
+      appLogger.error("[useCanon]", `[useCanon] Quick capture #${captureNum} failed:: ${result.error)}`);
       return "";
     } catch (err: any) {
-      console.error(`[useCanon] Quick capture #${captureNum} error:`, err);
+      appLogger.error("[useCanon]", `[useCanon] Quick capture #${captureNum} error:: ${err)}`);
       isCapturingRef.current = false;
       try {
         await invoke("canon_start_live_view");
@@ -312,7 +313,7 @@ export function useCanon() {
    */
   const takePhotoDuringRecording = useCallback(async (): Promise<string> => {
     if (isCapturingRef.current) {
-      console.warn("[useCanon] Capture already in progress, skipping");
+      appLogger.warn("[useCanon]", "[useCanon] Capture already in progress, skipping");
       return "";
     }
 
@@ -320,10 +321,10 @@ export function useCanon() {
     const captureNum = captureNumberRef.current;
     isCapturingRef.current = true;
 
-    console.log(`[useCanon] Taking photo during recording #${captureNum}...`);
+    appLogger.info("[useCanon]", `[useCanon] Taking photo during recording #${captureNum}...`);
 
     try {
-      // DON'T stop LV polling here — keep preview alive so the user
+      // DON'T stop LV polling here â€” keep preview alive so the user
       // sees a live image until the shutter actually fires.  The Rust
       // command handles EDSDK event pumping internally; concurrent LV
       // frame fetches will just get stale/empty frames which is fine.
@@ -352,14 +353,14 @@ export function useCanon() {
         const dataUrl = result.image_data.startsWith("data:")
           ? result.image_data
           : `data:image/jpeg;base64,${result.image_data}`;
-        console.log(`[useCanon] Photo-during-recording #${captureNum} success`);
+        appLogger.info("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} success`);
         return dataUrl;
       }
 
-      console.error(`[useCanon] Photo-during-recording #${captureNum} failed:`, result.error);
+      appLogger.error("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} failed:: ${result.error)}`);
       return "";
     } catch (err: any) {
-      console.error(`[useCanon] Photo-during-recording #${captureNum} error:`, err);
+      appLogger.error("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} error:: ${err)}`);
       isCapturingRef.current = false;
       try {
         await invoke("canon_start_live_view");
@@ -402,16 +403,16 @@ export function useCanon() {
   const startMovieRecording = useCallback(async (): Promise<boolean> => {
     try {
       stopLiveViewPolling();
-      console.log("[useCanon] Starting movie recording...");
+      appLogger.info("[useCanon]", "[useCanon] Starting movie recording...");
       await invoke("canon_start_movie_record");
       // Resume live view polling so preview remains visible during recording
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
       }
-      console.log("[useCanon] Movie recording started");
+      appLogger.info("[useCanon]", "[useCanon] Movie recording started");
       return true;
     } catch (err: any) {
-      console.error("[useCanon] startMovieRecording error:", err);
+      appLogger.error("[useCanon]", `[useCanon] startMovieRecording error:: ${err)}`);
       // Try to resume live view even on error
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
@@ -423,14 +424,14 @@ export function useCanon() {
   /**
    * Stop movie recording, wait for the camera to finalize and download the file.
    * Returns the local path to the downloaded MP4/MOV file on success, or "" on failure.
-   * This is a blocking call — the camera needs to write and transfer the movie file.
+   * This is a blocking call â€” the camera needs to write and transfer the movie file.
    */
   const stopMovieRecording = useCallback(async (): Promise<string> => {
     try {
       stopLiveViewPolling();
-      console.log("[useCanon] Stopping movie recording...");
+      appLogger.info("[useCanon]", "[useCanon] Stopping movie recording...");
       const moviePath: string = await invoke("canon_stop_movie_record");
-      console.log("[useCanon] Movie file downloaded:", moviePath);
+      appLogger.info("[useCanon]", `[useCanon] Movie file downloaded:: ${moviePath)}`);
       // Restart live view + polling
       try {
         await invoke("canon_start_live_view");
@@ -440,7 +441,7 @@ export function useCanon() {
       }
       return moviePath;
     } catch (err: any) {
-      console.error("[useCanon] stopMovieRecording error:", err);
+      appLogger.error("[useCanon]", `[useCanon] stopMovieRecording error:: ${err)}`);
       // Try to recover
       try {
         await invoke("canon_start_live_view");
@@ -453,7 +454,7 @@ export function useCanon() {
   }, [stopLiveViewPolling, startLiveViewPolling]);
 
   /**
-   * Fast movie stop — stops recording and switches to photo mode (~200 ms)
+   * Fast movie stop â€” stops recording and switches to photo mode (~200 ms)
    * WITHOUT waiting for the movie file to download from the SD card.
    *
    * After this call the camera is ready for `takePicture()`.
@@ -462,12 +463,12 @@ export function useCanon() {
   const stopMovieRecordingFast = useCallback(async (): Promise<boolean> => {
     try {
       stopLiveViewPolling();
-      console.log("[useCanon] Stopping movie recording (fast)...");
+      appLogger.info("[useCanon]", "[useCanon] Stopping movie recording (fast)...");
       await invoke("canon_stop_movie_record_fast");
-      console.log("[useCanon] Movie recording stopped — camera ready for photo");
+      appLogger.info("[useCanon]", "[useCanon] Movie recording stopped â€” camera ready for photo");
       return true;
     } catch (err: any) {
-      console.error("[useCanon] stopMovieRecordingFast error:", err);
+      appLogger.error("[useCanon]", `[useCanon] stopMovieRecordingFast error:: ${err)}`);
       return false;
     }
   }, [stopLiveViewPolling]);
@@ -481,18 +482,18 @@ export function useCanon() {
    */
   const finalizeMovieDownload = useCallback(async (): Promise<string> => {
     try {
-      // Pause LV polling — EDSDK is single-threaded, can't pump events concurrently
+      // Pause LV polling â€” EDSDK is single-threaded, can't pump events concurrently
       stopLiveViewPolling();
-      console.log("[useCanon] Finalizing movie download...");
+      appLogger.info("[useCanon]", "[useCanon] Finalizing movie download...");
       const moviePath: string = await invoke("canon_finalize_movie_download");
-      console.log("[useCanon] Movie file downloaded:", moviePath);
+      appLogger.info("[useCanon]", `[useCanon] Movie file downloaded:: ${moviePath)}`);
       // Resume LV polling
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
       }
       return moviePath;
     } catch (err: any) {
-      console.error("[useCanon] finalizeMovieDownload error:", err);
+      appLogger.error("[useCanon]", `[useCanon] finalizeMovieDownload error:: ${err)}`);
       // Resume LV polling even on error
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
@@ -563,3 +564,5 @@ export function useCanon() {
     cleanup,
   };
 }
+
+

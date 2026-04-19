@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, Capture } from "../App";
@@ -41,7 +42,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const resolvedPathsRef = useRef<Record<string, string>>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  useIdleTimeout();
+  useIdleTimeout({ transactionCode: state?.referenceId });
 
   useEffect(() => {
     setPreviewImage(firstPhoto);
@@ -57,7 +58,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
           });
           resolvedPathsRef.current[filter.id] = resolved;
         } catch (err) {
-          console.warn(`LUT not found for ${filter.id}:`, err);
+          appLogger.warn(__CTX__, `LUT not found for ${filter.id}:`, err);
         }
       }
       if (firstPhoto) {
@@ -107,7 +108,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
         }
       }
     } catch (err) {
-      console.error("Apply filter preview error:", err);
+      appLogger.error(__CTX__, "Apply filter preview error:", err);
       setPreviewImage(firstPhoto);
     }
 
@@ -120,7 +121,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
     try {
       let filteredCaptures = [...frameCaptures];
       try {
-        setApplyProgress("กำลังตรวจสอบ FFmpeg...");
+        setApplyProgress("à¸à¸³à¸¥à¸±à¸‡à¸•à¸£à¸§à¸ˆà¸ªà¸­à¸š FFmpeg...");
         await invoke<boolean>("ensure_ffmpeg");
       } catch {
         try {
@@ -153,7 +154,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
         },
       });
     } catch (err) {
-      console.error("Apply filter error:", err);
+      appLogger.error(__CTX__, "Apply filter error:", err);
       navigate("/photo-result", {
         state: { ...state, selectedFilter: selectedFilter || null },
       });
@@ -162,7 +163,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
     setApplyingAll(false);
   };
 
-  // --- ปุ่มเลื่อนซ้ายขวา ---
+  // --- à¸›à¸¸à¹ˆà¸¡à¹€à¸¥à¸·à¹ˆà¸­à¸™à¸‹à¹‰à¸²à¸¢à¸‚à¸§à¸² ---
   const scrollLeft = () => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollBy({ left: -250, behavior: "smooth" });
@@ -175,7 +176,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
     }
   };
 
-  // --- ระบบ Click & Drag (รองรับเมาส์และทัชสกรีน) ---
+  // --- à¸£à¸°à¸šà¸š Click & Drag (à¸£à¸­à¸‡à¸£à¸±à¸šà¹€à¸¡à¸²à¸ªà¹Œà¹à¸¥à¸°à¸—à¸±à¸Šà¸ªà¸à¸£à¸µà¸™) ---
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [scrollLeftPos, setScrollLeftPos] = useState(0);
@@ -248,7 +249,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
         <div className="page-row-top">
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
-              ตกแต่งรูปของคุณ
+              à¸•à¸à¹à¸•à¹ˆà¸‡à¸£à¸¹à¸›à¸‚à¸­à¸‡à¸„à¸¸à¸“
             </h1>
             <p className="title-english" style={{ color: theme.fontColor }}>
               DECORATE YOUR PHOTO
@@ -256,7 +257,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
           </div>
         </div>
 
-        {/* Row 2: Body – filter carousel + preview */}
+        {/* Row 2: Body â€“ filter carousel + preview */}
         <div
           className="page-row-body"
           style={{ flexDirection: "column", padding: 0 }}
@@ -291,7 +292,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
               }}
             >
-              ❮
+              â®
             </button>
 
             <div
@@ -306,7 +307,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 gap: "15px",
                 overflowX: "auto",
                 scrollBehavior: "smooth",
-                // 🚨 ขยายพื้นที่ให้กว้างขึ้น เพื่อให้มั่นใจว่าจะไม่โดนขอบบนของคอนเทนเนอร์นี้ตัด
+                // ðŸš¨ à¸‚à¸¢à¸²à¸¢à¸žà¸·à¹‰à¸™à¸—à¸µà¹ˆà¹ƒà¸«à¹‰à¸à¸§à¹‰à¸²à¸‡à¸‚à¸¶à¹‰à¸™ à¹€à¸žà¸·à¹ˆà¸­à¹ƒà¸«à¹‰à¸¡à¸±à¹ˆà¸™à¹ƒà¸ˆà¸§à¹ˆà¸²à¸ˆà¸°à¹„à¸¡à¹ˆà¹‚à¸”à¸™à¸‚à¸­à¸šà¸šà¸™à¸‚à¸­à¸‡à¸„à¸­à¸™à¹€à¸—à¸™à¹€à¸™à¸­à¸£à¹Œà¸™à¸µà¹‰à¸•à¸±à¸”
                 padding: "20px 60px 20px 80px",
                 WebkitOverflowScrolling: "touch",
                 width: "100%",
@@ -327,7 +328,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "center",
-                      // 🚨 ดันเนื้อหาลงมา 16px เพื่อให้มีพื้นที่เหลือสำหรับวงกลมด้านบน
+                      // ðŸš¨ à¸”à¸±à¸™à¹€à¸™à¸·à¹‰à¸­à¸«à¸²à¸¥à¸‡à¸¡à¸² 16px à¹€à¸žà¸·à¹ˆà¸­à¹ƒà¸«à¹‰à¸¡à¸µà¸žà¸·à¹‰à¸™à¸—à¸µà¹ˆà¹€à¸«à¸¥à¸·à¸­à¸ªà¸³à¸«à¸£à¸±à¸šà¸§à¸‡à¸à¸¥à¸¡à¸”à¹‰à¸²à¸™à¸šà¸™
                       paddingTop: "16px",
                       background: "transparent",
                       cursor: "pointer",
@@ -336,12 +337,12 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                       WebkitTapHighlightColor: "transparent",
                     }}
                   >
-                    {/* เครื่องหมายถูก ตรงกลางด้านบน */}
+                    {/* à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸«à¸¡à¸²à¸¢à¸–à¸¹à¸ à¸•à¸£à¸‡à¸à¸¥à¸²à¸‡à¸”à¹‰à¸²à¸™à¸šà¸™ */}
                     {isSelected && (
                       <div
                         style={{
                           position: "absolute",
-                          // 🚨 ขยับลงมาให้อยู่ในพื้นที่ 16px ที่เราดันลงมา
+                          // ðŸš¨ à¸‚à¸¢à¸±à¸šà¸¥à¸‡à¸¡à¸²à¹ƒà¸«à¹‰à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¸žà¸·à¹‰à¸™à¸—à¸µà¹ˆ 16px à¸—à¸µà¹ˆà¹€à¸£à¸²à¸”à¸±à¸™à¸¥à¸‡à¸¡à¸²
                           top: "4px",
                           left: "50%",
                           transform: "translateX(-50%)",
@@ -360,28 +361,28 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                           pointerEvents: "none",
                         }}
                       >
-                        ✔
+                        âœ”
                       </div>
                     )}
 
-                    {/* กรอบ Filter Card - ขนาดคงที่ตลอดเวลา */}
+                    {/* à¸à¸£à¸­à¸š Filter Card - à¸‚à¸™à¸²à¸”à¸„à¸‡à¸—à¸µà¹ˆà¸•à¸¥à¸­à¸”à¹€à¸§à¸¥à¸² */}
                     <div
                       style={{
-                        boxSizing: "border-box", // สำคัญ: รวม border และ padding ในขนาด
+                        boxSizing: "border-box", // à¸ªà¸³à¸„à¸±à¸: à¸£à¸§à¸¡ border à¹à¸¥à¸° padding à¹ƒà¸™à¸‚à¸™à¸²à¸”
                         width: "110px",
                         borderRadius: "12px",
                         overflow: "hidden",
                         position: "relative",
 
-                        // ถ้าเลือก: พื้นหลังใส (มองทะลุ), ถ้าไม่เลือก: พื้นหลังขาว
+                        // à¸–à¹‰à¸²à¹€à¸¥à¸·à¸­à¸: à¸žà¸·à¹‰à¸™à¸«à¸¥à¸±à¸‡à¹ƒà¸ª (à¸¡à¸­à¸‡à¸—à¸°à¸¥à¸¸), à¸–à¹‰à¸²à¹„à¸¡à¹ˆà¹€à¸¥à¸·à¸­à¸: à¸žà¸·à¹‰à¸™à¸«à¸¥à¸±à¸‡à¸‚à¸²à¸§
                         backgroundColor: isSelected ? "transparent" : "white",
 
-                        // ถ้าเลือก: เส้นขอบแดง, ถ้าไม่เลือก: เส้นขอบใส (จองพื้นที่ไว้)
+                        // à¸–à¹‰à¸²à¹€à¸¥à¸·à¸­à¸: à¹€à¸ªà¹‰à¸™à¸‚à¸­à¸šà¹à¸”à¸‡, à¸–à¹‰à¸²à¹„à¸¡à¹ˆà¹€à¸¥à¸·à¸­à¸: à¹€à¸ªà¹‰à¸™à¸‚à¸­à¸šà¹ƒà¸ª (à¸ˆà¸­à¸‡à¸žà¸·à¹‰à¸™à¸—à¸µà¹ˆà¹„à¸§à¹‰)
                         border: isSelected
                           ? `3px solid ${theme.primaryColor}`
                           : "3px solid transparent",
 
-                        // Padding คงที่ตลอดเวลา เพื่อสร้างระยะห่างที่เท่ากัน
+                        // Padding à¸„à¸‡à¸—à¸µà¹ˆà¸•à¸¥à¸­à¸”à¹€à¸§à¸¥à¸² à¹€à¸žà¸·à¹ˆà¸­à¸ªà¸£à¹‰à¸²à¸‡à¸£à¸°à¸¢à¸°à¸«à¹ˆà¸²à¸‡à¸—à¸µà¹ˆà¹€à¸—à¹ˆà¸²à¸à¸±à¸™
                         padding: "6px 6px 0 6px",
 
                         boxShadow: isSelected
@@ -393,7 +394,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                         pointerEvents: "none",
                       }}
                     >
-                      {/* ส่วนรูปภาพ */}
+                      {/* à¸ªà¹ˆà¸§à¸™à¸£à¸¹à¸›à¸ à¸²à¸ž */}
                       <div
                         style={{
                           width: "100%",
@@ -426,10 +427,10 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                         />
                       </div>
 
-                      {/* ส่วนชื่อ Filter */}
+                      {/* à¸ªà¹ˆà¸§à¸™à¸Šà¸·à¹ˆà¸­ Filter */}
                       <div
                         style={{
-                          // ถ้าเลือก: พื้นหลังใส, ถ้าไม่เลือก: พื้นหลังขาว
+                          // à¸–à¹‰à¸²à¹€à¸¥à¸·à¸­à¸: à¸žà¸·à¹‰à¸™à¸«à¸¥à¸±à¸‡à¹ƒà¸ª, à¸–à¹‰à¸²à¹„à¸¡à¹ˆà¹€à¸¥à¸·à¸­à¸: à¸žà¸·à¹‰à¸™à¸«à¸¥à¸±à¸‡à¸‚à¸²à¸§
                           backgroundColor: isSelected ? "transparent" : "white",
                           color: isSelected ? theme.primaryColor : "#666",
                           padding: "8px 0 6px",
@@ -472,11 +473,11 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
               }}
             >
-              ❯
+              â¯
             </button>
           </div>
 
-          {/* 3. รูป Preview ขนาดใหญ่ด้านล่าง */}
+          {/* 3. à¸£à¸¹à¸› Preview à¸‚à¸™à¸²à¸”à¹ƒà¸«à¸à¹ˆà¸”à¹‰à¸²à¸™à¸¥à¹ˆà¸²à¸‡ */}
           <div
             style={{
               flex: 1,
@@ -490,9 +491,9 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
             <div
               style={{
                 position: "relative",
-                display: "inline-block", // ให้กรอบปรับขนาดตามรูปภาพ
+                display: "inline-block", // à¹ƒà¸«à¹‰à¸à¸£à¸­à¸šà¸›à¸£à¸±à¸šà¸‚à¸™à¸²à¸”à¸•à¸²à¸¡à¸£à¸¹à¸›à¸ à¸²à¸ž
                 maxWidth: "800px",
-                maxHeight: "45vh", // เพิ่มความสูงได้อีกนิดนึง
+                maxHeight: "45vh", // à¹€à¸žà¸´à¹ˆà¸¡à¸„à¸§à¸²à¸¡à¸ªà¸¹à¸‡à¹„à¸”à¹‰à¸­à¸µà¸à¸™à¸´à¸”à¸™à¸¶à¸‡
                 borderRadius: "15px",
                 overflow: "hidden",
                 boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
