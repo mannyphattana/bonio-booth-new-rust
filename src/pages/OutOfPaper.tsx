@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -10,12 +10,14 @@ import type { ThemeData } from "../App";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 
+const CTX = "[OutOfPaper]";
+
 interface Props {
   theme: ThemeData;
   lineUrl: string;
   onFormatReset: () => void;
   onBeforeClose?: () => void;
-  /** à¹‚à¸«à¸¡à¸” overlay à¸ˆà¸²à¸ App (maintenance à¸à¸£à¸°à¸”à¸²à¸©à¸«à¸¡à¸”) â€” à¸‹à¹ˆà¸­à¸™à¸›à¸¸à¹ˆà¸¡à¸à¸¥à¸±à¸š à¹à¸¥à¸°à¹‚à¸žà¸¥à¹à¸¥à¹‰à¸§à¹€à¸£à¸µà¸¢à¸ onPaperRefilled à¹€à¸¡à¸·à¹ˆà¸­à¸à¸£à¸°à¸”à¸²à¸©à¹€à¸•à¸´à¸¡ */
+  /** โหมด overlay จาก App (maintenance กระดาษหมด) — ซ่อนปุ่มกลับ และโพลแล้วเรียก onPaperRefilled เมื่อกระดาษเติม */
   isOverlay?: boolean;
   onPaperRefilled?: () => void;
 }
@@ -39,7 +41,7 @@ export default function OutOfPaper({
     navigate("/");
   }, [navigate]);
 
-  // Poll machine data when auto-redirected (maintenance/out-of-paper) or overlay (à¸à¸£à¸°à¸”à¸²à¸©à¸«à¸¡à¸”à¸ˆà¸²à¸ init)
+  // Poll machine data when auto-redirected (maintenance/out-of-paper) or overlay (กระดาษหมดจาก init)
   useEffect(() => {
     if (!shouldHideBackAndPoll) return;
 
@@ -50,7 +52,7 @@ export default function OutOfPaper({
           const paperLevel = res.data.paperLevel ?? res.data.machine?.paperLevel;
           const isMaintenanceModeBackend = res.data.machine?.isMaintenanceMode;
           if (isMaintenanceMode && isMaintenanceModeBackend) {
-            // Maintenance turned on â€” redirect to maintenance
+            // Maintenance turned on — redirect to maintenance
             navigate("/", { state: { maintenance: true } });
           } else if (paperLevel !== 0 && paperLevel !== undefined) {
             // Paper refilled
@@ -62,7 +64,7 @@ export default function OutOfPaper({
           }
         }
       } catch (error) {
-        appLogger.error(__CTX__, "[OutOfPaper] Polling error:", error);
+        appLogger.error(CTX, "[OutOfPaper] Polling error:", error);
       }
     }, REFETCH_INTERVAL.OUT_OF_PAPER * 1000);
 
@@ -87,7 +89,7 @@ export default function OutOfPaper({
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
     >
-      {/* Back button â€” hidden in overlay mode or maintenance/auto-redirect */}
+      {/* Back button — hidden in overlay mode or maintenance/auto-redirect */}
       {!shouldHideBackAndPoll && <BackButton onBackClick={handleBack} />}
 
       {/* Main content */}
@@ -138,9 +140,9 @@ export default function OutOfPaper({
             color: theme?.fontColor || "#2c2c2c",
           }}
         >
-          à¸‚à¸­à¸­à¸ à¸±à¸¢à¹ƒà¸™à¸„à¸§à¸²à¸¡à¹„à¸¡à¹ˆà¸ªà¸°à¸”à¸§à¸
+          ขออภัยในความไม่สะดวก
           <br />
-          à¸à¸£à¸¸à¸“à¸²à¸•à¸´à¸”à¸•à¹ˆà¸­à¸žà¸™à¸±à¸à¸‡à¸²à¸™ à¸«à¸£à¸·à¸­à¹à¸­à¸”à¹„à¸¥à¸™à¹Œ à¹€à¸žà¸·à¹ˆà¸­à¹à¸ˆà¹‰à¸‡à¹à¸­à¸”à¸¡à¸´à¸™
+          กรุณาติดต่อพนักงาน หรือแอดไลน์ เพื่อแจ้งแอดมิน
         </p>
 
         {/* QR Code */}

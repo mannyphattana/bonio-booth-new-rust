@@ -1,11 +1,13 @@
-﻿import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { appLogger } from "../utils/appLogger";
 import { invoke } from "@tauri-apps/api/core";
 import { DEVICE_CHECK } from "../config/appConfig";
 import { logError } from "../utils/logger";
 
-// DS-RX1 à¹à¸¥à¸° printer à¸šà¸²à¸‡à¸£à¸¸à¹ˆà¸™à¸ˆà¸° re-enumerate USB à¸Šà¸±à¹ˆà¸§à¸„à¸£à¸²à¸§ (2-3 à¸§à¸´) à¸£à¸°à¸«à¸§à¹ˆà¸²à¸‡ wakeup/ribbon load
-// à¹ƒà¸Šà¹‰ debounce à¸à¹ˆà¸­à¸™à¸¢à¸´à¸‡ alert à¹€à¸žà¸·à¹ˆà¸­à¸à¸£à¸­à¸‡ false disconnect à¸­à¸­à¸
+const CTX = "[useDeviceCheck]";
+
+// DS-RX1 และ printer บางรุ่นจะ re-enumerate USB ชั่วคราว (2-3 วิ) ระหว่าง wakeup/ribbon load
+// ใช้ debounce ก่อนยิง alert เพื่อกรอง false disconnect ออก
 const PRINTER_DISCONNECT_DEBOUNCE_MS = 5000;
 
 interface DeviceCheckOptions {
@@ -42,8 +44,8 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     camera: false,
     printer: false,
   });
-  // Debounce timer à¸ªà¸³à¸«à¸£à¸±à¸š printer disconnect
-  // à¸–à¹‰à¸² printer reconnect à¸à¹ˆà¸­à¸™ timer à¸¢à¸´à¸‡ = brief re-enum â†’ à¸¢à¸à¹€à¸¥à¸´à¸ alert
+  // Debounce timer สำหรับ printer disconnect
+  // ถ้า printer reconnect ก่อน timer ยิง = brief re-enum → ยกเลิก alert
   const printerDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkDevices = useCallback(async () => {
@@ -107,16 +109,16 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         if (foundPrinter?.status) printerLastStatus = foundPrinter.status;
 
         if (foundPrinter) {
-          appLogger.info(__CTX__, 
-            `[useDeviceCheck] Printer "${savedPrinter}": is_online=${foundPrinter.is_online}, status="${foundPrinter.status}"`,
-          );
+          // appLogger.info(CTX, 
+          //   `[useDeviceCheck] Printer "${savedPrinter}": is_online=${foundPrinter.is_online}, status="${foundPrinter.status}"`,
+          // );
         } else {
-          appLogger.info(__CTX__, 
+          appLogger.info(CTX, 
             `[useDeviceCheck] Printer "${savedPrinter}": not found in printer list`,
           );
         }
       } catch (err) {
-        appLogger.error(__CTX__, "[useDeviceCheck] Error checking printers:", err);
+        appLogger.error(CTX, "[useDeviceCheck] Error checking printers:", err);
         printerConnected = false;
       }
     }
@@ -134,10 +136,10 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
             isStartup: true,
             cameraConfigured: isConfiguredCamera,
             cameraFound: cameraConnected,
-            cameraDeviceName: cameraName || "à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²",
+            cameraDeviceName: cameraName || "ไม่ได้ตั้งค่า",
             printerConfigured: isConfiguredPrinter,
             printerFound: printerConnected,
-            printerDeviceDetail: printerName ? `Main: ${printerName}` : "à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²",
+            printerDeviceDetail: printerName ? `Main: ${printerName}` : "ไม่ได้ตั้งค่า",
             printerAvailableNames: availablePrinterNames,
           });
         } catch {
@@ -145,8 +147,8 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         }
       }
 
-      // If either device is configured but not found on startup â†’ maintenance
-      // (à¸‚à¹‰à¸²à¸¡à¸–à¹‰à¸² ALLOW_TEST_WITHOUT_DEVICES = true à¹€à¸žà¸·à¹ˆà¸­à¹€à¸—à¸ªà¸•à¹ˆà¸­à¹€à¸™à¸·à¹ˆà¸­à¸‡à¹‚à¸”à¸¢à¹„à¸¡à¹ˆà¸‚à¸¶à¹‰à¸™ maintenance)
+      // If either device is configured but not found on startup → maintenance
+      // (ข้ามถ้า ALLOW_TEST_WITHOUT_DEVICES = true เพื่อเทสต่อเนื่องโดยไม่ขึ้น maintenance)
       if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES) {
         if (
           (isConfiguredCamera && !cameraConnected) ||
@@ -209,7 +211,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         }
       }
 
-      // Printer disconnect transition â€” à¹ƒà¸Šà¹‰ debounce à¹€à¸žà¸·à¹ˆà¸­à¸à¸£à¸­à¸‡ DS-RX1 brief re-enum (2-3 à¸§à¸´)
+      // Printer disconnect transition — ใช้ debounce เพื่อกรอง DS-RX1 brief re-enum (2-3 วิ)
       if (
         isConfiguredPrinter &&
         prevState.printerConnected &&
@@ -220,10 +222,10 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         const capturedPrinterName = printerName;
         const capturedAvailableNames = [...availablePrinterNames];
         const capturedPrinterStatus = printerLastStatus;
-        appLogger.info(__CTX__, `[useDeviceCheck] Printer disconnected (status: ${capturedPrinterStatus}), waiting ${PRINTER_DISCONNECT_DEBOUNCE_MS}ms to confirm...`);
+        appLogger.info(CTX, `[useDeviceCheck] Printer disconnected (status: ${capturedPrinterStatus}), waiting ${PRINTER_DISCONNECT_DEBOUNCE_MS}ms to confirm...`);
         printerDisconnectTimerRef.current = setTimeout(async () => {
           printerDisconnectTimerRef.current = null;
-          // à¸•à¸£à¸§à¸ˆà¸ˆà¸±à¸šà¸­à¸µà¸à¸„à¸£à¸±à¹‰à¸‡ â€” à¸–à¹‰à¸²à¸¢à¸±à¸‡à¸«à¸¥à¸¸à¸”à¸­à¸¢à¸¹à¹ˆà¸„à¹ˆà¸­à¸¢à¸ªà¹ˆà¸‡ alert
+          // ตรวจจับอีกครั้ง — ถ้ายังหลุดอยู่ค่อยส่ง alert
           let stillDisconnected = true;
           let confirmedStatus = capturedPrinterStatus;
           try {
@@ -232,7 +234,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
             stillDisconnected = !found?.is_online;
             if (found?.status) confirmedStatus = found.status;
           } catch {
-            // à¸–à¹‰à¸² check à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸–à¸·à¸­à¸§à¹ˆà¸²à¸¢à¸±à¸‡à¸«à¸¥à¸¸à¸”
+            // ถ้า check ไม่ได้ถือว่ายังหลุด
           }
           if (stillDisconnected) {
             alertSentRef.current.printer = true;
@@ -252,7 +254,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
             );
             if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES && onMaintenanceNeeded) onMaintenanceNeeded();
           } else {
-            appLogger.info(__CTX__, "[useDeviceCheck] Printer reconnected within debounce window, ignoring transient disconnect");
+            appLogger.info(CTX, "[useDeviceCheck] Printer reconnected within debounce window, ignoring transient disconnect");
           }
         }, PRINTER_DISCONNECT_DEBOUNCE_MS);
       }
@@ -264,13 +266,13 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         printerConnected
       ) {
         if (printerDisconnectTimerRef.current) {
-          // Reconnect à¸¡à¸²à¸ à¸²à¸¢à¹ƒà¸™ debounce window = DS-RX1 brief re-enum
-          // à¸¢à¸à¹€à¸¥à¸´à¸ timer à¹€à¸‡à¸µà¸¢à¸šà¹† à¹„à¸¡à¹ˆà¸¢à¸´à¸‡ reconnect noti (à¹€à¸žà¸£à¸²à¸°à¹„à¸¡à¹ˆà¹€à¸„à¸¢à¸¢à¸´à¸‡ disconnect)
+          // Reconnect มาภายใน debounce window = DS-RX1 brief re-enum
+          // ยกเลิก timer เงียบๆ ไม่ยิง reconnect noti (เพราะไม่เคยยิง disconnect)
           clearTimeout(printerDisconnectTimerRef.current);
           printerDisconnectTimerRef.current = null;
-          appLogger.info(__CTX__, "[useDeviceCheck] Printer back within debounce window â€” transient disconnect ignored");
+          appLogger.info(CTX, "[useDeviceCheck] Printer back within debounce window — transient disconnect ignored");
         } else {
-          // alert disconnect à¸–à¸¹à¸à¸ªà¹ˆà¸‡à¹„à¸›à¹à¸¥à¹‰à¸§ â†’ à¸ªà¹ˆà¸‡ reconnect notification
+          // alert disconnect ถูกส่งไปแล้ว → ส่ง reconnect notification
           alertSentRef.current.printer = false;
           try {
             await invoke("send_device_reconnected", {
@@ -282,8 +284,8 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
       }
     }
 
-    // à¹€à¸¡à¸·à¹ˆà¸­à¸­à¸¸à¸›à¸à¸£à¸“à¹Œà¸—à¸µà¹ˆà¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²à¹„à¸§à¹‰à¸¢à¸±à¸‡à¸«à¸¥à¸¸à¸”à¸­à¸¢à¸¹à¹ˆ à¹ƒà¸«à¹‰à¹à¸ˆà¹‰à¸‡ maintenance
-    // (printer: à¸£à¸­ debounce à¸œà¹ˆà¸²à¸™à¸à¹ˆà¸­à¸™ à¹€à¸žà¸·à¹ˆà¸­à¹„à¸¡à¹ˆà¹‚à¸Šà¸§à¹Œ overlay à¸ˆà¸²à¸ DS-RX1 brief re-enum)
+    // เมื่ออุปกรณ์ที่ตั้งค่าไว้ยังหลุดอยู่ ให้แจ้ง maintenance
+    // (printer: รอ debounce ผ่านก่อน เพื่อไม่โชว์ overlay จาก DS-RX1 brief re-enum)
     if (!DEVICE_CHECK.ALLOW_TEST_WITHOUT_DEVICES) {
       const printerReallyDisconnected = isConfiguredPrinter && !printerConnected && !printerDisconnectTimerRef.current;
       if (
@@ -305,14 +307,14 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
     // Listen for USB device changes (immediate detection on hot-plug/unplug)
     // This fires for webcams, printers, and other USB devices
     const handleDeviceChange = () => {
-      appLogger.info(__CTX__, "[useDeviceCheck] USB device change detected, checking devices...");
+      appLogger.info(CTX, "[useDeviceCheck] USB device change detected, checking devices...");
       // Small delay to let Windows settle after USB event
       setTimeout(checkDevices, 1000);
     };
     try {
       navigator.mediaDevices?.addEventListener("devicechange", handleDeviceChange);
     } catch {
-      // mediaDevices not available â€” fall back to polling only
+      // mediaDevices not available — fall back to polling only
     }
 
     return () => {

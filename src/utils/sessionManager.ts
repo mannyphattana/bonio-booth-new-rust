@@ -62,6 +62,27 @@ export async function initSession(): Promise<void> {
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  // --- ตรวจสอบ crash ระหว่างถ่ายรูป (MainShooting)
+  const shootingRaw = localStorage.getItem("bonio_shooting_crash");
+  if (shootingRaw) {
+    try {
+      const shooting = JSON.parse(shootingRaw);
+      if (shooting.transactionCode) {
+        appLogger.warn("[SessionManager]", `Crash during shooting detected — transactionCode: ${shooting.transactionCode}`);
+        await invoke("update_transaction_session_note", {
+          transactionCode: shooting.transactionCode,
+          sessionNote: `App crash detected during shooting (started: ${shooting.startedAt})`,
+          closeReason: "crash",
+        }).catch((e) => {
+          appLogger.error("[SessionManager]", `Failed to update crash sessionNote: ${e}`);
+        });
+      }
+    } catch {
+      // JSON parse error — ล้างทิ้ง
+    }
+    localStorage.removeItem("bonio_shooting_crash");
+  }
+
   // --- เริ่ม session ใหม่
   _sessionId = generateUUID();
   _startedAt = new Date().toISOString();
