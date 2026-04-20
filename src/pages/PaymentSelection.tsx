@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
-import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
@@ -20,7 +19,6 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
-  useIdleTimeout();
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const selectedQuantity = state.quantity || 1;

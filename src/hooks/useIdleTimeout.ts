@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "../utils/appLogger";
+import { logError } from "../utils/logger";
 
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -28,7 +29,11 @@ export function useIdleTimeout(options: IdleTimeoutOptions | string = "/") {
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
-      appLogger.warn("[IdleTimeout]", `Idle timeout fired — user inactive for 5 minutes${transactionCode ? `, txCode: ${transactionCode}` : ""}`);
+      const msg = `Idle timeout fired — user inactive for 5 minutes${transactionCode ? `, txCode: ${transactionCode}` : ""}`;
+      appLogger.warn("[IdleTimeout]", msg);
+
+      // ส่ง error log ไป backend ทันที (ไม่ต้องรอปิด app)
+      logError("idle_timeout", msg, undefined, "info");
 
       // บันทึก sessionNote ลง transaction ถ้ามี transactionCode
       if (transactionCode) {

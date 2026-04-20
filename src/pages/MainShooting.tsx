@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
-import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import { useCanon } from "../hooks/useCanon";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
@@ -180,7 +179,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     height: 600,
   });
   const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
-  useIdleTimeout({ transactionCode: state?.referenceId });
 
   useEffect(() => {
     const updateContainerDimensions = () => {
@@ -197,9 +195,18 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
   useEffect(() => {
     appLogger.info(CTX, `Mounted — frame: ${selectedFrame?.name || 'unknown'}, slots: ${totalSlots}, totalCaptures: ${totalCaptures}`);
+    // บันทึก crash flag ไว้ใน localStorage — ถ้า app crash จะยังค้างอยู่ → ตรวจพบตอน startup ครั้งถัดไป
+    if (state?.referenceId) {
+      localStorage.setItem("bonio_shooting_crash", JSON.stringify({
+        transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+        startedAt: new Date().toISOString(),
+      }));
+    }
     initCamera();
     return () => {
       appLogger.info(CTX, "Unmounted — stopping camera");
+      // ออกปกติ → ลบ crash flag
+      localStorage.removeItem("bonio_shooting_crash");
       stopCamera();
     };
   }, []);
@@ -325,12 +332,14 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       try {
         const stream = await navigator.mediaDevices.getUserMedia(constraint);
         streamRef.current = stream;
+        let vw = 0;
+        let vh = 0;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await new Promise<void>((resolve) => {
             videoRef.current!.onloadedmetadata = () => {
-              const vw = videoRef.current!.videoWidth;
-              const vh = videoRef.current!.videoHeight;
+              vw = videoRef.current!.videoWidth;
+              vh = videoRef.current!.videoHeight;
               if (vw > 0 && vh > 0) {
                 setVideoDimensions({ width: vw, height: vh });
               }

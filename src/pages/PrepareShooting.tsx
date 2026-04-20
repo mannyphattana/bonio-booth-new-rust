@@ -1,7 +1,9 @@
 import { useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
-import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import { logError } from "../utils/logger";
+import { appLogger } from "../utils/appLogger";
+import { invoke } from "@tauri-apps/api/core";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
@@ -18,7 +20,6 @@ export default function PrepareShooting({ theme, machineData, onFormatReset, onB
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
-  useIdleTimeout({ transactionCode: state?.referenceId });
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   // const [countdown, setCountdown] = useState(PREPARE_DURATION); // Removed custom state
   const cameraCountdown = machineData.cameraCountdown || 5;
@@ -44,6 +45,24 @@ export default function PrepareShooting({ theme, machineData, onFormatReset, onB
     navigate("/main-shooting", { state });
   }, [navigate, state]);
 
+  const handleCountdownComplete = useCallback(async () => {
+    const msg = `Countdown expired on PrepareShooting${state?.referenceId ? `, txCode: ${state.referenceId}` : ""}`;
+    appLogger.warn("[PrepareShooting]", msg);
+    logError("countdown_timeout", msg, undefined, "info");
+    if (state?.referenceId) {
+      try {
+        await invoke("update_transaction_session_note", {
+          transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+          sessionNote: "Countdown expired on prepare shooting page — user did not start",
+          closeReason: "timeout",
+        });
+      } catch (err) {
+        appLogger.error("[PrepareShooting]", `update_transaction_session_note failed: ${err}`);
+      }
+    }
+    navigate("/");
+  }, [navigate, state]);
+
   return (
     <div
       className="page-container page-space-between" // เพิ่ม class page-space-between
@@ -58,7 +77,7 @@ export default function PrepareShooting({ theme, machineData, onFormatReset, onB
       {/* 1. Header Bar: แสดง Countdown (ไม่มี BackButton ตาม Legacy) */}
       <Countdown
         seconds={COUNTDOWN.PHOTO_PREPARE.DURATION}
-        onComplete={() => navigate("/")}
+        onComplete={handleCountdownComplete}
       />
 
       <div className="page-main-content" style={{ marginTop: "60px" }}>

@@ -1,18 +1,15 @@
-﻿import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { appLogger } from "../utils/appLogger";
+import { logError } from "../utils/logger";
 import { useNavigate, useLocation } from "react-router-dom";
-import type {
-  ThemeData,
-  MachineData,
-  Capture,
-  FrameSlot,
-  FrameData,
-} from "../App";
-import { useIdleTimeout } from "../hooks/useIdleTimeout";
+import { invoke } from "@tauri-apps/api/core";
+import type { ThemeData, MachineData, Capture, FrameData, FrameSlot } from "../App";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+
+const CTX = "[SlotSelection]";
 
 interface Props {
   theme: ThemeData;
@@ -25,7 +22,6 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
-  useIdleTimeout({ transactionCode: state?.referenceId });
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const captures: Capture[] = state.captures || [];
@@ -128,46 +124,64 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
-  // ðŸ‘‡ðŸ‘‡ðŸ‘‡ à¹à¸à¹‰à¹„à¸‚ Logic à¸à¸²à¸£à¸ªà¸¥à¸±à¸šà¸£à¸¹à¸›à¹ƒà¸«à¸¡à¹ˆà¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”à¸•à¸£à¸‡à¸™à¸µà¹‰à¸„à¸£à¸±à¸š ðŸ‘‡ðŸ‘‡ðŸ‘‡
+  // 👇👇👇 แก้ไข Logic การสลับรูปใหม่ทั้งหมดตรงนี้ครับ 👇👇👇
+const handleCountdownComplete = async () => {
+    const msg = `Countdown expired on SlotSelection${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
+    appLogger.warn(CTX, msg);
+    logError("countdown_timeout", msg, undefined, "info");
+    if (state?.referenceId) {
+      try {
+        await invoke("update_transaction_session_note", {
+          transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+          sessionNote: "Countdown expired on slot selection page",
+          closeReason: "timeout",
+        });
+      } catch (err) {
+        appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
+      }
+    }
+    navigate("/");
+  };
+
   const handleNext = () => {
     if (getAssignedCount() < slots.length) return;
 
-    // 1. à¸”à¸¶à¸‡ Index à¸—à¸µà¹ˆà¸¥à¸¹à¸à¸„à¹‰à¸²à¹€à¸¥à¸·à¸­à¸à¸¡à¸²à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”
+    // 1. ดึง Index ที่ลูกค้าเลือกมาทั้งหมด
     let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
       return captureIdx !== undefined ? captureIdx : 0;
     });
 
-    // 2. à¸„à¹‰à¸™à¸«à¸²à¸à¸­à¸‡à¸«à¸™à¸¸à¸™: à¸”à¸¶à¸‡ Index à¹€à¸‰à¸žà¸²à¸°à¸£à¸¹à¸›à¸—à¸µà¹ˆ "à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸–à¸¹à¸à¹€à¸¥à¸·à¸­à¸" à¹à¸¥à¸° "à¸¡à¸µà¸§à¸´à¸”à¸µà¹‚à¸­à¸ªà¸¡à¸šà¸¹à¸£à¸“à¹Œ"
+    // 2. ค้นหากองหนุน: ดึง Index เฉพาะรูปที่ "ไม่ได้ถูกเลือก" และ "มีวิดีโอสมบูรณ์"
     let spareValidIndexes = captures
       .map((cap, idx) => ({ cap, idx }))
-      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx)) // à¸•à¹‰à¸­à¸‡à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸–à¸¹à¸à¹€à¸¥à¸·à¸­à¸à¹„à¸›à¹à¸¥à¹‰à¸§
-      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "") // à¸§à¸´à¸”à¸µà¹‚à¸­à¸•à¹‰à¸­à¸‡à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰
+      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx)) // ต้องไม่ได้ถูกเลือกไปแล้ว
+      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "") // วิดีโอต้องใช้งานได้
       .map((item) => item.idx);
 
-    // 3. à¸ªà¹à¸à¸™à¸•à¸£à¸§à¸ˆà¸ªà¸­à¸šà¸£à¸¹à¸›à¸—à¸µà¹ˆà¸¥à¸¹à¸à¸„à¹‰à¸²à¹€à¸¥à¸·à¸­à¸ à¸–à¹‰à¸²à¸£à¸¹à¸›à¹„à¸«à¸™à¸§à¸´à¸”à¸µà¹‚à¸­à¸žà¸±à¸‡ à¸ªà¸¥à¸±à¸šà¹€à¸­à¸²à¸‚à¸­à¸‡à¸”à¸µà¸¡à¸²à¹ƒà¸ªà¹ˆà¹à¸—à¸™à¸—à¸±à¹‰à¸‡à¸Šà¸¸à¸”
+    // 3. สแกนตรวจสอบรูปที่ลูกค้าเลือก ถ้ารูปไหนวิดีโอพัง สลับเอาของดีมาใส่แทนทั้งชุด
     finalSelectedCaptureIndexes = finalSelectedCaptureIndexes.map((currentIdx) => {
       const currentCap = captures[currentIdx];
       const isBroken = !currentCap || !currentCap.videoPath || currentCap.videoPath.trim() === "";
 
       if (isBroken) {
-        appLogger.warn(__CTX__, `[Smart Fallback] à¸£à¸¹à¸›à¸—à¸µà¹ˆ ${currentIdx + 1} à¹„à¸¡à¹ˆà¸¡à¸µà¸§à¸´à¸”à¸µà¹‚à¸­!`);
+        appLogger.warn(CTX, `[Smart Fallback] รูปที่ ${currentIdx + 1} ไม่มีวิดีโอ!`);
         
         if (spareValidIndexes.length > 0) {
-          // à¸”à¸¶à¸‡à¸à¸­à¸‡à¸«à¸™à¸¸à¸™à¸¡à¸²à¸ªà¸§à¸¡à¸£à¸­à¸¢ "à¸—à¸±à¹‰à¸‡à¸£à¸¹à¸›à¸ à¸²à¸žà¹à¸¥à¸°à¸§à¸´à¸”à¸µà¹‚à¸­" à¸ˆà¸°à¹„à¸”à¹‰à¹„à¸¡à¹ˆà¸¡à¸µà¸­à¸²à¸à¸²à¸£à¸ à¸²à¸žà¸à¸£à¸°à¸•à¸¸à¸
+          // ดึงกองหนุนมาสวมรอย "ทั้งรูปภาพและวิดีโอ" จะได้ไม่มีอาการภาพกระตุก
           const spareIdx = spareValidIndexes.shift()!;
-          appLogger.info(__CTX__, `-> à¸ªà¸¥à¸±à¸šà¹„à¸›à¹ƒà¸Šà¹‰à¸£à¸¹à¸›à¹à¸¥à¸°à¸§à¸´à¸”à¸µà¹‚à¸­à¸ˆà¸²à¸à¸Šà¹ˆà¸­à¸‡à¸—à¸µà¹ˆ ${spareIdx + 1} à¹à¸—à¸™à¹€à¸£à¸µà¸¢à¸šà¸£à¹‰à¸­à¸¢`);
+          appLogger.info(CTX, `-> สลับไปใช้รูปและวิดีโอจากช่องที่ ${spareIdx + 1} แทนเรียบร้อย`);
           return spareIdx; 
         } else {
-          // à¸—à¹ˆà¸²à¹„à¸¡à¹‰à¸•à¸²à¸¢à¸à¹‰à¸™à¸«à¸µà¸š: à¸–à¹‰à¸²à¸à¸­à¸‡à¸«à¸™à¸¸à¸™à¸žà¸±à¸‡à¹€à¸à¸¥à¸µà¹‰à¸¢à¸‡à¸«à¸¡à¸”à¸•à¸¹à¹‰à¸ˆà¸£à¸´à¸‡à¹† à¹ƒà¸«à¹‰à¸”à¸¶à¸‡à¸§à¸´à¸”à¸µà¹‚à¸­à¹„à¸«à¸™à¸à¹‡à¹„à¸”à¹‰à¸—à¸µà¹ˆà¸ªà¸¡à¸šà¸¹à¸£à¸“à¹Œà¸¡à¸²à¹ƒà¸Šà¹‰à¸à¸±à¸™à¸£à¸°à¸šà¸šà¹à¸„à¸£à¸Š/à¸ˆà¸­à¸”à¸³
+          // ท่าไม้ตายก้นหีบ: ถ้ากองหนุนพังเกลี้ยงหมดตู้จริงๆ ให้ดึงวิดีโอไหนก็ได้ที่สมบูรณ์มาใช้กันระบบแครช/จอดำ
           const emergencyIdx = captures.findIndex(c => c && c.videoPath && c.videoPath.trim() !== "");
           return emergencyIdx !== -1 ? emergencyIdx : currentIdx;
         }
       }
-      return currentIdx; // à¸–à¹‰à¸²à¸£à¸¹à¸›à¸›à¸à¸•à¸´ à¸à¹‡à¹ƒà¸Šà¹‰à¸£à¸¹à¸›à¹€à¸”à¸´à¸¡à¸—à¸µà¹ˆà¸¥à¸¹à¸à¸„à¹‰à¸²à¹€à¸¥à¸·à¸­à¸
+      return currentIdx; // ถ้ารูปปกติ ก็ใช้รูปเดิมที่ลูกค้าเลือก
     });
 
-    // 4. à¸›à¸£à¸°à¸à¸­à¸šà¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¹ƒà¸«à¹‰à¸žà¸£à¹‰à¸­à¸¡à¸ªà¹ˆà¸‡
+    // 4. ประกอบข้อมูลให้พร้อมส่ง
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
 
     navigate("/apply-filter", {
@@ -178,7 +192,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
       },
     });
   };
-  // ðŸ‘†ðŸ‘†ðŸ‘† à¸ˆà¸šà¸à¸²à¸£à¹à¸à¹‰à¹„à¸‚ ðŸ‘†ðŸ‘†ðŸ‘†
+  // 👆👆👆 จบการแก้ไข 👆👆👆
 
   if (!selectedFrame) return null;
 
@@ -200,7 +214,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
       {/* Countdown */}
       <Countdown
         seconds={COUNTDOWN.SLOT_SELECTION.DURATION}
-        onComplete={() => navigate("/")}
+        onComplete={handleCountdownComplete}
       />
 
       <div className="page-main-content" style={{ marginTop: "60px", height: "calc(100vh - 60px)", display: "flex", flexDirection: "column", padding: "10px 20px" }}>
@@ -208,7 +222,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
         <div className="page-row-top" style={{ flex: "0 0 auto", marginBottom: "8px", padding: "40px 0" }}>
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
-              à¹€à¸¥à¸·à¸­à¸à¸£à¸¹à¸›à¸‚à¸­à¸‡à¸„à¸¸à¸“
+              เลือกรูปของคุณ
             </h1>
             <p className="title-english" style={{ color: theme.fontColor }}>
               SELECT YOUR PHOTOS ({selectedPhotos.length}/{slots.length})
@@ -216,7 +230,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
           </div>
         </div>
 
-        {/* Row 2: Body â€“ frame + thumbnails */}
+        {/* Row 2: Body – frame + thumbnails */}
         <div
           className="page-row-body"
           style={{ flexDirection: "column", gap: "20px", flex: 1, overflow: "hidden" }}
@@ -280,7 +294,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                   >
                     {captureIdx !== undefined && (
                       <img
-                        src={captures[captureIdx].photoPreview || captures[captureIdx].photo}
+                        src={(captures[captureIdx].photoPreview || captures[captureIdx].photo) || null}
                         alt=""
                         decoding="async"
                         style={{
@@ -303,12 +317,12 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
               flexWrap: "wrap",
               gap: "12px",
               justifyContent: "center",
-              alignItems: "flex-start", // à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¸ˆà¸²à¸ center à¹€à¸›à¹‡à¸™ flex-start à¹€à¸žà¸·à¹ˆà¸­à¹ƒà¸«à¹‰à¸£à¸¹à¸›à¸Šà¸´à¸”à¸šà¸™
-              alignContent: "flex-start", // à¸ˆà¸±à¸”à¸à¸¥à¸¸à¹ˆà¸¡à¸šà¸£à¸£à¸—à¸±à¸”à¹ƒà¸«à¹‰à¸Šà¸´à¸”à¸šà¸™
+              alignItems: "flex-start", // เปลี่ยนจาก center เป็น flex-start เพื่อให้รูปชิดบน
+              alignContent: "flex-start", // จัดกลุ่มบรรทัดให้ชิดบน
               zIndex: 20,
               width: "90%",
-              flex: 1, // à¹ƒà¸«à¹‰à¸‚à¸¢à¸²à¸¢à¹€à¸•à¹‡à¸¡à¸žà¸·à¹‰à¸™à¸—à¸µà¹ˆà¸—à¸µà¹ˆà¹€à¸«à¸¥à¸·à¸­
-              overflow: "hidden", // à¸‹à¹ˆà¸­à¸™ scrollbar
+              flex: 1, // ให้ขยายเต็มพื้นที่ที่เหลือ
+              overflow: "hidden", // ซ่อน scrollbar
               padding: "10px",
             }}
           >
@@ -337,7 +351,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                   }}
                 >
                   <img
-                    src={cap.photoPreview || cap.photo}
+                    src={(cap.photoPreview || cap.photo) || null}
                     alt=""
                     decoding="async"
                     style={{
@@ -427,8 +441,8 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                   ? theme.primaryColor
                   : "gray",
               color: theme.textButtonColor,
-              padding: "12px 40px", // à¸¥à¸”à¸‚à¸™à¸²à¸”à¸›à¸¸à¹ˆà¸¡à¸¥à¸‡
-              fontSize: "20px", // à¸¥à¸”à¸‚à¸™à¸²à¸”à¸•à¸±à¸§à¸­à¸±à¸à¸©à¸£à¸¥à¸‡
+              padding: "12px 40px", // ลดขนาดปุ่มลง
+              fontSize: "20px", // ลดขนาดตัวอักษรลง
               borderRadius: "30px",
             }}
           >

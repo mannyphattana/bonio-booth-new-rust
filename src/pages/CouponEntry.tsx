@@ -1,14 +1,15 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
-import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+
+const CTX = "[CouponEntry]";
 
 interface Props {
   theme: ThemeData;
@@ -28,7 +29,6 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
-  useIdleTimeout();
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,7 +53,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
 
   const handleSubmit = async () => {
     if (!code.trim()) {
-      setError("à¸à¸£à¸¸à¸“à¸²à¹ƒà¸ªà¹ˆà¹‚à¸„à¹‰à¸”à¸„à¸¹à¸›à¸­à¸‡");
+      setError("กรุณาใส่โค้ดคูปอง");
       return;
     }
 
@@ -65,7 +65,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
       const checkResult: any = await invoke("check_coupon", { code });
 
       if (!checkResult.success) {
-        setError("à¸„à¸¹à¸›à¸­à¸‡à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰");
+        setError("คูปองไม่สามารถใช้งานได้");
         setLoading(false);
         return;
       }
@@ -79,13 +79,13 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
 
       // Validate that couponCodeId exists
       if (!couponCodeId || couponCodeId.trim() === "") {
-        setError("à¸„à¸¹à¸›à¸­à¸‡à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰");
+        setError("คูปองไม่สามารถใช้งานได้");
         setLoading(false);
         return;
       }
 
-      appLogger.info(__CTX__, 
-        "ðŸŽŸï¸ [CouponEntry] Coupon check passed, couponCodeId:",
+      appLogger.info(CTX, 
+        "🎟️ [CouponEntry] Coupon check passed, couponCodeId:",
         couponCodeId,
       );
 
@@ -97,10 +97,10 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
         couponCodeId: couponCodeId || null,
       });
 
-      appLogger.info(__CTX__, "ðŸŽŸï¸ [CouponEntry] Payment result:", paymentResult);
+      appLogger.info(CTX, "🎟️ [CouponEntry] Payment result:", paymentResult);
 
       if (!paymentResult.success) {
-        setError("à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¸ªà¸£à¹‰à¸²à¸‡à¸£à¸²à¸¢à¸à¸²à¸£à¹„à¸”à¹‰ à¸à¸£à¸¸à¸“à¸²à¸¥à¸­à¸‡à¹ƒà¸«à¸¡à¹ˆ");
+        setError("ไม่สามารถสร้างรายการได้ กรุณาลองใหม่");
         setLoading(false);
         return;
       }
@@ -115,15 +115,15 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
       const isFree =
         payData.netAmount === 0 || payData.qr_code === null || !payData.qr_code;
 
-      appLogger.info(__CTX__, 
-        "ðŸŽŸï¸ [CouponEntry] transactionId:",
+      appLogger.info(CTX, 
+        "🎟️ [CouponEntry] transactionId:",
         transactionId,
         "isFree:",
         isFree,
       );
 
       if (isFree) {
-        // Free coupon â€” skip payment QR, go directly to frame selection
+        // Free coupon — skip payment QR, go directly to frame selection
         navigate("/frame-selection", {
           state: {
             ...state,
@@ -134,7 +134,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
           },
         });
       } else {
-        // Discounted but not free â€” go to payment QR with existing payment data
+        // Discounted but not free — go to payment QR with existing payment data
         navigate("/payment-qr", {
           state: {
             ...state,
@@ -148,8 +148,8 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
         });
       }
     } catch (err: any) {
-      appLogger.error(__CTX__, "ðŸŽŸï¸ [CouponEntry] Error:", err);
-      setError("à¸„à¸¹à¸›à¸­à¸‡à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰");
+      appLogger.error(CTX, "🎟️ [CouponEntry] Error:", err);
+      setError("คูปองไม่สามารถใช้งานได้");
       setLoading(false);
       return;
     }
@@ -186,7 +186,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
         <div className="page-row-top">
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
-              à¹ƒà¸Šà¹‰à¸„à¸¹à¸›à¸­à¸‡à¸ªà¹ˆà¸§à¸™à¸¥à¸”
+              ใช้คูปองส่วนลด
             </h1>
             <p className="title-english" style={{ color: theme.fontColor }}>
               USE DISCOUNT COUPON

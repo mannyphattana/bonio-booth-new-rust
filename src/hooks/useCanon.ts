@@ -115,7 +115,7 @@ export function useCanon() {
       return true;
     } catch (err: any) {
       const errorMsg = typeof err === "string" ? err : JSON.stringify(err);
-      appLogger.error("[useCanon]", `[useCanon] SDK init error:: ${errorMsg)}`);
+      appLogger.error("[useCanon]", `[useCanon] SDK init error: ${errorMsg}`);
       logError("canon_sdk_init", `SDK init error: ${errorMsg}`, undefined, "critical");
       setState((s) => ({ ...s, error: `SDK init error: ${errorMsg}` }));
       return false;
@@ -225,10 +225,10 @@ export function useCanon() {
         return dataUrl;
       }
 
-      appLogger.error("[useCanon]", `[useCanon] Capture #${captureNum} failed:: ${result.error)}`);
+      appLogger.error("[useCanon]", `[useCanon] Capture #${captureNum} failed: ${result.error}`);
       return "";
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] Capture #${captureNum} error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] Capture #${captureNum} error: ${err}`);
 
       // Always try to recover
       isCapturingRef.current = false;
@@ -290,10 +290,10 @@ export function useCanon() {
         return dataUrl;
       }
 
-      appLogger.error("[useCanon]", `[useCanon] Quick capture #${captureNum} failed:: ${result.error)}`);
+      appLogger.error("[useCanon]", `[useCanon] Quick capture #${captureNum} failed: ${result.error}`);
       return "";
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] Quick capture #${captureNum} error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] Quick capture #${captureNum} error: ${err}`);
       isCapturingRef.current = false;
       try {
         await invoke("canon_start_live_view");
@@ -357,10 +357,10 @@ export function useCanon() {
         return dataUrl;
       }
 
-      appLogger.error("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} failed:: ${result.error)}`);
+      appLogger.error("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} failed: ${result.error}`);
       return "";
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] Photo-during-recording #${captureNum} error: ${err}`);
       isCapturingRef.current = false;
       try {
         await invoke("canon_start_live_view");
@@ -412,7 +412,7 @@ export function useCanon() {
       appLogger.info("[useCanon]", "[useCanon] Movie recording started");
       return true;
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] startMovieRecording error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] startMovieRecording error: ${err}`);
       // Try to resume live view even on error
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
@@ -431,7 +431,7 @@ export function useCanon() {
       stopLiveViewPolling();
       appLogger.info("[useCanon]", "[useCanon] Stopping movie recording...");
       const moviePath: string = await invoke("canon_stop_movie_record");
-      appLogger.info("[useCanon]", `[useCanon] Movie file downloaded:: ${moviePath)}`);
+      appLogger.info("[useCanon]", `[useCanon] Movie file downloaded: ${moviePath}`);
       // Restart live view + polling
       try {
         await invoke("canon_start_live_view");
@@ -441,7 +441,7 @@ export function useCanon() {
       }
       return moviePath;
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] stopMovieRecording error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] stopMovieRecording error: ${err}`);
       // Try to recover
       try {
         await invoke("canon_start_live_view");
@@ -468,7 +468,7 @@ export function useCanon() {
       appLogger.info("[useCanon]", "[useCanon] Movie recording stopped â€” camera ready for photo");
       return true;
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] stopMovieRecordingFast error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] stopMovieRecordingFast error: ${err}`);
       return false;
     }
   }, [stopLiveViewPolling]);
@@ -486,14 +486,14 @@ export function useCanon() {
       stopLiveViewPolling();
       appLogger.info("[useCanon]", "[useCanon] Finalizing movie download...");
       const moviePath: string = await invoke("canon_finalize_movie_download");
-      appLogger.info("[useCanon]", `[useCanon] Movie file downloaded:: ${moviePath)}`);
+      appLogger.info("[useCanon]", `[useCanon] Movie file downloaded: ${moviePath}`);
       // Resume LV polling
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
       }
       return moviePath;
     } catch (err: any) {
-      appLogger.error("[useCanon]", `[useCanon] finalizeMovieDownload error:: ${err)}`);
+      appLogger.error("[useCanon]", `[useCanon] finalizeMovieDownload error: ${err}`);
       // Resume LV polling even on error
       if (!isCleanedUpRef.current) {
         startLiveViewPolling();
