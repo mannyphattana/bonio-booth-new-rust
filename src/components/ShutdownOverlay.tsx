@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+﻿import { invoke } from "@tauri-apps/api/core";
+import { appLogger } from "../utils/appLogger";
 import type { ShutdownState } from "../hooks/useShutdown";
 
 interface Props {
@@ -7,7 +8,7 @@ interface Props {
 }
 
 /**
- * Shutdown countdown overlay — shown when dashboard triggers a shutdown
+ * Shutdown countdown overlay â€” shown when dashboard triggers a shutdown
  * or when the machine is outside operating hours (timer auto-shutdown).
  *
  * Behavior:
@@ -25,7 +26,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
     if (isTimer) {
       // Timer-based: cancel entirely so the customer can use the machine
       // The periodic poll will re-check and restart if still outside operating hours
-      invoke("cancel_timer_shutdown").catch(console.error);
+      invoke("cancel_timer_shutdown").catch((e) => appLogger.error("[ShutdownOverlay]", `cancel_timer_shutdown error: ${e}`));
     } else {
       // Manual/dashboard: just reset the countdown
       onActivity?.();
@@ -43,22 +44,22 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
   // Determine title and description based on shutdown type
   const getTitle = () => {
     if (isTimer) {
-      return "ขออภัย เนื่องจากอยู่นอกเวลาทำการ";
+      return "à¸‚à¸­à¸­à¸ à¸±à¸¢ à¹€à¸™à¸·à¹ˆà¸­à¸‡à¸ˆà¸²à¸à¸­à¸¢à¸¹à¹ˆà¸™à¸­à¸à¹€à¸§à¸¥à¸²à¸—à¸³à¸à¸²à¸£";
     }
     if (isCloseApp) {
-      return "กำลังจะปิดแอพ";
+      return "à¸à¸³à¸¥à¸±à¸‡à¸ˆà¸°à¸›à¸´à¸”à¹à¸­à¸ž";
     }
-    return "กำลังจะปิดเครื่อง";
+    return "à¸à¸³à¸¥à¸±à¸‡à¸ˆà¸°à¸›à¸´à¸”à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡";
   };
 
   const getDescription = () => {
     if (isTimer) {
-      return "เครื่องจะปิดตัวลงอีก " + timeStr + " นาที";
+      return "à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸ˆà¸°à¸›à¸´à¸”à¸•à¸±à¸§à¸¥à¸‡à¸­à¸µà¸ " + timeStr + " à¸™à¸²à¸—à¸µ";
     }
     if (isCloseApp) {
-      return "แอพจะปิดตัวลงอีก " + timeStr + " นาที";
+      return "à¹à¸­à¸žà¸ˆà¸°à¸›à¸´à¸”à¸•à¸±à¸§à¸¥à¸‡à¸­à¸µà¸ " + timeStr + " à¸™à¸²à¸—à¸µ";
     }
-    return "ปิดเครื่องจาก Dashboard";
+    return "à¸›à¸´à¸”à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸ˆà¸²à¸ Dashboard";
   };
 
   return (
@@ -80,7 +81,7 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
       onClick={handleClick}
     >
       {/* Warning icon */}
-      <div style={{ fontSize: 64, marginBottom: 24 }}>⚠️</div>
+      <div style={{ fontSize: 64, marginBottom: 24 }}>âš ï¸</div>
 
       {/* Title */}
       <h1
@@ -145,8 +146,8 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
         }}
       >
         {isTimer
-          ? "แตะหน้าจอเพื่อเริ่มใช้งาน"
-          : "แตะหน้าจอเพื่อรีเซ็ตเวลา"}
+          ? "à¹à¸•à¸°à¸«à¸™à¹‰à¸²à¸ˆà¸­à¹€à¸žà¸·à¹ˆà¸­à¹€à¸£à¸´à¹ˆà¸¡à¹ƒà¸Šà¹‰à¸‡à¸²à¸™"
+          : "à¹à¸•à¸°à¸«à¸™à¹‰à¸²à¸ˆà¸­à¹€à¸žà¸·à¹ˆà¸­à¸£à¸µà¹€à¸‹à¹‡à¸•à¹€à¸§à¸¥à¸²"}
       </p>
 
       <style>{`
@@ -158,3 +159,4 @@ export default function ShutdownOverlay({ state, onActivity }: Props) {
     </div>
   );
 }
+

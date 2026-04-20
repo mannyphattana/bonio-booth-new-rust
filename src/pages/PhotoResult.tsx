@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useCallback } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { QRCodeSVG } from "qrcode.react";
@@ -55,13 +56,13 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const [uploadStatus, setUploadStatus] = useState<string>("processing");
   const [printStatus, setPrintStatus] = useState<string>("idle");
   const [error, setError] = useState("");
-  const [, setStatusText] = useState("กำลังประมวลผล...");
+  const [, setStatusText] = useState("à¸à¸³à¸¥à¸±à¸‡à¸›à¸£à¸°à¸¡à¸§à¸¥à¸œà¸¥...");
 
   const hasStarted = useRef(false);
   const hasCreatedPresign = useRef(false);
   const hasUploadedFiles = useRef(false);
   const hasLoggedMissingVideoRef = useRef(false);
-  useIdleTimeout();
+  useIdleTimeout({ transactionCode: state?.referenceId });
 
   const buildVideoPathsBySlot = useCallback((): string[] => {
     const slotVideoPaths = frameCaptures.map((cap) => cap.videoPath || "");
@@ -131,7 +132,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           cameraType: string;
         } => item !== null);
 
-      console.warn("[Video Slot Fallback Summary]", {
+      appLogger.warn(__CTX__, "[Video Slot Fallback Summary]", {
         missingSlots,
         fallbackAssignments,
       });
@@ -143,7 +144,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
 
   const composeFrame = useCallback(async () => {
     try {
-      setStatusText("กำลังรวมรูปภาพ...");
+      setStatusText("à¸à¸³à¸¥à¸±à¸‡à¸£à¸§à¸¡à¸£à¸¹à¸›à¸ à¸²à¸ž...");
       const photosBase64 = frameCaptures.map((c: Capture) => c.photo);
 
       const result: string = await invoke("compose_frame", {
@@ -157,7 +158,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       setComposedImage(result);
       return result;
     } catch (err) {
-      console.error("Compose frame error:", err);
+      appLogger.error(__CTX__, "Compose frame error:", err);
       setError("Failed to compose frame");
       return "";
     }
@@ -214,7 +215,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     createPresignSession();
   }, [state?.transactionId, state?.referenceId]); 
 
-  // 🚨 1. ทำการสร้างรูป, สร้างวิดีโอ และเซฟลงเครื่องแยกต่างหาก (เป็นอิสระจากการอัปโหลด)
+  // ðŸš¨ 1. à¸—à¸³à¸à¸²à¸£à¸ªà¸£à¹‰à¸²à¸‡à¸£à¸¹à¸›, à¸ªà¸£à¹‰à¸²à¸‡à¸§à¸´à¸”à¸µà¹‚à¸­ à¹à¸¥à¸°à¹€à¸‹à¸Ÿà¸¥à¸‡à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¹à¸¢à¸à¸•à¹ˆà¸²à¸‡à¸«à¸²à¸ (à¹€à¸›à¹‡à¸™à¸­à¸´à¸ªà¸£à¸°à¸ˆà¸²à¸à¸à¸²à¸£à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”)
   useEffect(() => {
     if (hasStarted.current) return;
     hasStarted.current = true;
@@ -223,19 +224,19 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       const txId = state.transactionId || state.referenceId || new Date().getTime();
 
       // =====================================
-      // 1. จัดการรูปภาพ (รวมกรอบ + เซฟ + ปริ้นท์)
+      // 1. à¸ˆà¸±à¸”à¸à¸²à¸£à¸£à¸¹à¸›à¸ à¸²à¸ž (à¸£à¸§à¸¡à¸à¸£à¸­à¸š + à¹€à¸‹à¸Ÿ + à¸›à¸£à¸´à¹‰à¸™à¸—à¹Œ)
       // =====================================
       const composedImg = await composeFrame();
       if (composedImg) {
-        // เซฟรูปที่รวมกรอบแล้ว
+        // à¹€à¸‹à¸Ÿà¸£à¸¹à¸›à¸—à¸µà¹ˆà¸£à¸§à¸¡à¸à¸£à¸­à¸šà¹à¸¥à¹‰à¸§
         try {
           await invoke("save_to_local_drive", {
             imageDataBase64: composedImg,
             filename: `BonioBooth_${txId}_Frame.jpg`, 
           });
-        } catch (err) { console.error(err); }
+        } catch (err) { appLogger.error(__CTX__, err); }
 
-        // เซฟรูปเดี่ยวทุกรูป
+        // à¹€à¸‹à¸Ÿà¸£à¸¹à¸›à¹€à¸”à¸µà¹ˆà¸¢à¸§à¸—à¸¸à¸à¸£à¸¹à¸›
         for (let i = 0; i < frameCaptures.length; i++) {
           if (frameCaptures[i].photo) {
             try {
@@ -243,17 +244,17 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
                 imageDataBase64: frameCaptures[i].photo,
                 filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
               });
-            } catch (err) { console.error(err); }
+            } catch (err) { appLogger.error(__CTX__, err); }
           }
         }
-        console.log("✅ [PhotoResult] Saved all photos to local drive successfully!");
+        appLogger.info(__CTX__, "âœ… [PhotoResult] Saved all photos to local drive successfully!");
 
-        // สั่งปริ้นท์ทันทีที่รูปเสร็จ (ไม่ต้องรอวิดีโอ)
+        // à¸ªà¸±à¹ˆà¸‡à¸›à¸£à¸´à¹‰à¸™à¸—à¹Œà¸—à¸±à¸™à¸—à¸µà¸—à¸µà¹ˆà¸£à¸¹à¸›à¹€à¸ªà¸£à¹‡à¸ˆ (à¹„à¸¡à¹ˆà¸•à¹‰à¸­à¸‡à¸£à¸­à¸§à¸´à¸”à¸µà¹‚à¸­)
         printFrame(composedImg, quantity);
       }
 
       // =====================================
-      // 2. จัดการวิดีโอ (รวมเฟรม + เซฟ)
+      // 2. à¸ˆà¸±à¸”à¸à¸²à¸£à¸§à¸´à¸”à¸µà¹‚à¸­ (à¸£à¸§à¸¡à¹€à¸Ÿà¸£à¸¡ + à¹€à¸‹à¸Ÿ)
       // =====================================
       let composedVid = "";
       const resolvedVideoBySlot = buildVideoPathsBySlot();
@@ -265,7 +266,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       const videoSlots = slotVideoPairs.map((pair) => pair.slot);
 
       if (videoPaths.length > 0) {
-        setStatusText("กำลังรวมวิดีโอ...");
+        setStatusText("à¸à¸³à¸¥à¸±à¸‡à¸£à¸§à¸¡à¸§à¸´à¸”à¸µà¹‚à¸­...");
         try {
           let lutPath: string | null = null;
           if (selectedFilter && selectedFilter.type === "lut" && selectedFilter.lutFile) {
@@ -286,21 +287,21 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             lutPath: lutPath,
           });
 
-          // เซฟวิดีโอลงเครื่อง
+          // à¹€à¸‹à¸Ÿà¸§à¸´à¸”à¸µà¹‚à¸­à¸¥à¸‡à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡
           try {
             await invoke("copy_video_to_local_drive", {
               sourcePath: composedVid,
               filename: `BonioBooth_${txId}_Video.mp4`, 
             });
-            console.log("✅ [PhotoResult] Saved video to local drive successfully!");
-          } catch (err) { console.error(err); }
+            appLogger.info(__CTX__, "âœ… [PhotoResult] Saved video to local drive successfully!");
+          } catch (err) { appLogger.error(__CTX__, err); }
 
         } catch (err) {
-          console.error("Video compose failed:", err);
+          appLogger.error(__CTX__, "Video compose failed:", err);
         }
       }
 
-      // ตั้งค่าให้รู้ว่าการประมวลผลไฟล์ทั้งหมดพร้อมสำหรับการอัปโหลดแล้ว
+      // à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²à¹ƒà¸«à¹‰à¸£à¸¹à¹‰à¸§à¹ˆà¸²à¸à¸²à¸£à¸›à¸£à¸°à¸¡à¸§à¸¥à¸œà¸¥à¹„à¸Ÿà¸¥à¹Œà¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”à¸žà¸£à¹‰à¸­à¸¡à¸ªà¸³à¸«à¸£à¸±à¸šà¸à¸²à¸£à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¹à¸¥à¹‰à¸§
       setFinalVideoPath(composedVid);
       setMediaReady(true);
     };
@@ -320,7 +321,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     state.transactionId,
   ]);
 
-  // 🚨 2. อัปโหลดเมื่อไฟล์พร้อมและได้รับ Session ID แล้วเท่านั้น
+  // ðŸš¨ 2. à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¹€à¸¡à¸·à¹ˆà¸­à¹„à¸Ÿà¸¥à¹Œà¸žà¸£à¹‰à¸­à¸¡à¹à¸¥à¸°à¹„à¸”à¹‰à¸£à¸±à¸š Session ID à¹à¸¥à¹‰à¸§à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™
   const uploadFiles = useCallback(async () => {
     if (hasUploadedFiles.current) return;
     if (!mediaReady || !sessionId || uploadUrls.length === 0) return;
@@ -329,7 +330,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
 
     try {
       setUploadStatus("uploading");
-      setStatusText("กำลังอัปโหลด...");
+      setStatusText("à¸à¸³à¸¥à¸±à¸‡à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”...");
 
       const photoUrls = uploadUrls
         .filter((u: any) => u.type === "photo")
@@ -341,9 +342,9 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       const uploadedFiles: { key: string; type: string; order: number }[] = [];
       let photoIdx = 0;
 
-      // อัปโหลดรูปที่รวมกรอบแล้ว
+      // à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¸—à¸µà¹ˆà¸£à¸§à¸¡à¸à¸£à¸­à¸šà¹à¸¥à¹‰à¸§
       if (photoIdx < photoUrls.length && composedImage) {
-        setStatusText("กำลังอัปโหลดรูปเฟรม...");
+        setStatusText("à¸à¸³à¸¥à¸±à¸‡à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¹€à¸Ÿà¸£à¸¡...");
         const composedPath: string = await invoke("save_temp_image", {
           imageDataBase64: composedImage,
           filename: "frame-photo.jpg",
@@ -363,10 +364,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         photoIdx++;
       }
 
-      // อัปโหลดรูปเดี่ยว
+      // à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¹€à¸”à¸µà¹ˆà¸¢à¸§
       for (let i = 0; i < frameCaptures.length && photoIdx < photoUrls.length; i++) {
         if (!frameCaptures[i].photo) continue;
-        setStatusText(`กำลังอัปโหลดรูป ${i + 1}/${frameCaptures.length}...`);
+        setStatusText(`à¸à¸³à¸¥à¸±à¸‡à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸› ${i + 1}/${frameCaptures.length}...`);
         const photoPath: string = await invoke("save_temp_image", {
           imageDataBase64: frameCaptures[i].photo,
           filename: `photo-${i + 1}.jpg`,
@@ -386,9 +387,9 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         photoIdx++;
       }
 
-      // อัปโหลดวิดีโอ
+      // à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸§à¸´à¸”à¸µà¹‚à¸­
       if (videoUrls.length > 0 && finalVideoPath) {
-        setStatusText("กำลังอัปโหลดวิดีโอ...");
+        setStatusText("à¸à¸³à¸¥à¸±à¸‡à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸§à¸´à¸”à¸µà¹‚à¸­...");
         try {
           await invoke("upload_to_presigned_url", {
             url: videoUrls[0].uploadUrl,
@@ -403,7 +404,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         } catch (err) {}
       }
 
-      // คอนเฟิร์มการอัปโหลด
+      // à¸„à¸­à¸™à¹€à¸Ÿà¸´à¸£à¹Œà¸¡à¸à¸²à¸£à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”
       if (uploadedFiles.length > 0) {
         try {
           await invoke("confirm_upload", {
@@ -414,14 +415,14 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       }
 
       setUploadStatus("done");
-      setStatusText("อัปโหลดเสร็จสิ้น!");
+      setStatusText("à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¹€à¸ªà¸£à¹‡à¸ˆà¸ªà¸´à¹‰à¸™!");
     } catch (err) {
       setUploadStatus("error");
       hasUploadedFiles.current = false; 
     }
   }, [sessionId, uploadUrls, composedImage, finalVideoPath, frameCaptures, mediaReady]);
 
-  // ดักจับและเรียกใช้ Upload เมื่อทุกอย่างพร้อม
+  // à¸”à¸±à¸à¸ˆà¸±à¸šà¹à¸¥à¸°à¹€à¸£à¸µà¸¢à¸à¹ƒà¸Šà¹‰ Upload à¹€à¸¡à¸·à¹ˆà¸­à¸—à¸¸à¸à¸­à¸¢à¹ˆà¸²à¸‡à¸žà¸£à¹‰à¸­à¸¡
   useEffect(() => {
     if (mediaReady && sessionId && uploadUrls.length > 0 && !hasUploadedFiles.current) {
       uploadFiles();
@@ -517,7 +518,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         const printers: any[] = await invoke("get_printers");
         const hasPrinter = printers.some((p: any) => p.is_online);
         if (!hasPrinter && printStatus === "printing") {
-          setError("เครื่องปริ้นถูกถอดออก กรุณาเชื่อมต่อใหม่");
+          setError("à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸›à¸£à¸´à¹‰à¸™à¸–à¸¹à¸à¸–à¸­à¸”à¸­à¸­à¸ à¸à¸£à¸¸à¸“à¸²à¹€à¸Šà¸·à¹ˆà¸­à¸¡à¸•à¹ˆà¸­à¹ƒà¸«à¸¡à¹ˆ");
           setTimeout(() => navigate("/"), 3000);
         }
       } catch {}
@@ -557,7 +558,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           marginBottom: 4,
         }}
       >
-        ภาพถ่ายของคุณ
+        à¸ à¸²à¸žà¸–à¹ˆà¸²à¸¢à¸‚à¸­à¸‡à¸„à¸¸à¸“
       </h1>
       <p
         style={{
@@ -614,7 +615,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
               textAlign: "center",
             }}
           >
-            กำลังประมวลผลรูปภาพ...
+            à¸à¸³à¸¥à¸±à¸‡à¸›à¸£à¸°à¸¡à¸§à¸¥à¸œà¸¥à¸£à¸¹à¸›à¸ à¸²à¸ž...
           </div>
         )}
       </div>
@@ -630,7 +631,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }}
       >
         <p style={{ color: theme.fontColor, fontSize: 14 }}>
-          สแกนเพื่อดาวน์โหลดรูปภาพ
+          à¸ªà¹à¸à¸™à¹€à¸žà¸·à¹ˆà¸­à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¸ à¸²à¸ž
         </p>
 
         <div
@@ -668,26 +669,26 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }}
       >
         <span>
-          📤{" "}
+          ðŸ“¤{" "}
           {uploadStatus === "done"
-            ? "✅ Uploaded"
+            ? "âœ… Uploaded"
             : uploadStatus === "uploading"
-              ? "⏳ Uploading..."
+              ? "â³ Uploading..."
               : uploadStatus === "error"
-                ? "❌ Error"
-                : "⏳ Processing"}
+                ? "âŒ Error"
+                : "â³ Processing"}
         </span>
         <span>
-          🖨️{" "}
+          ðŸ–¨ï¸{" "}
           {printStatus === "done"
-            ? "✅ Printed"
+            ? "âœ… Printed"
             : printStatus === "printing"
-              ? "⏳ Printing..."
+              ? "â³ Printing..."
               : printStatus === "no-printer"
-                ? "⚠️ No printer"
+                ? "âš ï¸ No printer"
                 : printStatus === "error"
-                  ? "❌ Error"
-                  : "⏳ Waiting"}
+                  ? "âŒ Error"
+                  : "â³ Waiting"}
         </span>
       </div>
 
@@ -718,7 +719,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           transition: "all 0.3s ease" 
         }}
       >
-        {isUploading ? "⏳ กำลังอัปโหลดภาพและวิดีโอ..." : "กลับหน้าหลัก / HOME"}
+        {isUploading ? "â³ à¸à¸³à¸¥à¸±à¸‡à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸ à¸²à¸žà¹à¸¥à¸°à¸§à¸´à¸”à¸µà¹‚à¸­..." : "à¸à¸¥à¸±à¸šà¸«à¸™à¹‰à¸²à¸«à¸¥à¸±à¸ / HOME"}
       </button>
       <ContextMenu
         open={showContextMenu}

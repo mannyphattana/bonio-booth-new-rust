@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+﻿import { useState, useEffect, useCallback, useRef } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
@@ -35,7 +36,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
   const createPayment = useCallback(async () => {
     // If payment was already created (e.g. from coupon flow), reuse it
     if (state.referenceId && state.qrcode) {
-      console.log("💳 [PaymentQR] Reusing existing payment from state");
+      appLogger.info(__CTX__, "ðŸ’³ [PaymentQR] Reusing existing payment from state");
       setQrCodeUrl(state.qrcode);
       setReferenceId(state.referenceId);
       setPaymentTransactionId(state.transactionId || "");
@@ -56,7 +57,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
         setPaymentTransactionId(result.data.transactionId || "");
         setStatus("PENDING");
       } else {
-        setError("ไม่สามารถสร้าง QR Code ได้");
+        setError("à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¸ªà¸£à¹‰à¸²à¸‡ QR Code à¹„à¸”à¹‰");
         setStatus("ERROR");
       }
     } catch (err: any) {
@@ -67,7 +68,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
 
   const checkStatus = useCallback(async () => {
     if (!referenceId || status !== "PENDING") return;
-    // Prevent concurrent requests — skip if previous check is still in-flight
+    // Prevent concurrent requests â€” skip if previous check is still in-flight
     if (isCheckingRef.current) return;
     isCheckingRef.current = true;
 
@@ -107,14 +108,14 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
           }, 2000);
         }
         // Per Ksher docs:
-        // PAYERROR/CLOSED = definitive failure → stop polling, show error
-        // NOTPAY/PENDING/USERPAYING/NOTSURE/FAIL = still processing → keep polling
+        // PAYERROR/CLOSED = definitive failure â†’ stop polling, show error
+        // NOTPAY/PENDING/USERPAYING/NOTSURE/FAIL = still processing â†’ keep polling
         if (paymentStatus === "PAYERROR" || paymentStatus === "CLOSED") {
           setStatus("FAILED");
           setError(
             paymentStatus === "CLOSED"
-              ? "QR Code หมดอายุ กรุณาลองใหม่อีกครั้ง"
-              : "การชำระเงินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"
+              ? "QR Code à¸«à¸¡à¸”à¸­à¸²à¸¢à¸¸ à¸à¸£à¸¸à¸“à¸²à¸¥à¸­à¸‡à¹ƒà¸«à¸¡à¹ˆà¸­à¸µà¸à¸„à¸£à¸±à¹‰à¸‡"
+              : "à¸à¸²à¸£à¸Šà¸³à¸£à¸°à¹€à¸‡à¸´à¸™à¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ à¸à¸£à¸¸à¸“à¸²à¸¥à¸­à¸‡à¹ƒà¸«à¸¡à¹ˆà¸­à¸µà¸à¸„à¸£à¸±à¹‰à¸‡"
           );
           if (pollRef.current) clearInterval(pollRef.current);
           if (timerRef.current) clearInterval(timerRef.current);
@@ -125,12 +126,12 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
           paymentStatus === "NOTSURE" ||
           paymentStatus === "FAIL"
         ) {
-          // Still processing — continue polling
-          console.log(`Payment status: ${paymentStatus} for ${referenceId}, continuing to poll...`);
+          // Still processing â€” continue polling
+          appLogger.info(__CTX__, `Payment status: ${paymentStatus} for ${referenceId}, continuing to poll...`);
         }
       }
     } catch (err) {
-      console.error("Payment check error:", err);
+      appLogger.error(__CTX__, "Payment check error:", err);
     } finally {
       isCheckingRef.current = false;
     }
@@ -203,7 +204,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
               margin: "0 0 8px 0",
             }}
           >
-            สแกนจ่ายได้เลย!
+            à¸ªà¹à¸à¸™à¸ˆà¹ˆà¸²à¸¢à¹„à¸”à¹‰à¹€à¸¥à¸¢!
           </h1>
           <p
             style={{
@@ -345,7 +346,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                 />
               </svg>
               <p style={{ color: "#2ecc71", fontSize: 20, fontWeight: 600 }}>
-                ชำระเงินสำเร็จ!
+                à¸Šà¸³à¸£à¸°à¹€à¸‡à¸´à¸™à¸ªà¸³à¹€à¸£à¹‡à¸ˆ!
               </p>
             </div>
           )}
@@ -446,7 +447,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                 textAlign: "center",
               }}
             >
-              กรุณาชำระเงินภายในเวลาที่กำหนด
+              à¸à¸£à¸¸à¸“à¸²à¸Šà¸³à¸£à¸°à¹€à¸‡à¸´à¸™à¸ à¸²à¸¢à¹ƒà¸™à¹€à¸§à¸¥à¸²à¸—à¸µà¹ˆà¸à¸³à¸«à¸™à¸”
             </p>
             <p
               style={{
@@ -486,7 +487,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
         {status === "TIMEOUT" && (
           <div style={{ textAlign: "center", marginTop: 16 }}>
             <p style={{ color: "#e94560", fontSize: 18, marginBottom: 12 }}>
-              หมดเวลาการชำระเงิน
+              à¸«à¸¡à¸”à¹€à¸§à¸¥à¸²à¸à¸²à¸£à¸Šà¸³à¸£à¸°à¹€à¸‡à¸´à¸™
             </p>
             <button
               className="primary-button"
@@ -496,7 +497,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                 color: theme.textButtonColor,
               }}
             >
-              กลับหน้าหลัก
+              à¸à¸¥à¸±à¸šà¸«à¸™à¹‰à¸²à¸«à¸¥à¸±à¸
             </button>
           </div>
         )}
@@ -539,7 +540,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                 color: "#333",
               }}
             >
-              ต้องการยกเลิกการชำระเงิน?
+              à¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸¢à¸à¹€à¸¥à¸´à¸à¸à¸²à¸£à¸Šà¸³à¸£à¸°à¹€à¸‡à¸´à¸™?
             </p>
             <p
               style={{ margin: "8px 0 24px", fontSize: "1rem", color: "#666" }}
@@ -600,3 +601,4 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     </div>
   );
 }
+

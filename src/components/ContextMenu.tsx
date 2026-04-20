@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -34,12 +35,12 @@ export default function ContextMenu({
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
-  // State สำหรับรหัสปิดแอป (ของเดิม)
+  // State à¸ªà¸³à¸«à¸£à¸±à¸šà¸£à¸«à¸±à¸ªà¸›à¸´à¸”à¹à¸­à¸› (à¸‚à¸­à¸‡à¹€à¸”à¸´à¸¡)
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState(false);
 
-  // 🚨 State สำหรับรหัสผ่านเข้าเมนู (7053)
+  // ðŸš¨ State à¸ªà¸³à¸«à¸£à¸±à¸šà¸£à¸«à¸±à¸ªà¸œà¹ˆà¸²à¸™à¹€à¸‚à¹‰à¸²à¹€à¸¡à¸™à¸¹ (7053)
   const [isMenuUnlocked, setIsMenuUnlocked] = useState(false);
   const [unlockPinInput, setUnlockPinInput] = useState("");
   const [unlockPinError, setUnlockPinError] = useState(false);
@@ -67,7 +68,7 @@ export default function ContextMenu({
     setPinInput("");
     setPinError(false);
     
-    // 🚨 รีเซ็ตสถานะการล็อกทุกครั้งที่เปิดเมนูใหม่
+    // ðŸš¨ à¸£à¸µà¹€à¸‹à¹‡à¸•à¸ªà¸–à¸²à¸™à¸°à¸à¸²à¸£à¸¥à¹‡à¸­à¸à¸—à¸¸à¸à¸„à¸£à¸±à¹‰à¸‡à¸—à¸µà¹ˆà¹€à¸›à¸´à¸”à¹€à¸¡à¸™à¸¹à¹ƒà¸«à¸¡à¹ˆ
     setIsMenuUnlocked(false);
     setUnlockPinInput("");
     setUnlockPinError(false);
@@ -81,21 +82,21 @@ export default function ContextMenu({
     setCloseAppPinState(getCloseAppPin());
 
     // Get app version
-    getVersion().then(v => setAppVersion(v)).catch(console.error);
+    getVersion().then(v => setAppVersion(v)).catch((e) => appLogger.error("[ContextMenu]", `getVersion error: ${e}`));
 
     // Camera status
     const cameraType = localStorage.getItem("cameraType") || "webcam";
     if (cameraType === "webcam") {
       const label = localStorage.getItem("selectedCameraLabel");
-      setCameraStatus(label ? `Webcam: ${label}` : "Webcam (ยังไม่ได้เลือก)");
+      setCameraStatus(label ? `Webcam: ${label}` : "Webcam (à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¹€à¸¥à¸·à¸­à¸)");
     } else {
       const name = localStorage.getItem("selectedCameraName");
-      setCameraStatus(name ? `DSLR: ${name}` : "Canon/DSLR (ยังไม่ได้เลือก)");
+      setCameraStatus(name ? `DSLR: ${name}` : "Canon/DSLR (à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¹€à¸¥à¸·à¸­à¸)");
     }
 
     // Printer status
     const printer = localStorage.getItem("selectedPrinter");
-    setPrinterStatus(printer || "ยังไม่ได้เลือก");
+    setPrinterStatus(printer || "à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¹€à¸¥à¸·à¸­à¸");
   }, [open]);
 
   const handleFormatReset = async () => {
@@ -117,13 +118,16 @@ export default function ContextMenu({
 
   const handleCloseApp = async () => {
     try {
+      // à¸ªà¹ˆà¸‡ session log à¸à¹ˆà¸­à¸™ exit à¹€à¸ªà¸¡à¸­
+      const { sendSessionLog } = await import("../utils/sessionManager");
+      await sendSessionLog("user_exit");
       await invoke("exit_app");
     } catch {
       window.close();
     }
   };
 
-  // 🚨 ฟังก์ชันจัดการปุ่มกดรหัสสำหรับ "เข้าเมนู (7053)"
+  // ðŸš¨ à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸ˆà¸±à¸”à¸à¸²à¸£à¸›à¸¸à¹ˆà¸¡à¸à¸”à¸£à¸«à¸±à¸ªà¸ªà¸³à¸«à¸£à¸±à¸š "à¹€à¸‚à¹‰à¸²à¹€à¸¡à¸™à¸¹ (7053)"
   const handleUnlockPinKey = (key: string) => {
     if (key === "del") {
       setUnlockPinInput((p) => p.slice(0, -1));
@@ -147,7 +151,7 @@ export default function ContextMenu({
     }
   };
 
-  // ฟังก์ชันจัดการปุ่มกดรหัสสำหรับ "ปิดแอป"
+  // à¸Ÿà¸±à¸‡à¸à¹Œà¸Šà¸±à¸™à¸ˆà¸±à¸”à¸à¸²à¸£à¸›à¸¸à¹ˆà¸¡à¸à¸”à¸£à¸«à¸±à¸ªà¸ªà¸³à¸«à¸£à¸±à¸š "à¸›à¸´à¸”à¹à¸­à¸›"
   const handlePinKey = (key: string) => {
     if (key === "del") {
       setPinInput((p) => p.slice(0, -1));
@@ -220,10 +224,10 @@ export default function ContextMenu({
         setCloseAppPin(next);
         setMenuPinState(next);
         setCloseAppPinState(next);
-        setPinChangeSuccess("บันทึก PIN ใหม่สำเร็จ (ใช้ทั้งเข้าเมนูและปิดแอป)");
+        setPinChangeSuccess("à¸šà¸±à¸™à¸—à¸¶à¸ PIN à¹ƒà¸«à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ (à¹ƒà¸Šà¹‰à¸—à¸±à¹‰à¸‡à¹€à¸‚à¹‰à¸²à¹€à¸¡à¸™à¸¹à¹à¸¥à¸°à¸›à¸´à¸”à¹à¸­à¸›)");
         setPinChangeError("");
       } else {
-        setPinChangeError("PIN ไม่ตรงกัน กรุณาลองใหม่");
+        setPinChangeError("PIN à¹„à¸¡à¹ˆà¸•à¸£à¸‡à¸à¸±à¸™ à¸à¸£à¸¸à¸“à¸²à¸¥à¸­à¸‡à¹ƒà¸«à¸¡à¹ˆ");
         setPinDraftInput("");
         setPinConfirmInput("");
         setPinFirstValue("");
@@ -243,7 +247,7 @@ export default function ContextMenu({
         return;
       }
 
-      // โหมดกดรหัสปิดแอป
+      // à¹‚à¸«à¸¡à¸”à¸à¸”à¸£à¸«à¸±à¸ªà¸›à¸´à¸”à¹à¸­à¸›
       if (showPinModal) {
         if (e.key >= "0" && e.key <= "9") handlePinKey(e.key);
         else if (e.key === "Backspace") handlePinKey("del");
@@ -253,7 +257,7 @@ export default function ContextMenu({
           setPinError(false);
         }
       } 
-      // โหมดกดรหัสเข้าเมนู (ยังไม่ปลดล็อก)
+      // à¹‚à¸«à¸¡à¸”à¸à¸”à¸£à¸«à¸±à¸ªà¹€à¸‚à¹‰à¸²à¹€à¸¡à¸™à¸¹ (à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¸›à¸¥à¸”à¸¥à¹‡à¸­à¸)
       else if (!isMenuUnlocked) {
         if (e.key >= "0" && e.key <= "9") handleUnlockPinKey(e.key);
         else if (e.key === "Backspace") handleUnlockPinKey("del");
@@ -268,7 +272,7 @@ export default function ContextMenu({
 
   const PAD = [["1","2","3"],["4","5","6"],["7","8","9"],["del","0",""]];
 
-  // 🚨 ด่านตรวจที่ 1: ถ้ายังไม่ได้ปลดล็อกรหัส 7053 ให้แสดงหน้าต่างนี้ขวางไว้
+  // ðŸš¨ à¸”à¹ˆà¸²à¸™à¸•à¸£à¸§à¸ˆà¸—à¸µà¹ˆ 1: à¸–à¹‰à¸²à¸¢à¸±à¸‡à¹„à¸¡à¹ˆà¹„à¸”à¹‰à¸›à¸¥à¸”à¸¥à¹‡à¸­à¸à¸£à¸«à¸±à¸ª 7053 à¹ƒà¸«à¹‰à¹à¸ªà¸”à¸‡à¸«à¸™à¹‰à¸²à¸•à¹ˆà¸²à¸‡à¸™à¸µà¹‰à¸‚à¸§à¸²à¸‡à¹„à¸§à¹‰
   if (!isMenuUnlocked) {
     return (
       <div
@@ -276,8 +280,8 @@ export default function ContextMenu({
         onClick={(e) => { e.stopPropagation(); onClose(); }}
       >
         <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 320, textAlign: "center" }}>
-          <h3 style={{ margin: "0 0 8px" }}>🔒 รหัสผ่านตั้งค่า</h3>
-          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>กรอกรหัสผ่านเพื่อเข้าสู่เมนูผู้ดูแล</p>
+          <h3 style={{ margin: "0 0 8px" }}>ðŸ”’ à¸£à¸«à¸±à¸ªà¸œà¹ˆà¸²à¸™à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²</h3>
+          <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>à¸à¸£à¸­à¸à¸£à¸«à¸±à¸ªà¸œà¹ˆà¸²à¸™à¹€à¸žà¸·à¹ˆà¸­à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¹€à¸¡à¸™à¸¹à¸œà¸¹à¹‰à¸”à¸¹à¹à¸¥</p>
 
           {/* Dots */}
           <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
@@ -296,7 +300,7 @@ export default function ContextMenu({
           </div>
 
           {unlockPinError && (
-            <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>รหัสไม่ถูกต้อง</p>
+            <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>à¸£à¸«à¸±à¸ªà¹„à¸¡à¹ˆà¸–à¸¹à¸à¸•à¹‰à¸­à¸‡</p>
           )}
 
           {/* Numpad */}
@@ -317,7 +321,7 @@ export default function ContextMenu({
                   cursor: "pointer",
                 }}
               >
-                {key === "del" ? "⌫" : key}
+                {key === "del" ? "âŒ«" : key}
               </button>
             ))}
           </div>
@@ -327,14 +331,14 @@ export default function ContextMenu({
             style={{ marginTop: 16, justifyContent: "center", background: "#333" }}
             onClick={onClose}
           >
-            ยกเลิก
+            à¸¢à¸à¹€à¸¥à¸´à¸
           </button>
         </div>
       </div>
     );
   }
 
-  // ด่านตรวจที่ 2: PIN modal สำหรับยืนยันการ "ปิดแอป" (ของเดิม)
+  // à¸”à¹ˆà¸²à¸™à¸•à¸£à¸§à¸ˆà¸—à¸µà¹ˆ 2: PIN modal à¸ªà¸³à¸«à¸£à¸±à¸šà¸¢à¸·à¸™à¸¢à¸±à¸™à¸à¸²à¸£ "à¸›à¸´à¸”à¹à¸­à¸›" (à¸‚à¸­à¸‡à¹€à¸”à¸´à¸¡)
   if (showPinModal) {
     return (
       <div
@@ -342,7 +346,7 @@ export default function ContextMenu({
         onClick={(e) => { e.stopPropagation(); setShowPinModal(false); setPinInput(""); setPinError(false); }}
       >
         <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 320, textAlign: "center" }}>
-          <h3 style={{ margin: "0 0 8px" }}>🔒 ยืนยันรหัสก่อนปิดแอป</h3>
+          <h3 style={{ margin: "0 0 8px" }}>ðŸ”’ à¸¢à¸·à¸™à¸¢à¸±à¸™à¸£à¸«à¸±à¸ªà¸à¹ˆà¸­à¸™à¸›à¸´à¸”à¹à¸­à¸›</h3>
           <p style={{ fontSize: 13, opacity: 0.6, marginBottom: 16 }}>Enter PIN to close the app</p>
 
           <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
@@ -358,7 +362,7 @@ export default function ContextMenu({
             ))}
           </div>
 
-          {pinError && <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>รหัสไม่ถูกต้อง</p>}
+          {pinError && <p style={{ color: "#ff4444", fontSize: 13, marginBottom: 10 }}>à¸£à¸«à¸±à¸ªà¹„à¸¡à¹ˆà¸–à¸¹à¸à¸•à¹‰à¸­à¸‡</p>}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
             {PAD.flat().map((key, i) => (
@@ -372,7 +376,7 @@ export default function ContextMenu({
                   color: "#fff", cursor: "pointer",
                 }}
               >
-                {key === "del" ? "⌫" : key}
+                {key === "del" ? "âŒ«" : key}
               </button>
             ))}
           </div>
@@ -382,7 +386,7 @@ export default function ContextMenu({
             style={{ marginTop: 16, justifyContent: "center", background: "#333" }}
             onClick={() => { setShowPinModal(false); setPinInput(""); setPinError(false); }}
           >
-            ยกเลิก
+            à¸¢à¸à¹€à¸¥à¸´à¸
           </button>
         </div>
       </div>
@@ -415,12 +419,12 @@ export default function ContextMenu({
         }}
       >
         <div className="context-menu" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 340, textAlign: "center" }}>
-          <h3 style={{ margin: "0 0 8px" }}>🔐 เปลี่ยน PIN</h3>
+          <h3 style={{ margin: "0 0 8px" }}>ðŸ” à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™ PIN</h3>
 
           <p style={{ fontSize: 13, opacity: 0.7, marginBottom: 12 }}>
             {pinChangeStep === "enter"
-              ? "กรอก PIN ใหม่ (4 หลัก)"
-              : "ยืนยัน PIN อีกครั้ง"}
+              ? "à¸à¸£à¸­à¸ PIN à¹ƒà¸«à¸¡à¹ˆ (4 à¸«à¸¥à¸±à¸)"
+              : "à¸¢à¸·à¸™à¸¢à¸±à¸™ PIN à¸­à¸µà¸à¸„à¸£à¸±à¹‰à¸‡"}
           </p>
 
           <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 16 }}>
@@ -464,7 +468,7 @@ export default function ContextMenu({
                   opacity: pinChangeSuccess ? 0.5 : 1,
                 }}
               >
-                {key === "del" ? "⌫" : key}
+                {key === "del" ? "âŒ«" : key}
               </button>
             ))}
           </div>
@@ -475,7 +479,7 @@ export default function ContextMenu({
               style={{ justifyContent: "center", background: "#333", flex: 1 }}
               onClick={closePinChangeModal}
             >
-              ปิด
+              à¸›à¸´à¸”
             </button>
 
             {pinChangeSuccess && (
@@ -484,7 +488,7 @@ export default function ContextMenu({
                 style={{ justifyContent: "center", background: "#2f5f2f", flex: 1 }}
                 onClick={closePinChangeModal}
               >
-                เสร็จสิ้น
+                à¹€à¸ªà¸£à¹‡à¸ˆà¸ªà¸´à¹‰à¸™
               </button>
             )}
           </div>
@@ -493,7 +497,7 @@ export default function ContextMenu({
     );
   }
 
-  // หน้าจอเมนูหลัก (แสดงเมื่อกรอกรหัส 7053 ผ่านแล้ว)
+  // à¸«à¸™à¹‰à¸²à¸ˆà¸­à¹€à¸¡à¸™à¸¹à¸«à¸¥à¸±à¸ (à¹à¸ªà¸”à¸‡à¹€à¸¡à¸·à¹ˆà¸­à¸à¸£à¸­à¸à¸£à¸«à¸±à¸ª 7053 à¸œà¹ˆà¸²à¸™à¹à¸¥à¹‰à¸§)
   return (
     <div
       className="context-menu-overlay"
@@ -504,7 +508,7 @@ export default function ContextMenu({
     >
       <div className="context-menu" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>⚙️ Settings</h3>
+          <h3 style={{ margin: 0 }}>âš™ï¸ Settings</h3>
           {appVersion && (
             <span style={{ fontSize: 12, color: "#888", background: "#222", padding: "2px 8px", borderRadius: 12 }}>
               v{appVersion}
@@ -517,14 +521,14 @@ export default function ContextMenu({
           className="context-menu-item context-menu-config-item"
           onClick={() => setActiveModal("camera")}
         >
-          <span style={{ fontSize: 24 }}>📷</span>
+          <span style={{ fontSize: 24 }}>ðŸ“·</span>
           <div style={{ flex: 1, textAlign: "left" }}>
             <div style={{ fontWeight: 600 }}>Camera Config</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               {cameraStatus}
             </div>
           </div>
-          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>â€º</span>
         </button>
 
         {/* 2. Printer Config */}
@@ -532,14 +536,14 @@ export default function ContextMenu({
           className="context-menu-item context-menu-config-item"
           onClick={() => setActiveModal("printer")}
         >
-          <span style={{ fontSize: 24 }}>🖨️</span>
+          <span style={{ fontSize: 24 }}>ðŸ–¨ï¸</span>
           <div style={{ flex: 1, textAlign: "left" }}>
             <div style={{ fontWeight: 600 }}>Printer Config</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               {printerStatus}
             </div>
           </div>
-          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>â€º</span>
         </button>
 
         {/* 3. Paper Position Config */}
@@ -547,19 +551,19 @@ export default function ContextMenu({
           className="context-menu-item context-menu-config-item"
           onClick={() => setActiveModal("paper")}
         >
-          <span style={{ fontSize: 24 }}>📄</span>
+          <span style={{ fontSize: 24 }}>ðŸ“„</span>
           <div style={{ flex: 1, textAlign: "left" }}>
             <div style={{ fontWeight: 600 }}>Paper Position Config</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
-              ปรับ Scale, Vertical, Horizontal
+              à¸›à¸£à¸±à¸š Scale, Vertical, Horizontal
             </div>
           </div>
-          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>â€º</span>
         </button>
 
         <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
 
-        {/* 4. Request Image (พิมพ์ย้อนหลัง) */}
+        {/* 4. Request Image (à¸žà¸´à¸¡à¸žà¹Œà¸¢à¹‰à¸­à¸™à¸«à¸¥à¸±à¸‡) */}
         <button
           className="context-menu-item context-menu-config-item"
           onClick={() => {
@@ -567,14 +571,14 @@ export default function ContextMenu({
             navigate("/request-image");
           }}
         >
-          <span style={{ fontSize: 24 }}>🖼️</span>
+          <span style={{ fontSize: 24 }}>ðŸ–¼ï¸</span>
           <div style={{ flex: 1, textAlign: "left" }}>
-            <div style={{ fontWeight: 600 }}>พิมพ์ย้อนหลัง</div>
+            <div style={{ fontWeight: 600 }}>à¸žà¸´à¸¡à¸žà¹Œà¸¢à¹‰à¸­à¸™à¸«à¸¥à¸±à¸‡</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               Request Image Print
             </div>
           </div>
-          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>â€º</span>
         </button>
 
         <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
@@ -583,14 +587,14 @@ export default function ContextMenu({
           className="context-menu-item context-menu-config-item"
           onClick={() => setActiveModal("pin")}
         >
-          <span style={{ fontSize: 24 }}>🔐</span>
+          <span style={{ fontSize: 24 }}>ðŸ”</span>
           <div style={{ flex: 1, textAlign: "left" }}>
-            <div style={{ fontWeight: 600 }}>เปลี่ยน PIN</div>
+            <div style={{ fontWeight: 600 }}>à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™ PIN</div>
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               Menu PIN / Close App PIN
             </div>
           </div>
-          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>â€º</span>
         </button>
 
         <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
@@ -602,25 +606,25 @@ export default function ContextMenu({
             style={{ justifyContent: "center", color: "#ffa502" }}
             onClick={() => setShowResetConfirm(true)}
           >
-            🔄 Format Reset
+            ðŸ”„ Format Reset
           </button>
         ) : (
           <div className="context-menu-confirm-box">
             <p style={{ fontSize: 13, marginBottom: 8, textAlign: "center" }}>
-              ⚠️ ต้องการล้างค่าทั้งหมดและตั้งค่า Machine ใหม่?
+              âš ï¸ à¸•à¹‰à¸­à¸‡à¸à¸²à¸£à¸¥à¹‰à¸²à¸‡à¸„à¹ˆà¸²à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”à¹à¸¥à¸°à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² Machine à¹ƒà¸«à¸¡à¹ˆ?
             </p>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 className="context-menu-confirm-cancel"
                 onClick={() => setShowResetConfirm(false)}
               >
-                ยกเลิก
+                à¸¢à¸à¹€à¸¥à¸´à¸
               </button>
               <button
                 className="context-menu-confirm-ok"
                 onClick={handleFormatReset}
               >
-                ยืนยัน Reset
+                à¸¢à¸·à¸™à¸¢à¸±à¸™ Reset
               </button>
             </div>
           </div>
@@ -634,7 +638,7 @@ export default function ContextMenu({
           style={{ justifyContent: "center", color: "#ff4444" }}
           onClick={() => { setShowPinModal(true); setPinInput(""); setPinError(false); }}
         >
-          ❌ ปิดแอป / Close App
+          âŒ à¸›à¸´à¸”à¹à¸­à¸› / Close App
         </button>
 
         <button

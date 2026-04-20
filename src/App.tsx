@@ -1,6 +1,7 @@
 import { MemoryRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import Home from "./pages/Home";
 import PaymentSelection from "./pages/PaymentSelection";
 import CouponEntry from "./pages/CouponEntry";
@@ -26,6 +27,8 @@ import { useDeviceCheck } from "./hooks/useDeviceCheck";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
+import { initSession, sendSessionLog } from "./utils/sessionManager";
+import { appLogger } from "./utils/appLogger";
 import "./App.css";
 
 export interface ThemeData {
@@ -124,6 +127,21 @@ function App() {
     if (savedCameraType) {
       invoke("set_camera_type", { cameraType: savedCameraType }).catch(() => {});
     }
+
+    // เริ่ม session tracking (crash recovery + new session)
+    initSession().catch((e) => {
+      appLogger.warn("[App]", `initSession failed: ${e}`);
+    });
+
+    // ฟัง shutdown-starting event → ส่ง session log ก่อน timer/OS shutdown
+    const unlistenShutdown = listen("shutdown-starting", async () => {
+      appLogger.info("[App]", "shutdown-starting received — sending session log (timer/auto)");
+      await sendSessionLog("timer");
+    });
+
+    return () => {
+      unlistenShutdown.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
@@ -186,7 +204,7 @@ function App() {
           throw new Error("verify_machine failed");
         }
       } catch (err) {
-        console.error("Init error:", err);
+        appLogger.error("[App]", `initMachine error: ${err}`);
         setShowMaintenance(true);
         setMaintenanceConfig("network");
         setMaintenanceFromBackend(false);
@@ -200,7 +218,7 @@ function App() {
       const savedMachineId = localStorage.getItem("machineId");
       if (savedMachineId) {
         initRetryTimerRef.current = setInterval(() => {
-          console.log("[App] Retrying connection...");
+          appLogger.info("[App]", "Retrying connection to backend...");
           initMachine(savedMachineId);
         }, REFETCH_INTERVAL.SYSTEM_MAINTENANCE * 1000);
       }
@@ -228,7 +246,7 @@ function App() {
 
   const handleConfigUpdated = useCallback(
     (configType: string) => {
-      console.log("[App] Config updated via SSE:", configType);
+      appLogger.info("[App]", `Config updated via SSE: ${configType}`);
       const savedMachineId = localStorage.getItem("machineId");
       if (savedMachineId) {
         initMachine(savedMachineId);

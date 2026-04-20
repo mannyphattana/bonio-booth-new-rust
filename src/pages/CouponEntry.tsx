@@ -1,4 +1,5 @@
-import { useState } from "react";
+﻿import { useState } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
@@ -52,7 +53,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
 
   const handleSubmit = async () => {
     if (!code.trim()) {
-      setError("กรุณาใส่โค้ดคูปอง");
+      setError("à¸à¸£à¸¸à¸“à¸²à¹ƒà¸ªà¹ˆà¹‚à¸„à¹‰à¸”à¸„à¸¹à¸›à¸­à¸‡");
       return;
     }
 
@@ -64,7 +65,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
       const checkResult: any = await invoke("check_coupon", { code });
 
       if (!checkResult.success) {
-        setError("คูปองไม่สามารถใช้งานได้");
+        setError("à¸„à¸¹à¸›à¸­à¸‡à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰");
         setLoading(false);
         return;
       }
@@ -78,13 +79,13 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
 
       // Validate that couponCodeId exists
       if (!couponCodeId || couponCodeId.trim() === "") {
-        setError("คูปองไม่สามารถใช้งานได้");
+        setError("à¸„à¸¹à¸›à¸­à¸‡à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰");
         setLoading(false);
         return;
       }
 
-      console.log(
-        "🎟️ [CouponEntry] Coupon check passed, couponCodeId:",
+      appLogger.info(__CTX__, 
+        "ðŸŽŸï¸ [CouponEntry] Coupon check passed, couponCodeId:",
         couponCodeId,
       );
 
@@ -96,10 +97,10 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
         couponCodeId: couponCodeId || null,
       });
 
-      console.log("🎟️ [CouponEntry] Payment result:", paymentResult);
+      appLogger.info(__CTX__, "ðŸŽŸï¸ [CouponEntry] Payment result:", paymentResult);
 
       if (!paymentResult.success) {
-        setError("ไม่สามารถสร้างรายการได้ กรุณาลองใหม่");
+        setError("à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¸ªà¸£à¹‰à¸²à¸‡à¸£à¸²à¸¢à¸à¸²à¸£à¹„à¸”à¹‰ à¸à¸£à¸¸à¸“à¸²à¸¥à¸­à¸‡à¹ƒà¸«à¸¡à¹ˆ");
         setLoading(false);
         return;
       }
@@ -114,15 +115,15 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
       const isFree =
         payData.netAmount === 0 || payData.qr_code === null || !payData.qr_code;
 
-      console.log(
-        "🎟️ [CouponEntry] transactionId:",
+      appLogger.info(__CTX__, 
+        "ðŸŽŸï¸ [CouponEntry] transactionId:",
         transactionId,
         "isFree:",
         isFree,
       );
 
       if (isFree) {
-        // Free coupon — skip payment QR, go directly to frame selection
+        // Free coupon â€” skip payment QR, go directly to frame selection
         navigate("/frame-selection", {
           state: {
             ...state,
@@ -133,7 +134,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
           },
         });
       } else {
-        // Discounted but not free — go to payment QR with existing payment data
+        // Discounted but not free â€” go to payment QR with existing payment data
         navigate("/payment-qr", {
           state: {
             ...state,
@@ -147,8 +148,8 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
         });
       }
     } catch (err: any) {
-      console.error("🎟️ [CouponEntry] Error:", err);
-      setError("คูปองไม่สามารถใช้งานได้");
+      appLogger.error(__CTX__, "ðŸŽŸï¸ [CouponEntry] Error:", err);
+      setError("à¸„à¸¹à¸›à¸­à¸‡à¹„à¸¡à¹ˆà¸ªà¸²à¸¡à¸²à¸£à¸–à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰");
       setLoading(false);
       return;
     }
@@ -185,7 +186,7 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
         <div className="page-row-top">
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
-              ใช้คูปองส่วนลด
+              à¹ƒà¸Šà¹‰à¸„à¸¹à¸›à¸­à¸‡à¸ªà¹ˆà¸§à¸™à¸¥à¸”
             </h1>
             <p className="title-english" style={{ color: theme.fontColor }}>
               USE DISCOUNT COUPON
@@ -464,3 +465,4 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
     </div>
   );
 }
+

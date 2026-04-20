@@ -7,6 +7,9 @@ import { useCanon } from "../hooks/useCanon";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
+import { appLogger } from "../utils/appLogger";
+
+const CTX = "[MainShooting]";
 
 const CANON_VIDEO_BITRATE = 14_000_000;
 const WEBCAM_VIDEO_BITRATE = 8_000_000;
@@ -177,7 +180,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     height: 600,
   });
   const [videosReadyTimeout, setVideosReadyTimeout] = useState(false);
-  useIdleTimeout();
+  useIdleTimeout({ transactionCode: state?.referenceId });
 
   useEffect(() => {
     const updateContainerDimensions = () => {
@@ -193,8 +196,10 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   }, []);
 
   useEffect(() => {
+    appLogger.info(CTX, `Mounted — frame: ${selectedFrame?.name || 'unknown'}, slots: ${totalSlots}, totalCaptures: ${totalCaptures}`);
     initCamera();
     return () => {
+      appLogger.info(CTX, "Unmounted — stopping camera");
       stopCamera();
     };
   }, []);
@@ -218,6 +223,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const initCamera = async () => {
     try {
       const type: string = await invoke("get_camera_type");
+      appLogger.info(CTX, `Camera type: ${type}`);
       setCameraType(type);
       cameraTypeRef.current = type;
 
@@ -227,33 +233,37 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         await initCanon();
       }
     } catch (err: any) {
+      appLogger.error(CTX, `Camera init error: ${err}`);
       setCameraError("Camera not found. Please check connection.");
-      console.error("Camera init error:", err);
     }
   };
 
   const initCanon = async () => {
-    console.log("[Canon] Connecting to camera...");
+    appLogger.info(CTX, "Canon: connecting to camera...");
     const connOk = await canonCamera.connect(0);
     if (!connOk) {
+      appLogger.error(CTX, "Canon: connect() failed");
       setCameraError("Cannot connect to Canon camera");
       return;
     }
+    appLogger.info(CTX, "Canon: connected — waiting 300ms before live view...");
 
     await new Promise((r) => setTimeout(r, 300));
 
     let lvOk = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
-      console.log(`[Canon] Starting live view (attempt ${attempt}/3)...`);
+      appLogger.info(CTX, `Canon: startLiveView attempt ${attempt}/3`);
       lvOk = await canonCamera.startLiveView();
       if (lvOk) break;
       await new Promise((r) => setTimeout(r, attempt * 500));
     }
     if (!lvOk) {
+      appLogger.error(CTX, "Canon: startLiveView() failed after 3 attempts");
       await canonCamera.cleanup();
       setCameraError("Cannot start Canon live view");
       return;
     }
+    appLogger.info(CTX, "Canon: live view started — waiting for first frame...");
 
     let waitTime = 0;
     while (!canonCamera.liveViewFrame && waitTime < 3000) {
@@ -268,6 +278,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     setVideoDimensions({ width: targetW, height: targetH });
     setCameraReady(true);
+    appLogger.info(CTX, `Canon: camera ready — resolution ${targetW}x${targetH}`);
 
     setTimeout(() => {
       if (cameraContainerRef.current) {
@@ -329,6 +340,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           await videoRef.current.play();
         }
         setCameraReady(true);
+        appLogger.info(CTX, `Webcam: stream started — resolution ${vw}x${vh}`);
         setTimeout(() => {
           if (cameraContainerRef.current) {
             const rect = cameraContainerRef.current.getBoundingClientRect();
@@ -402,8 +414,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       mediaRecorderRef.current = recorder;
       isRecordingRef.current = true;
       setIsRecording(true);
+      appLogger.debug(CTX, `Recording started — mimeType: ${mimeType}, bitrate: ${videoBitsPerSecond}`);
     } catch (err) {
-      console.error("Start recording failed:", err);
+      appLogger.error(CTX, `startRecording failed: ${err}`);
     }
   }, [getRecordingProfile]);
 
@@ -509,7 +522,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         });
         return path;
       } catch (err) {
-        console.error("Failed to save video to temp:", err);
+        appLogger.error(CTX, `saveVideoToTemp failed for capture_${index}: ${err}`);
         return "";
       }
     },
@@ -558,7 +571,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }
 
       if (streamRef.current) {
-        console.log("[Warm-up] อุ่นเครื่อง Video Encoder...");
+        appLogger.info(CTX, "Warm-up: initialising video encoder...");
         try {
           const { mimeType, videoBitsPerSecond } = getRecordingProfile();
 
@@ -583,7 +596,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             await new Promise((r) => setTimeout(r, 300));
           }
         } catch (e) {
-          console.error("Warmup failed", e);
+          appLogger.warn(CTX, `Warm-up failed: ${e}`);
         }
       }
       
@@ -597,7 +610,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }> = [];
 
     for (let i = 0; i < totalCaptures; i++) {
-      console.log(`[Capture] Starting capture ${i + 1}/${totalCaptures}`);
+      appLogger.info(CTX, `Capture ${i + 1}/${totalCaptures} — starting countdown`);
 
       isRecordingRef.current = false;
       setIsRecording(false);
@@ -662,14 +675,16 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       let photoData: string = "";
       try {
         photoData = await capturePromise;
+        appLogger.info(CTX, `Capture ${i + 1}: photo captured — size ${photoData.length} chars`);
       } catch (err) {
-        // fallback
+        appLogger.error(CTX, `Capture ${i + 1}: photo capture threw: ${err}`);
       }
 
       if (!photoData) {
         const fallbackFrame = canonCamera.getLatestFrame();
         if (fallbackFrame) {
           photoData = fallbackFrame;
+          appLogger.warn(CTX, `Capture ${i + 1}: photo was empty — fell back to latest live view frame`);
           logError(
             "capture_photo_fallback_liveview",
             `[Capture] shot ${i + 1}: fallback to latest live view frame`,
@@ -690,7 +705,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       const isTargetBrokenIndex = i === 1 || i === (totalCaptures - 1);
 
       if (FORCE_TEST_MISSING_VIDEO && isTargetBrokenIndex) {
-        console.warn(`[TEST MODE] 💥 กำลังจำลองการทำลายวิดีโอ ช็อตที่ ${i + 1}`);
+        appLogger.warn(CTX, `[TEST MODE] Simulating missing video for capture ${i + 1}`);
         missingReason = "TEST_MODE_FORCED_MISSING";
         videoPath = ""; 
       } 
@@ -714,6 +729,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         blobSize,
         cameraType: cameraTypeRef.current,
       });
+      appLogger.info(CTX, `Capture ${i + 1} complete — video: ${missingReason ? `MISSING (${missingReason})` : `ok (${blobSize} bytes)`}`);
 
       const photoPreview = await buildPhotoPreview(photoData);
       const newCapture: Capture = {
@@ -735,11 +751,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       (item) => item.status === "missing",
     );
     if (missingVideoDiagnostics.length > 0) {
-      console.warn("[Capture Video Diagnostics]", {
-        totalCaptures,
-        missingCount: missingVideoDiagnostics.length,
-        missingItems: missingVideoDiagnostics,
-      });
+      appLogger.warn(CTX, `Video diagnostics: ${missingVideoDiagnostics.length}/${totalCaptures} missing — ${JSON.stringify(missingVideoDiagnostics)}`);
 
       if (typeof logError === "function") {
         logError(
@@ -757,6 +769,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     setPhase("done");
     sequenceRunningRef.current = false;
+    appLogger.info(CTX, `Shooting sequence complete — ${totalCaptures} captures done, navigating to slot-selection`);
 
     setTimeout(() => {
       navigate("/slot-selection", {
@@ -823,6 +836,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       if (cameraType === "webcam" && streamRef.current) {
         const videoTrack = streamRef.current.getVideoTracks()[0];
         if (!videoTrack || videoTrack.readyState === "ended") {
+          appLogger.error(CTX, "Webcam disconnected — redirecting to home");
           setCameraError("กล้องถูกถอดออก กรุณาเชื่อมต่อใหม่");
           setTimeout(() => navigate("/"), 3000);
         }
@@ -844,6 +858,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             !canonDisconnectHandledRef.current
           ) {
             canonDisconnectHandledRef.current = true;
+            appLogger.error(CTX, "Canon: not connected (3+ checks failed) — disconnected");
             setCameraError("กล้อง Canon ถูกถอดออก กรุณาเชื่อมต่อใหม่");
             setTimeout(() => navigate("/"), 3000);
           }
@@ -854,6 +869,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             !canonDisconnectHandledRef.current
           ) {
             canonDisconnectHandledRef.current = true;
+            appLogger.error(CTX, "Canon: connection check threw error 3 times — disconnected");
             setCameraError("กล้อง Canon ถูกถอดออก กรุณาเชื่อมต่อใหม่");
             setTimeout(() => navigate("/"), 3000);
           }

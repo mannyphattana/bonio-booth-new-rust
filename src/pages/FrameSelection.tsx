@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+﻿import React, { useState, useEffect, useRef } from "react";
+import { appLogger } from "../utils/appLogger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
@@ -19,7 +20,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
-  useIdleTimeout();
+  useIdleTimeout({ transactionCode: state?.referenceId });
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [selectedFrame, setSelectedFrame] = useState<FrameData | null>(null);
@@ -75,7 +76,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
         }
       }
     } catch (err) {
-      console.error("Load frames error:", err);
+      appLogger.error(__CTX__, "Load frames error:", err);
     }
     setLoading(false);
   };
@@ -109,7 +110,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
         <div className="page-row-top">
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
-              เลือกกรอบรูป
+              à¹€à¸¥à¸·à¸­à¸à¸à¸£à¸­à¸šà¸£à¸¹à¸›
             </h1>
             <p className="title-english" style={{ color: theme.fontColor }}>
               SELECT YOUR FRAME
@@ -117,7 +118,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
           </div>
         </div>
 
-        {/* Row 2: Body – carousel + preview */}
+        {/* Row 2: Body â€“ carousel + preview */}
         <div
           className="page-row-body"
           style={{ flexDirection: "column", gap: 0, padding: 0 }}
@@ -132,7 +133,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                 justifyContent: "center",
               }}
             >
-              กำลังโหลด...
+              à¸à¸³à¸¥à¸±à¸‡à¹‚à¸«à¸¥à¸”...
             </div>
           ) : (
             <>
@@ -169,7 +170,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                     boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
                   }}
                 >
-                  ❮
+                  â®
                 </button>
 
                 {/* Scroll container */}
@@ -210,7 +211,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                           boxShadow: isSelected
                             ? "0 8px 10px rgba(0,0,0,0.25)"
                             : "0 4px 5px rgba(0,0,0,0.1)",
-                          lineHeight: 0, // ป้องกัน inline gap ใต้รูป
+                          lineHeight: 0, // à¸›à¹‰à¸­à¸‡à¸à¸±à¸™ inline gap à¹ƒà¸•à¹‰à¸£à¸¹à¸›
                           border: isSelected
                             ? `3px solid ${theme.primaryColor}`
                             : "3px solid transparent",
@@ -256,11 +257,11 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                     boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
                   }}
                 >
-                  ❯
+                  â¯
                 </button>
               </div>
 
-              {/* 3. รูปพรีวิว (Preview) - ย่อขนาดลงอีก และห้ามดันจนล้น */}
+              {/* 3. à¸£à¸¹à¸›à¸žà¸£à¸µà¸§à¸´à¸§ (Preview) - à¸¢à¹ˆà¸­à¸‚à¸™à¸²à¸”à¸¥à¸‡à¸­à¸µà¸ à¹à¸¥à¸°à¸«à¹‰à¸²à¸¡à¸”à¸±à¸™à¸ˆà¸™à¸¥à¹‰à¸™ */}
               <div
                 style={{
                   flex: 1,
@@ -334,3 +335,4 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
     </div>
   );
 }
+

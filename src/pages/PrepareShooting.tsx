@@ -18,7 +18,7 @@ export default function PrepareShooting({ theme, machineData, onFormatReset, onB
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
-  useIdleTimeout();
+  useIdleTimeout({ transactionCode: state?.referenceId });
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   // const [countdown, setCountdown] = useState(PREPARE_DURATION); // Removed custom state
   const cameraCountdown = machineData.cameraCountdown || 5;

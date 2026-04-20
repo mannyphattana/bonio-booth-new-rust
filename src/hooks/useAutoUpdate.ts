@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { appLogger } from "../utils/appLogger";
+import { sendSessionLog } from "../utils/sessionManager";
 
 const LAST_CHECK_KEY = "bonio_updater_last_check_date";
 
@@ -83,8 +85,8 @@ export function useAutoUpdate(options: UseAutoUpdateOptions = {}) {
 
     // If an update was already downloaded and we just arrived at home → relaunch now
     if (isOnHomePage && updateReadyRef.current) {
-      console.log("[Updater] Now on home page — applying pending update, relaunching...");
-      relaunch();
+      appLogger.info("[Updater]", "Now on home page — applying pending update, relaunching...");
+      sendSessionLog("auto_update").finally(() => relaunch());
     }
   }, [isOnHomePage]);
 
@@ -98,35 +100,36 @@ export function useAutoUpdate(options: UseAutoUpdateOptions = {}) {
       checkingRef.current = true;
 
       try {
-        console.log("[Updater] Checking for updates...");
+        appLogger.info("[Updater]", "Checking for updates...");
         // บันทึกว่าได้เช็ควันนี้แล้ว (เฉพาะ schedule mode)
         if (scheduleHour !== undefined) markCheckedToday();
 
         const update = await check();
 
         if (update) {
-          console.log(`[Updater] Update found: v${update.version} — downloading in background...`);
+          appLogger.info("[Updater]", `Update found: v${update.version} — downloading in background...`);
           if (onUpdateFound) onUpdateFound(update.version);
 
           // Download and install silently (no relaunch yet)
           await update.downloadAndInstall();
-          console.log("[Updater] Update downloaded and installed.");
+          appLogger.info("[Updater]", "Update downloaded and installed.");
           updateReadyRef.current = true;
           if (onUpdateReady) onUpdateReady();
 
           // Relaunch immediately only if already on home page
           if (isOnHomePageRef.current) {
-            console.log("[Updater] On home page — relaunching now.");
+            appLogger.info("[Updater]", "On home page — sending session log then relaunching.");
+            await sendSessionLog("auto_update");
             await relaunch();
           } else {
-            console.log("[Updater] Not on home page — relaunch deferred until home.");
+            appLogger.info("[Updater]", "Not on home page — relaunch deferred until home.");
           }
         } else {
-          console.log("[Updater] No update available.");
+          appLogger.debug("[Updater]", "No update available.");
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error("[Updater] Error:", msg);
+        appLogger.error("[Updater]", `Error: ${msg}`);
         if (onError) onError(msg);
       } finally {
         checkingRef.current = false;
@@ -140,13 +143,13 @@ export function useAutoUpdate(options: UseAutoUpdateOptions = {}) {
       // === Schedule mode: วันละครั้งตาม scheduleHour ===
       if (shouldCheckImmediately(scheduleHour)) {
         // เปิดแอปหลังเวลาที่กำหนดและยังไม่ได้เช็ควันนี้ → เช็คทันที
-        console.log(`[Updater] Missed today's ${scheduleHour}:00 window — checking now.`);
+        appLogger.info("[Updater]", `Missed today's ${scheduleHour}:00 window — checking now.`);
         checkForUpdate();
       }
 
       // ตั้ง timeout จนถึง scheduleHour ครั้งต่อไป
       const msUntilNext = getNextScheduledDate(scheduleHour).getTime() - Date.now();
-      console.log(`[Updater] Next scheduled check in ${Math.round(msUntilNext / 60000)} minutes (at ${scheduleHour}:00).`);
+      appLogger.info("[Updater]", `Next scheduled check in ${Math.round(msUntilNext / 60000)} minutes (at ${scheduleHour}:00).`);
 
       timeoutId = setTimeout(() => {
         checkForUpdate();
