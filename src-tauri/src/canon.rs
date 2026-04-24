@@ -148,21 +148,23 @@ fn is_transient_live_view_error(error: EdsError) -> bool {
 
 #[cfg(target_os = "windows")]
 fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
-    // AF-only capture path:
-    // keep retrying AF shutter so we don't take a photo with stale/incorrect focus.
-    // This is bounded to avoid hanging forever when the scene is impossible to focus.
-    let mut last_error = EDS_ERR_TAKE_PICTURE_AF_NG;
-    for attempt in 1..=30 {
-        let af_shutter_error = unsafe {
+    // Try AF-enabled shutter first (up to 3 attempts).
+    // If the scene cannot be focused (EDS_ERR_TAKE_PICTURE_AF_NG) after all AF
+    // retries, fall back to NonAF so the photo is always taken regardless of the
+    // camera's AF mode setting — this prevents the application from returning an
+    // error / appearing to crash when the lens cannot lock focus.
+    const MAX_AF_RETRIES: u32 = 3;
+
+    for attempt in 1..=MAX_AF_RETRIES {
+        let af_error = unsafe {
             EdsSendCommand(
                 camera_ref,
                 kEdsCameraCommand_PressShutterButton,
                 kEdsShutterButton_Completely as i32,
             )
         };
-        last_error = af_shutter_error;
 
-        if af_shutter_error == EDS_ERR_OK {
+        if af_error == EDS_ERR_OK {
             unsafe {
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 let _ = EdsSendCommand(
@@ -174,49 +176,64 @@ fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
             return EDS_ERR_OK;
         }
 
-        if af_shutter_error == EDS_ERR_TAKE_PICTURE_AF_NG {
-            warn!(
-                "[Canon] AF shutter returned AF_NG (attempt {}/30), retrying",
-                attempt
-            );
-            unsafe {
-                let _ = EdsSendCommand(
-                    camera_ref,
-                    kEdsCameraCommand_PressShutterButton,
-                    kEdsShutterButton_OFF as i32,
-                );
-                let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
-                let _ = EdsGetEvent();
-            }
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            continue;
-        }
-
-        warn!(
-            "[Canon] AF shutter error (attempt {}/30): {}",
-            attempt,
-            error_to_string(af_shutter_error)
-        );
-
+        // Release shutter button and pump events before retry
         unsafe {
+            let _ = EdsSendCommand(
+                camera_ref,
+                kEdsCameraCommand_PressShutterButton,
+                kEdsShutterButton_OFF as i32,
+            );
             let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
             let _ = EdsGetEvent();
+        }
+
+        if af_error == EDS_ERR_TAKE_PICTURE_AF_NG {
+            warn!(
+                "[Canon] AF shutter returned AF_NG (attempt {}/{}), will retry or fall back to NonAF",
+                attempt, MAX_AF_RETRIES
+            );
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        } else {
+            warn!(
+                "[Canon] AF shutter error (attempt {}/{}): {}",
+                attempt,
+                MAX_AF_RETRIES,
+                error_to_string(af_error)
+            );
+            let retry_wait_ms = if is_transient_live_view_error(af_error) { 120 } else { 180 };
+            std::thread::sleep(std::time::Duration::from_millis(retry_wait_ms));
+        }
+    }
+
+    // AF retries exhausted — fall back to NonAF so the photo is always captured.
+    // The image may be slightly out of focus but the program continues normally.
+    warn!(
+        "[Canon] AF retries exhausted after {} attempts, falling back to NonAF capture",
+        MAX_AF_RETRIES
+    );
+
+    let non_af_error = unsafe {
+        EdsSendCommand(
+            camera_ref,
+            kEdsCameraCommand_PressShutterButton,
+            kEdsShutterButton_Completely_NonAF as i32,
+        )
+    };
+
+    if non_af_error == EDS_ERR_OK {
+        unsafe {
+            std::thread::sleep(std::time::Duration::from_millis(30));
             let _ = EdsSendCommand(
                 camera_ref,
                 kEdsCameraCommand_PressShutterButton,
                 kEdsShutterButton_OFF as i32,
             );
         }
-
-        // transient/live-view related errors retry a bit faster than AF_NG paths
-        let retry_wait_ms = if is_transient_live_view_error(af_shutter_error) {
-            120
-        } else {
-            180
-        };
-        std::thread::sleep(std::time::Duration::from_millis(retry_wait_ms));
+        info!("[Canon] NonAF fallback capture succeeded");
+        return EDS_ERR_OK;
     }
 
+    // Release button and report final failure
     unsafe {
         let _ = EdsSendCommand(
             camera_ref,
@@ -226,10 +243,10 @@ fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
     }
 
     warn!(
-        "[Canon] AF-only shutter exhausted retries; final error: {}",
-        error_to_string(last_error)
+        "[Canon] NonAF fallback also failed: {}",
+        error_to_string(non_af_error)
     );
-    last_error
+    non_af_error
 }
 
 /// Resolve EDSDK.dll path — tries multiple locations

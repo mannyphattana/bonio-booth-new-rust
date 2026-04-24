@@ -238,7 +238,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                         }}
                       >
                         <img
-                          src={(frame.previewUrl || frame.imageUrl) || null}
+                          src={(frame.previewUrl || frame.imageUrl) || undefined}
                           alt={frame.name}
                           draggable={false}
                           style={{
@@ -304,7 +304,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                     }}
                   >
                     <img
-                      src={selectedFrame.imageUrl || null}
+                      src={selectedFrame.imageUrl || undefined}
                       alt="Selected"
                       style={{
                         height: "auto",

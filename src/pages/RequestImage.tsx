@@ -337,7 +337,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
                 <p style={{ color: "#e53e3e", padding: 20 }}>❌ {imageError}</p>
               )}
               <img
-                src={imageUrl || null}
+                src={imageUrl || undefined}
                 alt="Preview"
                 onLoad={handleImageLoad}
                 onError={handleImageError}

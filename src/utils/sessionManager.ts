@@ -14,7 +14,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "./appLogger";
 
 const STORAGE_KEY = "bonio_current_session";
-const APP_VERSION = "__APP_VERSION__"; // replaced by Vite at build time (or use import.meta.env)
 
 interface SessionRecord {
   sessionId: string;

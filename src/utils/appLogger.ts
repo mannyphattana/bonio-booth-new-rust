@@ -42,6 +42,13 @@ class AppLogger {
     this.sendToTauri(level, formatted);
   }
 
+  private serialize(value: unknown): string {
+    if (value === null || value === undefined) return String(value);
+    if (typeof value === "string") return value;
+    if (value instanceof Error) return value.message;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+
   private sendToTauri(level: LogLevel, message: string): void {
     // ใช้ Tauri log commands (tauri-plugin-log)
     // fire-and-forget — ไม่ await
@@ -61,20 +68,24 @@ class AppLogger {
     }
   }
 
-  info(context: string, message: string): void {
-    this.push("info", context, message);
+  info(context: string, message: unknown, ...extra: unknown[]): void {
+    const parts = [this.serialize(message), ...extra.map((v) => this.serialize(v))];
+    this.push("info", context, parts.join(" "));
   }
 
-  warn(context: string, message: string): void {
-    this.push("warn", context, message);
+  warn(context: string, message: unknown, ...extra: unknown[]): void {
+    const parts = [this.serialize(message), ...extra.map((v) => this.serialize(v))];
+    this.push("warn", context, parts.join(" "));
   }
 
-  error(context: string, message: string): void {
-    this.push("error", context, message);
+  error(context: string, message: unknown, ...extra: unknown[]): void {
+    const parts = [this.serialize(message), ...extra.map((v) => this.serialize(v))];
+    this.push("error", context, parts.join(" "));
   }
 
-  debug(context: string, message: string): void {
-    this.push("debug", context, message);
+  debug(context: string, message: unknown, ...extra: unknown[]): void {
+    const parts = [this.serialize(message), ...extra.map((v) => this.serialize(v))];
+    this.push("debug", context, parts.join(" "));
   }
 
   /** คืน log entries ทั้งหมด (สำหรับส่งเป็น session log ตอน exit) */
