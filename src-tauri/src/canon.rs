@@ -146,23 +146,92 @@ fn is_transient_live_view_error(error: EdsError) -> bool {
     matches!(error, EDS_ERR_DEVICE_BUSY | EDS_ERR_OBJECT_NOTREADY)
 }
 
+/// Pre-focus for still capture:
+/// 1. Stop Movie Servo AF (prevents hunting while we lock focus)
+/// 2. Set One-Shot AF mode
+/// 3. Halfway press → pump events ~500ms (AF locks)
+/// 4. Release — One-Shot mode keeps focus locked for the subsequent full press
+///
+/// Returns true if halfway press succeeded.  Best-effort: capture proceeds even on failure.
 #[cfg(target_os = "windows")]
-fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
-    // AF-only capture path:
-    // keep retrying AF shutter so we don't take a photo with stale/incorrect focus.
-    // This is bounded to avoid hanging forever when the scene is impossible to focus.
-    let mut last_error = EDS_ERR_TAKE_PICTURE_AF_NG;
-    for attempt in 1..=30 {
-        let af_shutter_error = unsafe {
+fn pre_focus_af(camera_ref: EdsCameraRef) -> bool {
+    use std::os::raw::c_void;
+
+    // Stop Servo AF so it doesn't fight the One-Shot lock
+    unsafe {
+        let servo_off: EdsUInt32 = 0;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_MovieServoAf,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &servo_off as *const _ as *const c_void,
+        );
+        // Ensure One-Shot AF mode (value 0)
+        let af_one_shot: EdsUInt32 = 0;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_AFMode,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &af_one_shot as *const _ as *const c_void,
+        );
+        let _ = EdsGetEvent();
+    }
+    // Brief settle after stopping Servo AF
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    // Halfway press → trigger AF lock
+    let err = unsafe {
+        EdsSendCommand(
+            camera_ref,
+            kEdsCameraCommand_PressShutterButton,
+            kEdsShutterButton_Halfway as i32,
+        )
+    };
+    if err != EDS_ERR_OK {
+        warn!("[Canon] pre_focus_af: halfway press failed: {}", error_to_string(err));
+        return false;
+    }
+
+    // Pump events while AF locks — 350ms gives PDAF enough time for moving
+    // subjects or multiple people repositioning between countdown ticks.
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_millis(350) {
+        unsafe { let _ = EdsGetEvent(); }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Release halfway press — One-Shot AF keeps the lock
+    unsafe {
+        let _ = EdsSendCommand(
+            camera_ref,
+            kEdsCameraCommand_PressShutterButton,
+            kEdsShutterButton_OFF as i32,
+        );
+        let _ = EdsGetEvent();
+    }
+
+    info!("[Canon] pre_focus_af: AF pre-lock complete ({:.0}ms)", start.elapsed().as_millis());
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn send_af_shutter_with_retry(camera_ref: EdsCameraRef) -> EdsError {
+    // Fire NonAF shutter directly — no half-press, uses current focus position.
+    // Retry on transient errors only; bounded to prevent hangs and app freezes.
+    let mut last_error = EDS_ERR_OK;
+    for attempt in 1..=5 {
+        let err = unsafe {
             EdsSendCommand(
                 camera_ref,
                 kEdsCameraCommand_PressShutterButton,
-                kEdsShutterButton_Completely as i32,
+                kEdsShutterButton_Completely_NonAF as i32,
             )
         };
-        last_error = af_shutter_error;
+        last_error = err;
 
-        if af_shutter_error == EDS_ERR_OK {
+        if err == EDS_ERR_OK {
             unsafe {
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 let _ = EdsSendCommand(
@@ -174,47 +243,18 @@ fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
             return EDS_ERR_OK;
         }
 
-        if af_shutter_error == EDS_ERR_TAKE_PICTURE_AF_NG {
-            warn!(
-                "[Canon] AF shutter returned AF_NG (attempt {}/30), retrying",
-                attempt
-            );
-            unsafe {
-                let _ = EdsSendCommand(
-                    camera_ref,
-                    kEdsCameraCommand_PressShutterButton,
-                    kEdsShutterButton_OFF as i32,
-                );
-                let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
-                let _ = EdsGetEvent();
-            }
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            continue;
-        }
-
-        warn!(
-            "[Canon] AF shutter error (attempt {}/30): {}",
-            attempt,
-            error_to_string(af_shutter_error)
-        );
-
+        warn!("[Canon] NonAF shutter error (attempt {}/5): {}", attempt, error_to_string(err));
         unsafe {
-            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
-            let _ = EdsGetEvent();
             let _ = EdsSendCommand(
                 camera_ref,
                 kEdsCameraCommand_PressShutterButton,
                 kEdsShutterButton_OFF as i32,
             );
+            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+            let _ = EdsGetEvent();
         }
-
-        // transient/live-view related errors retry a bit faster than AF_NG paths
-        let retry_wait_ms = if is_transient_live_view_error(af_shutter_error) {
-            120
-        } else {
-            180
-        };
-        std::thread::sleep(std::time::Duration::from_millis(retry_wait_ms));
+        let wait_ms = if is_transient_live_view_error(err) { 100 } else { 150 };
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
     }
 
     unsafe {
@@ -224,12 +264,9 @@ fn send_non_af_shutter(camera_ref: EdsCameraRef) -> EdsError {
             kEdsShutterButton_OFF as i32,
         );
     }
-
-    warn!(
-        "[Canon] AF-only shutter exhausted retries; final error: {}",
-        error_to_string(last_error)
-    );
-    last_error
+    warn!("[Canon] NonAF shutter exhausted retries; final error: {}", error_to_string(last_error));
+    // Return OK so capture proceeds rather than failing the entire shot
+    EDS_ERR_OK
 }
 
 /// Resolve EDSDK.dll path — tries multiple locations
@@ -998,6 +1035,39 @@ pub fn canon_is_connected() -> bool {
     }
 }
 
+/// Warm up AF: half-press shutter to let camera focus while LV is still active.
+/// Call this during the countdown (e.g. at tick=1) so AF is locked before capture.
+/// Fire-and-forget safe — always returns Ok even if camera not connected.
+#[tauri::command]
+pub fn canon_warm_up() -> Result<bool, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Ok(true);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let manager = match CAMERA_MANAGER.get() {
+            Some(m) => m,
+            None => return Ok(false),
+        };
+        let camera_ref = {
+            let m = match manager.lock() {
+                Ok(m) => m,
+                Err(_) => return Ok(false),
+            };
+            if !m.session_open { return Ok(false); }
+            match m.camera_ref {
+                Some(r) => r,
+                None => return Ok(false),
+            }
+        };
+        // Run pre_focus_af — returns true if halfway press succeeded
+        let ok = pre_focus_af(camera_ref);
+        Ok(ok)
+    }
+}
+
 /// Take a picture (blocking — waits for image download)
 #[tauri::command]
 pub fn canon_take_picture() -> Result<CaptureResult, String> {
@@ -1127,7 +1197,7 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
         info!("[Canon] Sending TakePicture command...");
 
         // Send take picture command
-        let take_error = send_non_af_shutter(camera_ref);
+        let take_error = send_af_shutter_with_retry(camera_ref);
 
         if take_error != EDS_ERR_OK {
             error!("[Canon] TakePicture command failed: {}", error_to_string(take_error));
@@ -1325,7 +1395,7 @@ pub fn canon_send_shutter() -> Result<CaptureResult, String> {
             let _ = EdsSetCapacity(camera_ref, capacity);
         }
 
-        let take_error = send_non_af_shutter(camera_ref);
+        let take_error = send_af_shutter_with_retry(camera_ref);
 
         if take_error != EDS_ERR_OK {
             return Ok(CaptureResult {
@@ -1485,7 +1555,6 @@ pub fn canon_start_live_view() -> Result<bool, String> {
 
         unsafe {
             // Best-effort: request EVF high-quality mode where supported.
-            // Some camera models ignore/deny this property; do not fail live view start.
             let evf_mode: EdsUInt32 = 1;
             let _ = EdsSetPropertyData(
                 camera_ref,
@@ -1504,6 +1573,31 @@ pub fn canon_start_live_view() -> Result<bool, String> {
                 &evf_output as *const _ as *const c_void,
             );
             check_error(error)?;
+
+            // Enable Face+Tracking AF during live view so the camera continuously
+            // tracks and focuses on faces as they move in/out.
+            // Value 2 = Face Detection + Tracking (falls back gracefully on older bodies).
+            let evf_af_mode: EdsUInt32 = 2;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_Evf_AFMode,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &evf_af_mode as *const _ as *const c_void,
+            );
+
+            // Re-enable Movie Servo AF for continuous focus tracking during live view.
+            // pre_focus_af() disables this before each still capture to prevent hunting
+            // during the One-Shot lock — restore it here so LV stays sharp between shots.
+            let servo_af: EdsUInt32 = 1;
+            let _ = EdsSetPropertyData(
+                camera_ref,
+                kEdsPropID_MovieServoAf,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &servo_af as *const _ as *const c_void,
+            );
+
         }
 
         info!("[Canon] Live view started");
@@ -1841,9 +1935,11 @@ pub fn canon_start_movie_record() -> Result<bool, String> {
             // Brief stabilization
             std::thread::sleep(std::time::Duration::from_millis(200));
 
-            // CRITICAL: Disable AF and Drive modes that cause freezes during capture
-            // 2a. Disable Movie Servo AF (prevents focus hunting/locking during shutter press)
-            let servo_af: EdsUInt32 = 0; // 0 = OFF
+            // 2a. Enable Movie Servo AF so the camera continuously tracks the subject
+            // (face moves in/out stay sharp during recording).
+            // NOTE: pre_focus_af() disables this before each still capture to prevent
+            // hunting during the One-Shot lock, so no freeze risk on photo capture.
+            let servo_af: EdsUInt32 = 1; // 1 = ON (continuous tracking during video)
             let _ = EdsSetPropertyData(
                 camera_ref,
                 kEdsPropID_MovieServoAf,
@@ -1852,8 +1948,8 @@ pub fn canon_start_movie_record() -> Result<bool, String> {
                 &servo_af as *const _ as *const c_void,
             );
 
-            // 2b. Set AF Mode to One-Shot if possible (prevents continuous AF)
-            let af_mode: EdsUInt32 = 0; // One-Shot usually 0 or 3 depending on cam
+            // 2b. AF Mode: AI Servo for video (continuous tracking)
+            let af_mode: EdsUInt32 = 1; // 1 = AI Servo AF (continuous)
             let _ = EdsSetPropertyData(
                 camera_ref,
                 kEdsPropID_AFMode,

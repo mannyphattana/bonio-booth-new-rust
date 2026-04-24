@@ -924,7 +924,7 @@ pub async fn reduce_paper_level(
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
     let client = &state.http_client;
-    let url = "https://api-booth.boniolabs.com/api/machines-public/paper-level/reduce";
+    let url = "https://api-booth-test.boniolabs.com/api/machines-public/paper-level/reduce";
 
     let res = client
         .post(url)

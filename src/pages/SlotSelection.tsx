@@ -294,7 +294,7 @@ const handleCountdownComplete = async () => {
                   >
                     {captureIdx !== undefined && (
                       <img
-                        src={(captures[captureIdx].photoPreview || captures[captureIdx].photo) || null}
+                        src={(captures[captureIdx].photoPreview || captures[captureIdx].photo) || undefined}
                         alt=""
                         decoding="async"
                         style={{
@@ -351,7 +351,7 @@ const handleCountdownComplete = async () => {
                   }}
                 >
                   <img
-                    src={(cap.photoPreview || cap.photo) || null}
+                    src={(cap.photoPreview || cap.photo) || undefined}
                     alt=""
                     decoding="async"
                     style={{

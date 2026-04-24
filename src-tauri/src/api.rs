@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
 
-const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+const API_BASE_URL: &str = "https://api-booth-test.boniolabs.com";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaperPositionConfig {
@@ -87,8 +87,7 @@ pub async fn verify_machine(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     if status.is_success() {
         // Save machine_id
@@ -125,8 +124,7 @@ pub async fn init_machine(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     // Log response data for debugging
     log::info!("[API] init_machine response: status={}", status);
@@ -215,8 +213,7 @@ pub async fn get_frames(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -256,8 +253,7 @@ pub async fn create_payment(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -284,8 +280,7 @@ pub async fn check_payment_status(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -316,8 +311,7 @@ pub async fn check_coupon(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -351,8 +345,7 @@ pub async fn use_coupon(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -383,8 +376,7 @@ pub async fn create_photo_session(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -423,8 +415,7 @@ pub async fn create_presign_upload(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -487,8 +478,7 @@ pub async fn confirm_upload(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -521,8 +511,7 @@ pub async fn notify_going_offline(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     log::info!("[API] notify-going-offline response: status={}, body={}", status, body);
 
@@ -582,8 +571,7 @@ pub async fn get_machine_status(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -681,8 +669,7 @@ pub async fn send_device_alert(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -732,8 +719,7 @@ pub async fn send_device_status_report(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -767,8 +753,7 @@ pub async fn send_device_reconnected(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -798,8 +783,7 @@ pub async fn update_paper_level(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -827,8 +811,7 @@ pub async fn reduce_paper_level_api(
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
-    let status = res.status();
-    let body: Value = res.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let (status, body) = parse_response_body(res).await;
 
     Ok(ApiResponse {
         success: status.is_success(),
@@ -1198,4 +1181,17 @@ pub async fn download_image_from_url(
     let path = temp_dir.join("request-image-print.jpg");
     std::fs::write(&path, &bytes).map_err(|e| format!("Failed to save image: {}", e))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+async fn parse_response_body(res: reqwest::Response) -> (reqwest::StatusCode, Value) {
+    let status = res.status();
+    let text = res.text().await.unwrap_or_default();
+    let body = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| {
+        if text.is_empty() {
+            serde_json::json!({ "message": "Empty response from server" })
+        } else {
+            serde_json::json!({ "message": text })
+        }
+    });
+    (status, body)
 }

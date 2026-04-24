@@ -424,7 +424,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                         }}
                       >
                         <img
-                          src={filterPreviews[filter.id] || firstPhoto || null}
+                          src={filterPreviews[filter.id] || firstPhoto || undefined}
                           alt={filter.name}
                           draggable={false}
                           onError={(e) => {
@@ -535,7 +535,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 </div>
               )}
               <img
-                src={previewImage || null}
+                src={previewImage || undefined}
                 alt="Preview"
                 draggable={false}
                 onError={() => setPreviewImage(firstPhoto || "")}

@@ -533,6 +533,17 @@ export function useCanon() {
     });
   }, [stopLiveViewPolling]);
 
+  // Warm up AF: call during countdown (e.g. at tick=1) while LV is still active.
+  // Fire-and-forget — never throws.
+  const warmUp = useCallback(async (): Promise<void> => {
+    try {
+      await invoke("canon_warm_up");
+      appLogger.info("[useCanon]", "[useCanon] AF warm-up complete");
+    } catch (err) {
+      appLogger.warn("[useCanon]", `[useCanon] AF warm-up failed (non-fatal): ${err}`);
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -561,6 +572,7 @@ export function useCanon() {
     isMovieRecording,
     takePictureQuick,
     takePhotoDuringRecording,
+    warmUp,
     cleanup,
   };
 }

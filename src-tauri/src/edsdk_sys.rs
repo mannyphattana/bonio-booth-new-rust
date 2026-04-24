@@ -91,6 +91,7 @@ pub const kEdsPropID_MovieServoAf: EdsPropertyID = 0x0100043e;
 // EVF Properties
 pub const kEdsPropID_Evf_OutputDevice: EdsPropertyID = 0x00000500;
 pub const kEdsPropID_Evf_Mode: EdsPropertyID = 0x00000501;
+pub const kEdsPropID_Evf_AFMode: EdsPropertyID = 0x0000050B; // AF mode during live view
 
 // =============================================================================
 // Constants - Camera Commands
