@@ -291,6 +291,7 @@ pub fn run() {
             canon::canon_close_session,
             canon::canon_is_connected,
             canon::canon_warm_up,
+            canon::canon_do_evf_af,
             canon::canon_take_picture,
             canon::canon_send_shutter,
             canon::canon_get_capture_result,

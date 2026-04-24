@@ -1068,6 +1068,66 @@ pub fn canon_warm_up() -> Result<bool, String> {
     }
 }
 
+/// Trigger autofocus during Live View using DoEvfAf command.
+///
+/// This is the proper EVF AF API — triggers AF while Live View is active
+/// without stopping/restarting the EVF stream.  Use between shots to ensure
+/// the next frame is sharp before starting the countdown.
+///
+/// param = 1: start AF, param = 0: stop AF
+#[tauri::command]
+pub fn canon_do_evf_af(start: Option<bool>) -> Result<bool, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = start;
+        return Ok(true);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let manager = match CAMERA_MANAGER.get() {
+            Some(m) => m,
+            None => return Ok(false),
+        };
+        let camera_ref = {
+            let m = match manager.lock() {
+                Ok(m) => m,
+                Err(_) => return Ok(false),
+            };
+            if !m.session_open { return Ok(false); }
+            match m.camera_ref {
+                Some(r) => r,
+                None => return Ok(false),
+            }
+        };
+
+        let param: i32 = if start.unwrap_or(true) { 1 } else { 0 };
+        let err = unsafe {
+            EdsSendCommand(camera_ref, kEdsCameraCommand_DoEvfAf, param)
+        };
+        if err != EDS_ERR_OK {
+            warn!("[Canon] DoEvfAf({}) failed: {}", param, error_to_string(err));
+            return Ok(false);
+        }
+
+        // Pump events while AF searches — 400ms is enough for PDAF/CDAF to lock
+        let start_time = std::time::Instant::now();
+        while start_time.elapsed() < std::time::Duration::from_millis(400) {
+            unsafe { let _ = EdsGetEvent(); }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        // Stop AF
+        unsafe {
+            let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_DoEvfAf, 0);
+            let _ = EdsGetEvent();
+        }
+
+        info!("[Canon] DoEvfAf complete");
+        Ok(true)
+    }
+}
+
 /// Take a picture (blocking — waits for image download)
 #[tauri::command]
 pub fn canon_take_picture() -> Result<CaptureResult, String> {

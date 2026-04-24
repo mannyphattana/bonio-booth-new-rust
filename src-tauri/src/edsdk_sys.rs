@@ -99,6 +99,7 @@ pub const kEdsPropID_Evf_AFMode: EdsPropertyID = 0x0000050B; // AF mode during l
 
 pub const kEdsCameraCommand_TakePicture: EdsCameraCommand = 0x00000000;
 pub const kEdsCameraCommand_ExtendShutDownTimer: EdsCameraCommand = 0x00000001;
+pub const kEdsCameraCommand_DoEvfAf: EdsCameraCommand = 0x00000102; // Trigger AF during Live View (param: 1=start, 0=stop)
 pub const kEdsCameraCommand_PressShutterButton: EdsCameraCommand = 0x00000004;
 pub const kEdsCameraCommand_MovieSelectSwON: EdsCameraCommand = 0x00000107;
 pub const kEdsCameraCommand_MovieSelectSwOFF: EdsCameraCommand = 0x00000108;

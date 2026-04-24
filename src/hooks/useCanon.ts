@@ -573,6 +573,24 @@ export function useCanon() {
     }
   }, []);
 
+  /**
+   * Trigger AF during Live View using DoEvfAf command.
+   * Unlike warmUp() which simulates a halfpress, this is the proper EVF AF API.
+   * Works while Live View is active — no need to stop/restart the EVF stream.
+   * Use between shots to force the camera to focus before the next countdown.
+   * Fire-and-forget safe — never throws.
+   */
+  const doEvfAf = useCallback(async (): Promise<boolean> => {
+    try {
+      const ok = await invoke<boolean>("canon_do_evf_af", { start: true });
+      appLogger.info("[useCanon]", `[useCanon] DoEvfAf complete: ${ok}`);
+      return ok;
+    } catch (err) {
+      appLogger.warn("[useCanon]", `[useCanon] DoEvfAf failed (non-fatal): ${err}`);
+      return false;
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -603,6 +621,7 @@ export function useCanon() {
     takePictureQuick,
     takePhotoDuringRecording,
     warmUp,
+    doEvfAf,
     cleanup,
   };
 }
