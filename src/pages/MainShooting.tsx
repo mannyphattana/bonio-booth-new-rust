@@ -758,6 +758,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       
       // 🚨 เพิ่มเวลาพักตอนจบแต่ละลูปเป็น 300ms ให้ระบบเคลียร์แรม/คืน Memory ให้หมดจดก่อนลุยช็อตต่อไป
       await new Promise((r) => setTimeout(r, 300));
+
+      // รอ live view stable ก่อนเริ่ม countdown ช็อตถัดไป
+      // (AF อาจยังทำงานอยู่หลัง capture — รอ 3 fresh frames เหมือนที่ LumaBooth ทำ)
+      if (cameraTypeRef.current === "canon" && i < totalCaptures - 1) {
+        await canonCamera.waitForStableFrames(3, 3000);
+      }
     }
 
     captureVideoDiagnosticsRef.current = captureVideoDiagnostics;

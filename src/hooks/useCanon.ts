@@ -377,6 +377,35 @@ export function useCanon() {
     return latestFrameRef.current;
   }, []);
 
+  /**
+   * Wait until the live view is showing stable/fresh frames after a capture.
+   * Polls latestFrameRef until `requiredFresh` consecutive distinct frames arrive
+   * (AF has settled). Mirrors what LumaBooth/DSLRBooth does between shots.
+   */
+  const waitForStableFrames = useCallback(
+    async (requiredFresh = 3, timeoutMs = 3000): Promise<void> => {
+      const pollMs = 50;
+      let elapsed = 0;
+      let freshCount = 0;
+      let lastFingerprint = "";
+
+      while (elapsed < timeoutMs && freshCount < requiredFresh) {
+        const frame = latestFrameRef.current;
+        if (frame) {
+          // Fingerprint: length + last 100 chars (fast, avoids full string compare)
+          const fp = `${frame.length}:${frame.slice(-100)}`;
+          if (fp !== lastFingerprint) {
+            freshCount++;
+            lastFingerprint = fp;
+          }
+        }
+        await new Promise((r) => setTimeout(r, pollMs));
+        elapsed += pollMs;
+      }
+    },
+    []
+  );
+
   // Frame recording for video/boomerang
   const startFrameRecording = useCallback(() => {
     recordedFramesRef.current = [];
@@ -563,6 +592,7 @@ export function useCanon() {
     stopLiveView,
     takePicture,
     getLatestFrame,
+    waitForStableFrames,
     startFrameRecording,
     stopFrameRecording,
     startMovieRecording,
