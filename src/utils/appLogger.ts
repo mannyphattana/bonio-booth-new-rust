@@ -61,20 +61,25 @@ class AppLogger {
     }
   }
 
-  info(context: string, message: string): void {
-    this.push("info", context, message);
+  info(context: string, message: string, ...extra: unknown[]): void {
+    this.push("info", context, this.fmt(message, extra));
   }
 
-  warn(context: string, message: string): void {
-    this.push("warn", context, message);
+  warn(context: string, message: string, ...extra: unknown[]): void {
+    this.push("warn", context, this.fmt(message, extra));
   }
 
-  error(context: string, message: string): void {
-    this.push("error", context, message);
+  error(context: string, message: string, ...extra: unknown[]): void {
+    this.push("error", context, this.fmt(message, extra));
   }
 
-  debug(context: string, message: string): void {
-    this.push("debug", context, message);
+  debug(context: string, message: string, ...extra: unknown[]): void {
+    this.push("debug", context, this.fmt(message, extra));
+  }
+
+  private fmt(message: string, extra: unknown[]): string {
+    if (extra.length === 0) return message;
+    return `${message} ${extra.map((e) => (typeof e === "object" ? JSON.stringify(e) : String(e))).join(" ")}`;
   }
 
   /** คืน log entries ทั้งหมด (สำหรับส่งเป็น session log ตอน exit) */

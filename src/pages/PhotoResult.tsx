@@ -234,7 +234,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             imageDataBase64: composedImg,
             filename: `BonioBooth_${txId}_Frame.jpg`, 
           });
-        } catch (err) { appLogger.error(CTX, err); }
+        } catch (err) { appLogger.error(CTX, String(err)); }
 
         // เซฟรูปเดี่ยวทุกรูป
         for (let i = 0; i < frameCaptures.length; i++) {
@@ -244,7 +244,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
                 imageDataBase64: frameCaptures[i].photo,
                 filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
               });
-            } catch (err) { appLogger.error(CTX, err); }
+            } catch (err) { appLogger.error(CTX, String(err)); }
           }
         }
         appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
@@ -294,7 +294,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
               filename: `BonioBooth_${txId}_Video.mp4`, 
             });
             appLogger.info(CTX, "✅ [PhotoResult] Saved video to local drive successfully!");
-          } catch (err) { appLogger.error(CTX, err); }
+          } catch (err) { appLogger.error(CTX, String(err)); }
 
         } catch (err) {
           appLogger.error(CTX, "Video compose failed:", err);

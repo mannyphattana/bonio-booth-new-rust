@@ -377,6 +377,35 @@ export function useCanon() {
     return latestFrameRef.current;
   }, []);
 
+  /**
+   * Wait until the live view is showing stable/fresh frames after a capture.
+   * Polls latestFrameRef until `requiredFresh` consecutive distinct frames arrive
+   * (AF has settled). Mirrors what LumaBooth/DSLRBooth does between shots.
+   */
+  const waitForStableFrames = useCallback(
+    async (requiredFresh = 3, timeoutMs = 3000): Promise<void> => {
+      const pollMs = 50;
+      let elapsed = 0;
+      let freshCount = 0;
+      let lastFingerprint = "";
+
+      while (elapsed < timeoutMs && freshCount < requiredFresh) {
+        const frame = latestFrameRef.current;
+        if (frame) {
+          // Fingerprint: length + last 100 chars (fast, avoids full string compare)
+          const fp = `${frame.length}:${frame.slice(-100)}`;
+          if (fp !== lastFingerprint) {
+            freshCount++;
+            lastFingerprint = fp;
+          }
+        }
+        await new Promise((r) => setTimeout(r, pollMs));
+        elapsed += pollMs;
+      }
+    },
+    []
+  );
+
   // Frame recording for video/boomerang
   const startFrameRecording = useCallback(() => {
     recordedFramesRef.current = [];
@@ -533,6 +562,35 @@ export function useCanon() {
     });
   }, [stopLiveViewPolling]);
 
+  // Warm up AF: call during countdown (e.g. at tick=1) while LV is still active.
+  // Fire-and-forget — never throws.
+  const warmUp = useCallback(async (): Promise<void> => {
+    try {
+      await invoke("canon_warm_up");
+      appLogger.info("[useCanon]", "[useCanon] AF warm-up complete");
+    } catch (err) {
+      appLogger.warn("[useCanon]", `[useCanon] AF warm-up failed (non-fatal): ${err}`);
+    }
+  }, []);
+
+  /**
+   * Trigger AF during Live View using DoEvfAf command.
+   * Unlike warmUp() which simulates a halfpress, this is the proper EVF AF API.
+   * Works while Live View is active — no need to stop/restart the EVF stream.
+   * Use between shots to force the camera to focus before the next countdown.
+   * Fire-and-forget safe — never throws.
+   */
+  const doEvfAf = useCallback(async (): Promise<boolean> => {
+    try {
+      const ok = await invoke<boolean>("canon_do_evf_af", { start: true });
+      appLogger.info("[useCanon]", `[useCanon] DoEvfAf complete: ${ok}`);
+      return ok;
+    } catch (err) {
+      appLogger.warn("[useCanon]", `[useCanon] DoEvfAf failed (non-fatal): ${err}`);
+      return false;
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -552,6 +610,7 @@ export function useCanon() {
     stopLiveView,
     takePicture,
     getLatestFrame,
+    waitForStableFrames,
     startFrameRecording,
     stopFrameRecording,
     startMovieRecording,
@@ -561,6 +620,8 @@ export function useCanon() {
     isMovieRecording,
     takePictureQuick,
     takePhotoDuringRecording,
+    warmUp,
+    doEvfAf,
     cleanup,
   };
 }

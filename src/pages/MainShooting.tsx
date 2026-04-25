@@ -648,6 +648,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             startRecording();
           }
 
+          // Warm up AF 1 second before capture (while LV is still active)
+          if (currentCount === 1 && cameraTypeRef.current === "canon") {
+            canonCamera.warmUp();
+          }
+
           if (currentCount <= 0) {
             clearInterval(timer);
             resolve();
@@ -753,6 +758,20 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       
       // 🚨 เพิ่มเวลาพักตอนจบแต่ละลูปเป็น 300ms ให้ระบบเคลียร์แรม/คืน Memory ให้หมดจดก่อนลุยช็อตต่อไป
       await new Promise((r) => setTimeout(r, 300));
+
+      // รอ live view stable + force AF ก่อนเริ่ม countdown ช็อตถัดไป
+      // ถ้าช็อตที่แล้วเบลอ (เช่น มีคนเอามือมาบัง) กล้องจะยัง AF hunt อยู่
+      // waitForStableFrames อย่างเดียวไม่พอ เพราะ blurry frames ก็ "distinct" ได้
+      // → trigger warmUp() ก่อนเพื่อ force AF cycle ให้ settle แล้วค่อยรอ stable frames
+      if (cameraTypeRef.current === "canon" && i < totalCaptures - 1) {
+        // 1. รอให้ EVF กลับมาออนไลน์ก่อน (อย่างน้อย 1 fresh frame)
+        await canonCamera.waitForStableFrames(1, 2000);
+        // 2. Trigger DoEvfAf — proper EVF AF API, ไม่ต้องหยุด LV เหมือน warmUp()
+        //    กล้องจะ focus ขณะ EVF active แก้ปัญหา live view เบลอก่อน countdown ถัดไป
+        await canonCamera.doEvfAf();
+        // 3. รอ sharp stable frames หลัง AF settle
+        await canonCamera.waitForStableFrames(3, 2000);
+      }
     }
 
     captureVideoDiagnosticsRef.current = captureVideoDiagnostics;
