@@ -30,7 +30,7 @@
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "https://api-booth-test.boniolabs.com/**" },
+        { "url": "https://api-booth.boniolabs.com/**" },
         { "url": "https://sgp1.digitaloceanspaces.com/**" },
         { "url": "https://**" }
       ]
