@@ -25,14 +25,15 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const state = (location.state as any) || {};
 
   const frameCaptures: Capture[] = state.frameCaptures || [];
-  const firstPhoto = frameCaptures[0]?.photoPreview || frameCaptures[0]?.photo || "";
+  const previewThumbnailSource = frameCaptures[0]?.photoPreview || frameCaptures[0]?.photo || "";
+  const previewFullSource = frameCaptures[0]?.photo || previewThumbnailSource;
 
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   const [selectedFilter, setSelectedFilter] = useState<FilterConfig>(
     FILTERS[0],
   );
-  const [previewImage, setPreviewImage] = useState(firstPhoto);
+  const [previewImage, setPreviewImage] = useState(previewFullSource);
   const [filterPreviews, setFilterPreviews] = useState<Record<string, string>>(
     {},
   );
@@ -45,8 +46,8 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setPreviewImage(firstPhoto);
-  }, [firstPhoto]);
+    setPreviewImage(previewFullSource);
+  }, [previewFullSource]);
 
   useEffect(() => {
     const resolvePaths = async () => {
@@ -61,26 +62,26 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
           appLogger.warn(CTX, `LUT not found for ${filter.id}:`, err);
         }
       }
-      if (firstPhoto) {
+      if (previewThumbnailSource) {
         generateFilterPreviews();
       }
     };
     resolvePaths();
-  }, [firstPhoto]);
+  }, [previewThumbnailSource]);
 
   const generateFilterPreviews = async () => {
     const promises = FILTERS.map(async (filter) => {
       const lutPath = resolvedPathsRef.current[filter.id] || "";
       try {
         const result: string = await invoke("apply_lut_filter_preview", {
-          imageDataBase64: firstPhoto,
+          imageDataBase64: previewThumbnailSource,
           lutFilePath: lutPath,
           maxSize: 180,
         });
         setFilterPreviews((prev) => ({ ...prev, [filter.id]: result }));
         previewCacheRef.current[filter.id] = result;
       } catch (err) {
-        setFilterPreviews((prev) => ({ ...prev, [filter.id]: firstPhoto }));
+        setFilterPreviews((prev) => ({ ...prev, [filter.id]: previewThumbnailSource }));
       }
     });
     await Promise.all(promises);
@@ -92,14 +93,14 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
 
     try {
       if (filter.type === "none") {
-        setPreviewImage(firstPhoto);
+        setPreviewImage(previewFullSource);
       } else {
         if (previewCacheRef.current[`full_${filter.id}`]) {
           setPreviewImage(previewCacheRef.current[`full_${filter.id}`]);
         } else {
           const lutPath = resolvedPathsRef.current[filter.id] || "";
           const result: string = await invoke("apply_lut_filter_preview", {
-            imageDataBase64: firstPhoto,
+            imageDataBase64: previewFullSource,
             lutFilePath: lutPath,
             maxSize: 900,
           });
@@ -109,7 +110,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
       }
     } catch (err) {
       appLogger.error(CTX, "Apply filter preview error:", err);
-      setPreviewImage(firstPhoto);
+      setPreviewImage(previewFullSource);
     }
 
     setLoading(false);
@@ -424,13 +425,13 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                         }}
                       >
                         <img
-                          src={filterPreviews[filter.id] || firstPhoto || undefined}
+                          src={filterPreviews[filter.id] || previewThumbnailSource || undefined}
                           alt={filter.name}
                           draggable={false}
                           onError={(e) => {
                             const img = e.currentTarget as HTMLImageElement;
-                            if (firstPhoto && img.src !== firstPhoto) {
-                              img.src = firstPhoto;
+                            if (previewThumbnailSource && img.src !== previewThumbnailSource) {
+                              img.src = previewThumbnailSource;
                             }
                           }}
                           style={{
@@ -538,7 +539,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
                 src={previewImage || undefined}
                 alt="Preview"
                 draggable={false}
-                onError={() => setPreviewImage(firstPhoto || "")}
+                onError={() => setPreviewImage(previewFullSource || "")}
                 style={{ 
                   display: "block", 
                   width: "auto",    
