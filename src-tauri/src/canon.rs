@@ -1256,6 +1256,11 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
 
         info!("[Canon] Sending TakePicture command...");
 
+        // Re-focus immediately before shutter so late subject changes (for example,
+        // a hand moving into frame at countdown end) can acquire a fresh AF lock
+        // without blocking live-view recording during the countdown itself.
+        let _ = pre_focus_af(camera_ref);
+
         // Send take picture command
         let take_error = send_af_shutter_with_retry(camera_ref);
 

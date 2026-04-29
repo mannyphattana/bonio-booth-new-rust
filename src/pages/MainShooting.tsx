@@ -648,11 +648,6 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             startRecording();
           }
 
-          // Warm up AF 1 second before capture (while LV is still active)
-          if (currentCount === 1 && cameraTypeRef.current === "canon") {
-            canonCamera.warmUp();
-          }
-
           if (currentCount <= 0) {
             clearInterval(timer);
             resolve();
