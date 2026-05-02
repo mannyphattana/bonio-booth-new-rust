@@ -552,6 +552,7 @@ export function useCanon() {
 
     try { await invoke("canon_stop_live_view"); } catch { /* ignore */ }
     try { await invoke("canon_close_session"); } catch { /* ignore */ }
+    try { await invoke("canon_terminate"); } catch { /* ignore */ }
 
     setState({
       initialized: false,
@@ -599,6 +600,7 @@ export function useCanon() {
       // Best-effort async cleanup
       invoke("canon_stop_live_view").catch(() => {});
       invoke("canon_close_session").catch(() => {});
+      invoke("canon_terminate").catch(() => {});
     };
   }, []);
 

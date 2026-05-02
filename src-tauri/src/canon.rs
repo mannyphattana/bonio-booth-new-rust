@@ -146,6 +146,188 @@ fn is_transient_live_view_error(error: EdsError) -> bool {
     matches!(error, EDS_ERR_DEVICE_BUSY | EDS_ERR_OBJECT_NOTREADY)
 }
 
+#[cfg(target_os = "windows")]
+fn apply_session_defaults(camera_ref: EdsCameraRef) {
+    unsafe {
+        let save_to: EdsUInt32 = kEdsSaveTo_Host;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_SaveTo,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &save_to as *const _ as *const c_void,
+        );
+
+        // Force JPEG Large Fine so downloads stay fast and RAW is never sent to host.
+        let img_quality: EdsUInt32 = kEdsImageQuality_LJF;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_ImageQuality,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &img_quality as *const _ as *const c_void,
+        );
+
+        // Best-effort: prefer One-Shot AF mode in photo session for sharper stills.
+        let af_mode_one_shot: EdsUInt32 = 0;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_AFMode,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &af_mode_one_shot as *const _ as *const c_void,
+        );
+
+        let capacity = EdsCapacity {
+            numberOfFreeClusters: 0x7FFFFFFF,
+            bytesPerSector: 512,
+            reset: 1,
+        };
+        let _ = EdsSetCapacity(camera_ref, capacity);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn register_object_event_handler(
+    manager: &mut CameraManager,
+    camera_ref: EdsCameraRef,
+) -> Result<(), String> {
+    if manager.event_handler_registered {
+        return Ok(());
+    }
+
+    unsafe {
+        let error = EdsSetObjectEventHandler(
+            camera_ref,
+            kEdsObjectEvent_All,
+            Some(object_event_handler),
+            ptr::null_mut(),
+        );
+        if error != EDS_ERR_OK {
+            return Err(format!(
+                "Failed to register event handler: {}",
+                error_to_string(error)
+            ));
+        }
+    }
+
+    manager.event_handler_registered = true;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn register_state_event_handler(manager: &mut CameraManager, camera_ref: EdsCameraRef) {
+    if manager.state_event_handler_registered {
+        return;
+    }
+
+    unsafe {
+        let error = EdsSetStateEventHandler(
+            camera_ref,
+            kEdsStateEvent_All,
+            Some(state_event_handler),
+            ptr::null_mut(),
+        );
+        if error == EDS_ERR_OK {
+            manager.state_event_handler_registered = true;
+        } else {
+            warn!("[Canon] Failed to register state event handler");
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_live_view_output(camera_ref: EdsCameraRef, output: EdsUInt32) -> EdsError {
+    unsafe {
+        EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_Evf_OutputDevice,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &output as *const _ as *const c_void,
+        )
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn start_live_view_properties(camera_ref: EdsCameraRef) -> EdsError {
+    unsafe {
+        // Best-effort: request EVF high-quality mode where supported.
+        let evf_mode: EdsUInt32 = 1;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_Evf_Mode,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &evf_mode as *const _ as *const c_void,
+        );
+
+        let error = set_live_view_output(camera_ref, kEdsEvfOutputDevice_PC);
+        if error != EDS_ERR_OK {
+            return error;
+        }
+
+        // Value 2 = Face Detection + Tracking (falls back gracefully on older bodies).
+        let evf_af_mode: EdsUInt32 = 2;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_Evf_AFMode,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &evf_af_mode as *const _ as *const c_void,
+        );
+
+        // Restore Movie Servo AF so LV keeps tracking between shots.
+        let servo_af: EdsUInt32 = 1;
+        let _ = EdsSetPropertyData(
+            camera_ref,
+            kEdsPropID_MovieServoAf,
+            0,
+            std::mem::size_of::<EdsUInt32>() as u32,
+            &servo_af as *const _ as *const c_void,
+        );
+    }
+
+    EDS_ERR_OK
+}
+
+#[cfg(target_os = "windows")]
+fn recover_camera_session(manager: &mut CameraManager, reason: &str) -> Result<(), String> {
+    let camera_ref = manager.camera_ref.ok_or("No camera connected")?;
+
+    warn!("[Canon] Recovering session after transient error: {}", reason);
+
+    unsafe {
+        let _ = EdsSendCommand(
+            camera_ref,
+            kEdsCameraCommand_PressShutterButton,
+            kEdsShutterButton_OFF as i32,
+        );
+        let _ = set_live_view_output(camera_ref, 0);
+        let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+        let _ = EdsGetEvent();
+        let _ = EdsCloseSession(camera_ref);
+    }
+
+    manager.session_open = false;
+    manager.event_handler_registered = false;
+    manager.state_event_handler_registered = false;
+
+    std::thread::sleep(std::time::Duration::from_millis(350));
+
+    unsafe {
+        let error = EdsOpenSession(camera_ref);
+        check_error(error)?;
+    }
+
+    apply_session_defaults(camera_ref);
+    manager.session_open = true;
+    register_state_event_handler(manager, camera_ref);
+
+    info!("[Canon] Session recovered successfully");
+    Ok(())
+}
+
 /// Pre-focus for still capture:
 /// 1. Stop Movie Servo AF (prevents hunting while we lock focus)
 /// 2. Set One-Shot AF mode
@@ -906,66 +1088,12 @@ pub fn canon_open_session() -> Result<bool, String> {
         unsafe {
             let error = EdsOpenSession(camera_ref);
             check_error(error)?;
-
-            // Set save target to host
-            let save_to: EdsUInt32 = kEdsSaveTo_Host;
-            let _ = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_SaveTo,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &save_to as *const _ as *const c_void,
-            );
-
-            // Force JPEG Large Fine — prevents RAW files from being sent to host
-            // (overrides whatever the camera's physical dial is set to)
-            let img_quality: EdsUInt32 = kEdsImageQuality_LJF;
-            let _ = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_ImageQuality,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &img_quality as *const _ as *const c_void,
-            );
-
-            // Best-effort: prefer One-Shot AF mode in photo session for sharper stills.
-            // Not all camera bodies expose/write this property, so ignore failures.
-            let af_mode_one_shot: EdsUInt32 = 0;
-            let _ = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_AFMode,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &af_mode_one_shot as *const _ as *const c_void,
-            );
-
-            // Set capacity
-            let capacity = EdsCapacity {
-                numberOfFreeClusters: 0x7FFFFFFF,
-                bytesPerSector: 512,
-                reset: 1,
-            };
-            let _ = EdsSetCapacity(camera_ref, capacity);
         }
+
+        apply_session_defaults(camera_ref);
 
         manager.session_open = true;
-
-        // Register state event handler
-        if !manager.state_event_handler_registered {
-            unsafe {
-                let error = EdsSetStateEventHandler(
-                    camera_ref,
-                    kEdsStateEvent_All,
-                    Some(state_event_handler),
-                    ptr::null_mut(),
-                );
-                if error == EDS_ERR_OK {
-                    manager.state_event_handler_registered = true;
-                } else {
-                    warn!("[Canon] Failed to register state event handler");
-                }
-            }
-        }
+        register_state_event_handler(&mut manager, camera_ref);
 
         info!("[Canon] Session opened");
         Ok(true)
@@ -1191,27 +1319,12 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
                 });
             }
 
-            // Register object event handler if needed
-            if !manager.event_handler_registered {
-                unsafe {
-                    let error = EdsSetObjectEventHandler(
-                        camera_ref,
-                        kEdsObjectEvent_All,
-                        Some(object_event_handler),
-                        ptr::null_mut(),
-                    );
-                    if error != EDS_ERR_OK {
-                        return Ok(CaptureResult {
-                            success: false,
-                            error: Some(format!(
-                                "Failed to register event handler: {}",
-                                error_to_string(error)
-                            )),
-                            image_data: None,
-                        });
-                    }
-                }
-                manager.event_handler_registered = true;
+            if let Err(err) = register_object_event_handler(&mut manager, camera_ref) {
+                return Ok(CaptureResult {
+                    success: false,
+                    error: Some(err),
+                    image_data: None,
+                });
             }
 
             camera_ref
@@ -1262,7 +1375,25 @@ pub fn canon_take_picture() -> Result<CaptureResult, String> {
         let _ = pre_focus_af(camera_ref);
 
         // Send take picture command
-        let take_error = send_af_shutter_with_retry(camera_ref);
+        let mut take_error = send_af_shutter_with_retry(camera_ref);
+
+        if take_error != EDS_ERR_OK && is_transient_live_view_error(take_error) {
+            warn!(
+                "[Canon] Capture hit transient error: {} - reopening session and retrying once",
+                error_to_string(take_error)
+            );
+
+            let retry_camera_ref = {
+                let mut manager = manager.lock().map_err(|e| e.to_string())?;
+                recover_camera_session(&mut manager, error_to_string(take_error))?;
+                let retry_camera_ref = manager.camera_ref.ok_or("No camera connected")?;
+                register_object_event_handler(&mut manager, retry_camera_ref)?;
+                retry_camera_ref
+            };
+
+            let _ = pre_focus_af(retry_camera_ref);
+            take_error = send_af_shutter_with_retry(retry_camera_ref);
+        }
 
         if take_error != EDS_ERR_OK {
             error!("[Canon] TakePicture command failed: {}", error_to_string(take_error));
@@ -1611,61 +1742,47 @@ pub fn canon_start_live_view() -> Result<bool, String> {
             .get()
             .ok_or("Camera manager not initialized")?;
 
-        let manager = manager.lock().map_err(|e| e.to_string())?;
+        let mut manager = manager.lock().map_err(|e| e.to_string())?;
 
         let camera_ref = manager.camera_ref.ok_or("No camera connected")?;
         if !manager.session_open {
             return Err("Session not open".to_string());
         }
 
-        unsafe {
-            // Best-effort: request EVF high-quality mode where supported.
-            let evf_mode: EdsUInt32 = 1;
-            let _ = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_Evf_Mode,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &evf_mode as *const _ as *const c_void,
+        let mut last_error = EDS_ERR_OK;
+        for attempt in 1..=3 {
+            let error = start_live_view_properties(camera_ref);
+            last_error = error;
+
+            if error == EDS_ERR_OK {
+                info!("[Canon] Live view started");
+                return Ok(true);
+            }
+
+            if !is_transient_live_view_error(error) {
+                check_error(error)?;
+            }
+
+            warn!(
+                "[Canon] Live view transient error on attempt {}/3: {}",
+                attempt,
+                error_to_string(error)
             );
 
-            let evf_output: EdsUInt32 = kEdsEvfOutputDevice_PC;
-            let error = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_Evf_OutputDevice,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &evf_output as *const _ as *const c_void,
-            );
-            check_error(error)?;
+            if attempt == 1 {
+                unsafe {
+                    let _ = set_live_view_output(camera_ref, 0);
+                    let _ = EdsSendCommand(camera_ref, kEdsCameraCommand_ExtendShutDownTimer, 0);
+                    let _ = EdsGetEvent();
+                }
+            } else if attempt == 2 {
+                recover_camera_session(&mut manager, error_to_string(error))?;
+            }
 
-            // Enable Face+Tracking AF during live view so the camera continuously
-            // tracks and focuses on faces as they move in/out.
-            // Value 2 = Face Detection + Tracking (falls back gracefully on older bodies).
-            let evf_af_mode: EdsUInt32 = 2;
-            let _ = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_Evf_AFMode,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &evf_af_mode as *const _ as *const c_void,
-            );
-
-            // Re-enable Movie Servo AF for continuous focus tracking during live view.
-            // pre_focus_af() disables this before each still capture to prevent hunting
-            // during the One-Shot lock — restore it here so LV stays sharp between shots.
-            let servo_af: EdsUInt32 = 1;
-            let _ = EdsSetPropertyData(
-                camera_ref,
-                kEdsPropID_MovieServoAf,
-                0,
-                std::mem::size_of::<EdsUInt32>() as u32,
-                &servo_af as *const _ as *const c_void,
-            );
-
+            std::thread::sleep(std::time::Duration::from_millis(250 * attempt as u64));
         }
 
-        info!("[Canon] Live view started");
+        check_error(last_error)?;
         Ok(true)
     }
 }
