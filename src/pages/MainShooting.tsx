@@ -13,6 +13,7 @@ const CTX = "[MainShooting]";
 const CANON_VIDEO_BITRATE = 14_000_000;
 const WEBCAM_VIDEO_BITRATE = 8_000_000;
 const CANON_MIN_COUNTDOWN_SECONDS = 3;
+const MEDIA_RECORDER_TIMESLICE_MS = 250;
 
 function CropOverlay({
   slotWidth,
@@ -419,7 +420,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }
       };
 
-      recorder.start();
+      recorder.start(MEDIA_RECORDER_TIMESLICE_MS);
       mediaRecorderRef.current = recorder;
       isRecordingRef.current = true;
       setIsRecording(true);
@@ -450,6 +451,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           setIsRecording(false);
           resolve({ url, blob });
         };
+        try {
+          recorder.requestData();
+        } catch {
+          // Some implementations may reject requestData during shutdown.
+        }
         recorder.stop();
       } else {
         isRecordingRef.current = false;
@@ -579,7 +585,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       setShowGetReady(false);
     }
 
-      if (streamRef.current) {
+      if (streamRef.current && cameraTypeRef.current !== "canon") {
         appLogger.info(CTX, "Warm-up: initialising video encoder...");
         try {
           const { mimeType, videoBitsPerSecond } = getRecordingProfile();
@@ -607,6 +613,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         } catch (e) {
           appLogger.warn(CTX, `Warm-up failed: ${e}`);
         }
+      } else if (streamRef.current) {
+        appLogger.info(CTX, "Warm-up: skipped for Canon live view stream to avoid EVF freeze before capture");
       }
       
     let localCaptures: Capture[] = [];
