@@ -419,7 +419,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         }
       };
 
-      recorder.start();
+      if (cameraTypeRef.current === "canon") {
+        recorder.start(250);
+      } else {
+        recorder.start();
+      }
       mediaRecorderRef.current = recorder;
       isRecordingRef.current = true;
       setIsRecording(true);
@@ -450,6 +454,15 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           setIsRecording(false);
           resolve({ url, blob });
         };
+
+        if (cameraTypeRef.current === "canon") {
+          try {
+            recorder.requestData();
+          } catch (err) {
+            appLogger.warn(CTX, `waitForVideo requestData failed: ${err}`);
+          }
+        }
+
         recorder.stop();
       } else {
         isRecordingRef.current = false;
@@ -579,7 +592,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       setShowGetReady(false);
     }
 
-      if (streamRef.current) {
+      if (streamRef.current && cameraTypeRef.current !== "canon") {
         appLogger.info(CTX, "Warm-up: initialising video encoder...");
         try {
           const { mimeType, videoBitsPerSecond } = getRecordingProfile();
@@ -665,7 +678,10 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
       // 🚨 สั่งถ่ายภาพ
       let capturePromise: Promise<string>;
       if (cameraTypeRef.current === "canon") {
-        canonDisconnectSuppressUntilRef.current = Date.now() + 2500;
+        // Re-lock AF only after recording has been stopped so the clip can
+        // finish cleanly before Canon blocks EVF frames during half-press AF.
+        canonDisconnectSuppressUntilRef.current = Date.now() + 3000;
+        await canonCamera.warmUp();
         capturePromise = canonCamera.takePicture();
       } else {
         capturePromise = takePhoto();
