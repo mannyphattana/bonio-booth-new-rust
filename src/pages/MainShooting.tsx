@@ -580,6 +580,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         await new Promise((r) => setTimeout(r, POLL_MS));
         elapsed += POLL_MS;
       }
+
+      // ทำให้ช็อตแรกใช้ EVF AF settle flow เดียวกับช็อตถัดไป
+      // เพื่อลดความต่างของ live view readiness ระหว่าง capture 1 กับ capture อื่น
+      await canonCamera.doEvfAf();
+      await canonCamera.waitForStableFrames(3, 2000);
       
       const getReadyElapsed = Date.now() - getReadyStart;
       if (getReadyElapsed < 1500) {

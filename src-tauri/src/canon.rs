@@ -146,6 +146,63 @@ fn is_transient_live_view_error(error: EdsError) -> bool {
     matches!(error, EDS_ERR_DEVICE_BUSY | EDS_ERR_OBJECT_NOTREADY)
 }
 
+#[cfg(target_os = "windows")]
+unsafe fn probe_live_view_frame(camera_ref: EdsCameraRef) -> EdsError {
+    let mut stream: EdsStreamRef = std::ptr::null_mut();
+    let error = EdsCreateMemoryStream(0, &mut stream);
+    if error != EDS_ERR_OK {
+        return error;
+    }
+
+    let mut evf_image: EdsEvfImageRef = std::ptr::null_mut();
+    let error = EdsCreateEvfImageRef(stream, &mut evf_image);
+    if error != EDS_ERR_OK {
+        EdsRelease(stream);
+        return error;
+    }
+
+    let error = EdsDownloadEvfImage(camera_ref, evf_image);
+    EdsRelease(evf_image);
+    EdsRelease(stream);
+    error
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_live_view_ready(camera_ref: EdsCameraRef) -> Result<(), String> {
+    let timeout = std::time::Duration::from_millis(1500);
+    let retry_delay = std::time::Duration::from_millis(50);
+    let start = std::time::Instant::now();
+    let mut last_error = EDS_ERR_OK;
+
+    while start.elapsed() < timeout {
+        let error = unsafe {
+            let _ = EdsGetEvent();
+            probe_live_view_frame(camera_ref)
+        };
+
+        if error == EDS_ERR_OK {
+            return Ok(());
+        }
+
+        if !is_transient_live_view_error(error) {
+            return Err(format!(
+                "Live view probe failed: {} (0x{:08X})",
+                error_to_string(error),
+                error
+            ));
+        }
+
+        last_error = error;
+        std::thread::sleep(retry_delay);
+    }
+
+    Err(format!(
+        "Live view probe timed out: {} (0x{:08X})",
+        error_to_string(last_error),
+        last_error
+    ))
+}
+
 /// Pre-focus for still capture:
 /// 1. Stop Movie Servo AF (prevents hunting while we lock focus)
 /// 2. Set One-Shot AF mode
@@ -1629,7 +1686,17 @@ pub fn canon_start_live_view() -> Result<bool, String> {
                 &evf_mode as *const _ as *const c_void,
             );
 
-            let evf_output: EdsUInt32 = kEdsEvfOutputDevice_PC;
+            let mut evf_output: EdsUInt32 = 0;
+            let error = EdsGetPropertyData(
+                camera_ref,
+                kEdsPropID_Evf_OutputDevice,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &mut evf_output as *mut _ as *mut c_void,
+            );
+            check_error(error)?;
+
+            evf_output |= kEdsEvfOutputDevice_PC;
             let error = EdsSetPropertyData(
                 camera_ref,
                 kEdsPropID_Evf_OutputDevice,
@@ -1665,6 +1732,8 @@ pub fn canon_start_live_view() -> Result<bool, String> {
 
         }
 
+        wait_for_live_view_ready(camera_ref)?;
+
         info!("[Canon] Live view started");
         Ok(true)
     }
@@ -1696,7 +1765,17 @@ pub fn canon_stop_live_view() -> Result<bool, String> {
         }
 
         unsafe {
-            let evf_output: EdsUInt32 = 0;
+            let mut evf_output: EdsUInt32 = 0;
+            let error = EdsGetPropertyData(
+                camera_ref,
+                kEdsPropID_Evf_OutputDevice,
+                0,
+                std::mem::size_of::<EdsUInt32>() as u32,
+                &mut evf_output as *mut _ as *mut c_void,
+            );
+            check_error(error)?;
+
+            evf_output &= !kEdsEvfOutputDevice_PC;
             let error = EdsSetPropertyData(
                 camera_ref,
                 kEdsPropID_Evf_OutputDevice,
