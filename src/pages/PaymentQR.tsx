@@ -149,15 +149,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     if (status === "PENDING" && referenceId) {
       pollRef.current = setInterval(checkStatus, POLL_INTERVAL);
       timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            setStatus("TIMEOUT");
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (timerRef.current) clearInterval(timerRef.current);
-            return 0;
-          }
-          return prev - 1;
-        });
+        setTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
       }, 1000);
     }
 
@@ -166,6 +158,22 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [status, referenceId, checkStatus]);
+
+  // Handle TIMEOUT: clear intervals and auto-navigate home after 3s
+  useEffect(() => {
+    if (timeLeft === 0 && status === "PENDING") {
+      setStatus("TIMEOUT");
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  }, [timeLeft, status]);
+
+  useEffect(() => {
+    if (status === "TIMEOUT") {
+      const t = setTimeout(() => navigate("/"), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [status, navigate]);
 
   const handleCancelClick = () => {
     setIsCancelModalOpen(true);
