@@ -277,6 +277,10 @@ const handleCountdownComplete = async () => {
                 const captureIdx = photoAssignments[i];
                 const slotX = slot.x * scaleFactor.x + imageOffset.x;
                 const slotY = slot.y * scaleFactor.y + imageOffset.y;
+                const framePhotoSource =
+                  captureIdx !== undefined
+                    ? (captures[captureIdx].photo || captures[captureIdx].photoPreview)
+                    : undefined;
                 return (
                   <div
                     key={i}
@@ -294,7 +298,7 @@ const handleCountdownComplete = async () => {
                   >
                     {captureIdx !== undefined && (
                       <img
-                        src={(captures[captureIdx].photoPreview || captures[captureIdx].photo) || undefined}
+                        src={framePhotoSource}
                         alt=""
                         decoding="async"
                         style={{
