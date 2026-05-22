@@ -135,9 +135,14 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   // 🚨 เพิ่ม Refs สำหรับจำลอง Canon Live View ให้เป็น Webcam Stream
   const canonCanvasRef = useRef<HTMLCanvasElement>(null);
   const canonDrawLoopRef = useRef<number>(0);
+  // Direct image element สำหรับ canvas draw (bypass React state path เพื่อไม่ให้ freeze)
+  const canonDirectImgRef = useRef<HTMLImageElement | null>(null);
+  const canonLastDrawnSrcRef = useRef<string>("");
   const canonDisconnectFailCountRef = useRef(0);
   const canonDisconnectSuppressUntilRef = useRef(0);
   const canonDisconnectHandledRef = useRef(false);
+  // Guard ป้องกัน React StrictMode double-mount: initCanon จะ early-exit ถ้า mount ถูก cleanup แล้ว
+  const isMountedRef = useRef(true);
 
   // 🚨 เปลี่ยนจาก RecordRTC เป็น MediaRecorder Native
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -204,6 +209,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }
     initCamera();
     return () => {
+      isMountedRef.current = false;
       appLogger.info(CTX, "Unmounted — stopping camera");
       // ออกปกติ → ลบ crash flag
       localStorage.removeItem("bonio_shooting_crash");
@@ -212,20 +218,28 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   }, []);
 
   const drawCanonFrame = useCallback(() => {
-    if (cameraTypeRef.current === "canon" && canonCanvasRef.current && canonLiveViewRef.current) {
-      const ctx = canonCanvasRef.current.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(
-          canonLiveViewRef.current,
-          0,
-          0,
-          canonCanvasRef.current.width,
-          canonCanvasRef.current.height
-        );
+    if (cameraTypeRef.current === "canon" && canonCanvasRef.current) {
+      const latestFrame = canonCamera.getLatestFrame();
+      if (latestFrame) {
+        // Initialize direct img element ครั้งแรก
+        if (!canonDirectImgRef.current) {
+          canonDirectImgRef.current = new Image();
+        }
+        // อัปเดต src โดยตรง — ไม่ผ่าน React state / React scheduler เลย
+        if (latestFrame !== canonLastDrawnSrcRef.current) {
+          canonLastDrawnSrcRef.current = latestFrame;
+          const img = canonDirectImgRef.current;
+          const canvas = canonCanvasRef.current;
+          img.onload = () => {
+            const ctx = canvas.getContext("2d");
+            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          };
+          img.src = latestFrame;
+        }
       }
     }
     canonDrawLoopRef.current = requestAnimationFrame(drawCanonFrame);
-  }, []);
+  }, [canonCamera]);
 
   const initCamera = async () => {
     try {
@@ -248,6 +262,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const initCanon = async () => {
     appLogger.info(CTX, "Canon: connecting to camera...");
     const connOk = await canonCamera.connect(0);
+    // Guard: ถ้า StrictMode cleanup ยิงมาก่อน connect กลับมา → ออกทันที ไม่ต้องเปิด live view
+    if (!isMountedRef.current) return;
     if (!connOk) {
       appLogger.error(CTX, "Canon: connect() failed");
       setCameraError("Cannot connect to Canon camera");
@@ -256,14 +272,17 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     appLogger.info(CTX, "Canon: connected — waiting 300ms before live view...");
 
     await new Promise((r) => setTimeout(r, 300));
+    if (!isMountedRef.current) return;
 
     let lvOk = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       appLogger.info(CTX, `Canon: startLiveView attempt ${attempt}/3`);
       lvOk = await canonCamera.startLiveView();
       if (lvOk) break;
+      if (!isMountedRef.current) return;
       await new Promise((r) => setTimeout(r, attempt * 500));
     }
+    if (!isMountedRef.current) return;
     if (!lvOk) {
       appLogger.error(CTX, "Canon: startLiveView() failed after 3 attempts");
       await canonCamera.cleanup();
@@ -272,11 +291,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     }
     appLogger.info(CTX, "Canon: live view started — waiting for first frame...");
 
+    // ใช้ getLatestFrame() แทน canonCamera.liveViewFrame เพื่อหลีกเลี่ยง stale closure
     let waitTime = 0;
-    while (!canonCamera.liveViewFrame && waitTime < 3000) {
+    while (!canonCamera.getLatestFrame() && waitTime < 3000) {
       await new Promise((r) => setTimeout(r, 100));
       waitTime += 100;
     }
+    if (!isMountedRef.current) return;
 
     const liveViewW = canonLiveViewRef.current?.naturalWidth || 0;
     const liveViewH = canonLiveViewRef.current?.naturalHeight || 0;
@@ -638,6 +659,15 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
     for (let i = 0; i < totalCaptures; i++) {
       appLogger.info(CTX, `Capture ${i + 1}/${totalCaptures} — starting countdown`);
+      
+      // ทุก capture: trigger AF อีกรอบก่อน countdown เพื่อแก้เคสมีคนบังกล้อง
+      // ระหว่าง capture ก่อนหน้า (ช่วง GetReady / ระหว่าง waitForStableFrames ของ capture ที่แล้ว)
+      // ถ้า AF ก่อนหน้า settle บน frame เบลอ รอบนี้จะให้กล้อง re-focus หลังคนถอยออกไปแล้ว
+      if (cameraTypeRef.current === "canon") {
+        await canonCamera.doEvfAf();
+        await canonCamera.waitForStableFrames(3, 2000);
+        appLogger.info(CTX, `Capture ${i + 1}: pre-countdown AF re-settle done`);
+      }
 
       isRecordingRef.current = false;
       setIsRecording(false);

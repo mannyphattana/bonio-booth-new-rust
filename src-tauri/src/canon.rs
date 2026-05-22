@@ -108,6 +108,9 @@ struct CameraManager {
     session_open: bool,
     event_handler_registered: bool,
     state_event_handler_registered: bool,
+    /// ป้องกัน double-start จาก React StrictMode double-mount: ถ้า live view กำลังทำงานอยู่แล้ว
+    /// จะ skip EdsSetPropertyData + wait_for_live_view_ready แทนที่จะ reset สตรีม
+    lv_active: bool,
 }
 
 impl Default for CameraManager {
@@ -117,6 +120,7 @@ impl Default for CameraManager {
             session_open: false,
             event_handler_registered: false,
             state_event_handler_registered: false,
+            lv_active: false,
         }
     }
 }
@@ -875,16 +879,19 @@ pub fn canon_connect(index: Option<u32>) -> Result<CameraInfo, String> {
 
         let mut manager = manager.lock().map_err(|e| e.to_string())?;
 
-        // Close existing session
-        if manager.session_open {
-            if let Some(camera_ref) = manager.camera_ref {
-                unsafe {
-                    let _ = EdsCloseSession(camera_ref);
-                    EdsRelease(camera_ref);
+        // Release any existing camera handle (whether or not a session was open).
+        // Failing to release a stale ref when session_open==false leaves EDSDK
+        // thinking the camera is still owned, which causes Internal error (0x00000002)
+        // on the next EdsOpenSession call.
+        if let Some(old_ref) = manager.camera_ref.take() {
+            unsafe {
+                if manager.session_open {
+                    let _ = EdsCloseSession(old_ref);
                 }
+                EdsRelease(old_ref);
             }
-            manager.camera_ref = None;
             manager.session_open = false;
+            manager.lv_active = false;
         }
 
         unsafe {
@@ -956,13 +963,44 @@ pub fn canon_open_session() -> Result<bool, String> {
 
         let mut manager = manager.lock().map_err(|e| e.to_string())?;
 
+        // Idempotency guard: if a session is already open on this camera ref,
+        // return success immediately.  This prevents the second of two concurrent
+        // connect() calls (e.g. from React StrictMode or dual-window setups) from
+        // failing with Internal error (0x00000002) because EDSDK disallows opening
+        // an already-open session.
+        if manager.session_open {
+            info!("[Canon] Session already open — skipping EdsOpenSession");
+            return Ok(true);
+        }
+
         let camera_ref = manager
             .camera_ref
             .ok_or("No camera connected")?;
 
         unsafe {
-            let error = EdsOpenSession(camera_ref);
-            check_error(error)?;
+            // EdsOpenSession can transiently return Internal error (0x00000002),
+            // Device busy, or Object not ready on some camera bodies / USB states.
+            // Retry up to 3 times with a short wait before giving up.
+            let is_transient = |e: EdsError| {
+                matches!(
+                    e,
+                    EDS_ERR_INTERNAL_ERROR | EDS_ERR_DEVICE_BUSY | EDS_ERR_OBJECT_NOTREADY
+                )
+            };
+            let mut open_err = EdsOpenSession(camera_ref);
+            for attempt in 1u32..=3 {
+                if open_err == EDS_ERR_OK || !is_transient(open_err) {
+                    break;
+                }
+                warn!(
+                    "[Canon] EdsOpenSession transient error on attempt {}: 0x{:08X} – retrying",
+                    attempt, open_err
+                );
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let _ = EdsGetEvent();
+                open_err = EdsOpenSession(camera_ref);
+            }
+            check_error(open_err)?;
 
             // Set save target to host
             let save_to: EdsUInt32 = kEdsSaveTo_Host;
@@ -1064,6 +1102,7 @@ pub fn canon_close_session() -> Result<bool, String> {
         manager.session_open = false;
         manager.event_handler_registered = false;
         manager.state_event_handler_registered = false;
+        manager.lv_active = false;
 
         info!("[Canon] Session closed");
         Ok(true)
@@ -1668,11 +1707,17 @@ pub fn canon_start_live_view() -> Result<bool, String> {
             .get()
             .ok_or("Camera manager not initialized")?;
 
-        let manager = manager.lock().map_err(|e| e.to_string())?;
+        let mut manager = manager.lock().map_err(|e| e.to_string())?;
 
         let camera_ref = manager.camera_ref.ok_or("No camera connected")?;
         if !manager.session_open {
             return Err("Session not open".to_string());
+        }
+
+        // Idempotency guard: ถ้า live view กำลัง active อยู่แล้ว ไม่ต้อง reset สตรีม
+        if manager.lv_active {
+            info!("[Canon] Live view already active — skipping restart");
+            return Ok(true);
         }
 
         unsafe {
@@ -1734,6 +1779,7 @@ pub fn canon_start_live_view() -> Result<bool, String> {
 
         wait_for_live_view_ready(camera_ref)?;
 
+        manager.lv_active = true;
         info!("[Canon] Live view started");
         Ok(true)
     }
@@ -1757,7 +1803,7 @@ pub fn canon_stop_live_view() -> Result<bool, String> {
             .get()
             .ok_or("Camera manager not initialized")?;
 
-        let manager = manager.lock().map_err(|e| e.to_string())?;
+        let mut manager = manager.lock().map_err(|e| e.to_string())?;
 
         let camera_ref = manager.camera_ref.ok_or("No camera connected")?;
         if !manager.session_open {
@@ -1786,6 +1832,7 @@ pub fn canon_stop_live_view() -> Result<bool, String> {
             check_error(error)?;
         }
 
+        manager.lv_active = false;
         info!("[Canon] Live view stopped");
         Ok(true)
     }
