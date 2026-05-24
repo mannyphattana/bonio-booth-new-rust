@@ -579,8 +579,20 @@ export function useCanon() {
    * Works while Live View is active — no need to stop/restart the EVF stream.
    * Use between shots to force the camera to focus before the next countdown.
    * Fire-and-forget safe — never throws.
+   *
+   * IMPORTANT: pauses EVF polling for the duration of the Rust call to prevent
+   * concurrent EdsGetEvent() from two threads.  canon_do_evf_af releases the
+   * CAMERA_MANAGER mutex while it runs its 400ms event pump, so without this
+   * guard the setInterval-based EVF polling can call EdsGetEvent() concurrently
+   * from a second thread — corrupting the EDSDK event queue and causing
+   * EdsDownloadEvfImage to fail randomly for ~500ms after AF completes (the
+   * root cause of the first-video freeze).
    */
   const doEvfAf = useCallback(async (): Promise<boolean> => {
+    // Pause EVF polling so no concurrent EdsGetEvent() fires while Rust runs AF.
+    isCapturingRef.current = true;
+    // Wait one poll cycle to let any already-inflight EdsDownloadEvfImage finish.
+    await new Promise((r) => setTimeout(r, 50));
     try {
       const ok = await invoke<boolean>("canon_do_evf_af", { start: true });
       appLogger.info("[useCanon]", `[useCanon] DoEvfAf complete: ${ok}`);
@@ -588,17 +600,20 @@ export function useCanon() {
     } catch (err) {
       appLogger.warn("[useCanon]", `[useCanon] DoEvfAf failed (non-fatal): ${err}`);
       return false;
+    } finally {
+      isCapturingRef.current = false;
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — only clear JS state, do NOT dispatch Tauri IPC commands here.
+  // Async IPC commands dispatched during a stale React StrictMode cleanup arrive AFTER
+  // a fresh session has already started (mount #2), which would kill the new live view.
+  // Real session cleanup happens through the explicit cleanup() function, called by
+  // MainShooting.stopCamera() on genuine unmount (cameraTypeRef.current === "canon").
   useEffect(() => {
     return () => {
       isCleanedUpRef.current = true;
       if (liveViewIntervalRef.current) clearInterval(liveViewIntervalRef.current);
-      // Best-effort async cleanup
-      invoke("canon_stop_live_view").catch(() => {});
-      invoke("canon_close_session").catch(() => {});
     };
   }, []);
 
