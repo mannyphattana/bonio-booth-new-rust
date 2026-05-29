@@ -189,8 +189,8 @@ pub async fn trim_video_keep_last(
             "-i", &input_path,
             "-t", &format!("{}", keep_seconds),
             "-c:v", "libx264",
-            "-preset", "ultrafast", 
-            "-crf", "23",
+            "-preset", "medium",
+            "-crf", "18",
             "-an",
             "-movflags", "+faststart",
             &output_path.to_string_lossy(),
@@ -226,8 +226,8 @@ pub async fn create_looped_video(
             "-i", &input_path,
             "-t", "9", 
             "-c:v", "libx264",
-            "-preset", "ultrafast", 
-            "-crf", "23", 
+            "-preset", "medium",
+            "-crf", "18",
             &output_path.to_string_lossy(),
         ])
         .output()
@@ -271,8 +271,8 @@ pub async fn apply_lut_to_video(
             "-vf", &lut_filter,
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
-            "-preset", "ultrafast", 
-            "-crf", "23", 
+            "-preset", "medium",
+            "-crf", "18",
             "-color_range", "1", 
             "-colorspace", "1",
             "-color_primaries", "1",
@@ -308,8 +308,8 @@ pub async fn convert_video_to_mp4(
             "-y",
             "-i", &input_path,
             "-c:v", "libx264",
-            "-preset", "ultrafast", 
-            "-crf", "23", 
+            "-preset", "medium",
+            "-crf", "18",
             "-movflags", "+faststart",
             &output_path.to_string_lossy(),
         ])
@@ -344,8 +344,8 @@ pub async fn process_frame_video(
             "-i", &video_path,
             "-t", "9",
             "-c:v", "libx264",
-            "-preset", "ultrafast", 
-            "-crf", "23", 
+            "-preset", "medium",
+            "-crf", "18",
             &looped_path.to_string_lossy(),
         ])
         .output()
@@ -370,8 +370,8 @@ pub async fn process_frame_video(
                 "-vf", &lut_filter,
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
-                "-preset", "ultrafast", 
-                "-crf", "23", 
+                "-preset", "medium",
+                "-crf", "18",
                 "-color_range", "1", 
                 "-colorspace", "1",
                 "-color_primaries", "1",
@@ -572,8 +572,8 @@ pub async fn compose_frame_video(
         "-c:v".to_string(), "libx264".to_string(),
         "-pix_fmt".to_string(), "yuv420p".to_string(),
         
-        "-preset".to_string(), "ultrafast".to_string(), // 🚨 กลับไปใช้ ultrafast 
-        "-crf".to_string(), "23".to_string(), // 🚨 กลับไปใช้ crf 18 
+        "-preset".to_string(), "medium".to_string(),
+        "-crf".to_string(), "18".to_string(),
         
         "-color_range".to_string(), "1".to_string(), 
         "-colorspace".to_string(), "1".to_string(), 
