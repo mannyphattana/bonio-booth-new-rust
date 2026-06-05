@@ -11,6 +11,7 @@ import { setPrinting } from "../utils/printingState";
 import { getPaperConfigForPrint } from "../utils/paperStore";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+import { addPendingUpload, removePendingUpload } from "../utils/pendingUploadStore";
 
 const CTX = "[PhotoResult]";
 
@@ -64,6 +65,8 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const hasCreatedPresign = useRef(false);
   const hasUploadedFiles = useRef(false);
   const hasLoggedMissingVideoRef = useRef(false);
+  /** เก็บ txId ที่ใช้ตั้งชื่อไฟล์ local เพื่อให้ uploadFiles ใช้ removePendingUpload ได้ */
+  const localTxIdRef = useRef<string>("");
 
   const buildVideoPathsBySlot = useCallback((): string[] => {
     const slotVideoPaths = frameCaptures.map((cap) => cap.videoPath || "");
@@ -244,6 +247,8 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
 
     const processMedia = async () => {
       const txId = state.transactionId || state.referenceId || new Date().getTime();
+      // เก็บ txId ไว้ใน ref เพื่อให้ uploadFiles สามารถเรียก removePendingUpload ได้
+      localTxIdRef.current = String(txId);
 
       // =====================================
       // 1. จัดการรูปภาพ (รวมกรอบ + เซฟ + ปริ้นท์)
@@ -335,6 +340,66 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             err instanceof Error ? err.stack : undefined,
             "error"
           );
+        }
+      }
+
+      // =====================================
+      // 3. บันทึก Pending Upload Record (ก่อนเริ่ม upload เพื่อให้ retry ได้ถ้า upload ล้มเหลว)
+      // =====================================
+      if (composedImg) {
+        try {
+          const LOCAL_SAVE_DIR = "C:\\boniobooth\\Saved_Photos";
+          const txIdStr = String(txId);
+          const pendingFiles: import("../utils/pendingUploadStore").PendingUploadFile[] = [];
+
+          // Frame photo
+          pendingFiles.push({
+            type: "frame",
+            localPath: `${LOCAL_SAVE_DIR}\\BonioBooth_${txIdStr}_Frame.jpg`,
+            order: 0,
+            contentType: "image/jpeg",
+          });
+
+          // Individual photos
+          for (let i = 0; i < frameCaptures.length; i++) {
+            if (frameCaptures[i].photo) {
+              pendingFiles.push({
+                type: "photo",
+                localPath: `${LOCAL_SAVE_DIR}\\BonioBooth_${txIdStr}_Photo_${i + 1}.jpg`,
+                order: i + 1,
+                contentType: "image/jpeg",
+              });
+            }
+          }
+
+          // Video (ถ้ามี)
+          if (composedVid) {
+            pendingFiles.push({
+              type: "video",
+              localPath: `${LOCAL_SAVE_DIR}\\BonioBooth_${txIdStr}_Video.mp4`,
+              order: 0,
+              contentType: "video/mp4",
+            });
+          }
+
+          const transactionIdForRecord = state.transactionId || state.referenceId || "";
+          const transactionCodeForRecord = state.referenceId
+            ? state.referenceId.startsWith("TXN-")
+              ? state.referenceId
+              : `TXN-${state.referenceId}`
+            : undefined;
+
+          addPendingUpload({
+            txId: txIdStr,
+            transactionId: transactionIdForRecord,
+            transactionCode: transactionCodeForRecord,
+            createdAt: new Date().toISOString(),
+            files: pendingFiles,
+            retryCount: 0,
+          });
+          appLogger.info(CTX, `✅ [PhotoResult] PendingUploadRecord saved — txId=${txIdStr} files=${pendingFiles.length}`);
+        } catch (err) {
+          appLogger.warn(CTX, "addPendingUpload failed (non-blocking):", err);
         }
       }
 
@@ -477,6 +542,11 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             uploadedFiles,
           });
           appLogger.info(CTX, "confirm_upload OK — files:", uploadedFiles.length);
+          // ลบ pending record เมื่อ upload สำเร็จสมบูรณ์
+          if (localTxIdRef.current) {
+            removePendingUpload(localTxIdRef.current);
+            appLogger.info(CTX, "PendingUploadRecord removed — txId:", localTxIdRef.current);
+          }
         } catch (err) {
           appLogger.error(CTX, "confirm_upload failed:", err);
           logError(

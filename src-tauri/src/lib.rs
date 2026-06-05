@@ -374,6 +374,7 @@ pub fn run() {
             video::cleanup_temp,
             video::save_to_local_drive,
             video::copy_video_to_local_drive,
+            video::check_file_exists,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
