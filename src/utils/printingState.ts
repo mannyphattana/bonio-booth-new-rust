@@ -23,10 +23,8 @@ export function setPrinting(isPrinting: boolean, timeoutMs: number = 30000) {
   if (isPrinting) {
     isPrintingRef.current = true;
     printingEndTimeRef.current = null;
-    console.log("[PrintingState] Printing started, device check notifications disabled");
     // Auto-reset after timeout (safety measure)
     printingTimeoutRef = setTimeout(() => {
-      console.log("[PrintingState] Printing timeout, re-enabling device check notifications");
       isPrintingRef.current = false;
       printingEndTimeRef.current = null;
       printingTimeoutRef = null;
@@ -34,14 +32,12 @@ export function setPrinting(isPrinting: boolean, timeoutMs: number = 30000) {
   } else {
     // Set end time and keep printing state true for grace period
     printingEndTimeRef.current = Date.now();
-    console.log("[PrintingState] Printing finished, starting grace period (10s)");
     
     // After grace period, clear printing state
     printingTimeoutRef = setTimeout(() => {
       isPrintingRef.current = false;
       printingEndTimeRef.current = null;
       printingTimeoutRef = null;
-      console.log("[PrintingState] Grace period ended, device check notifications enabled");
     }, GRACE_PERIOD_MS);
   }
 }

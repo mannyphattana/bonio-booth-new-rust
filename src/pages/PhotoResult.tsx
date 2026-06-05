@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { appLogger } from "../utils/appLogger";
+import { logError } from "../utils/logger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { QRCodeSVG } from "qrcode.react";
@@ -159,6 +160,12 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       return result;
     } catch (err) {
       appLogger.error(CTX, "Compose frame error:", err);
+      logError(
+        "compose_frame_failed",
+        `compose_frame threw: ${String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+        "error"
+      );
       setError("Failed to compose frame");
       return "";
     }
@@ -201,13 +208,28 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         const responseData = presignResult.data || presignResult;
 
         if (presignResult.success && responseData.qrcodeStorageUrl) {
+          appLogger.info(CTX, "Presign OK — sessionId:", responseData.photoSession?.id, "files:", responseData.uploadUrls?.length);
           setQrCodeUrl(responseData.qrcodeStorageUrl);
           setSessionId(responseData.photoSession?.id || "");
           setUploadUrls(responseData.uploadUrls || []);
         } else {
+          appLogger.warn(CTX, "Presign returned success=false or missing qrcodeStorageUrl", JSON.stringify(responseData));
+          logError(
+            "presign_upload_no_qr",
+            `create_presign_upload returned success=false or missing qrcodeStorageUrl. transactionId=${transactionId}`,
+            undefined,
+            "warning"
+          );
           hasCreatedPresign.current = false; 
         }
       } catch (err) {
+        appLogger.error(CTX, "createPresignSession failed:", err);
+        logError(
+          "presign_upload_failed",
+          `create_presign_upload threw: ${String(err)}`,
+          err instanceof Error ? err.stack : undefined,
+          "error"
+        );
         hasCreatedPresign.current = false; 
       }
     };
@@ -234,7 +256,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             imageDataBase64: composedImg,
             filename: `BonioBooth_${txId}_Frame.jpg`, 
           });
-        } catch (err) { appLogger.error(CTX, String(err)); }
+        } catch (err) {
+          appLogger.error(CTX, "save_to_local_drive (frame) failed:", err);
+          logError("save_local_photo_failed", `save_to_local_drive frame failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+        }
 
         // เซฟรูปเดี่ยวทุกรูป
         for (let i = 0; i < frameCaptures.length; i++) {
@@ -244,7 +269,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
                 imageDataBase64: frameCaptures[i].photo,
                 filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
               });
-            } catch (err) { appLogger.error(CTX, String(err)); }
+            } catch (err) {
+              appLogger.error(CTX, `save_to_local_drive (photo ${i + 1}) failed:`, err);
+              logError("save_local_photo_failed", `save_to_local_drive photo ${i + 1} failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+            }
           }
         }
         appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
@@ -294,10 +322,19 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
               filename: `BonioBooth_${txId}_Video.mp4`, 
             });
             appLogger.info(CTX, "✅ [PhotoResult] Saved video to local drive successfully!");
-          } catch (err) { appLogger.error(CTX, String(err)); }
+          } catch (err) {
+            appLogger.error(CTX, "copy_video_to_local_drive failed:", err);
+            logError("save_local_video_failed", `copy_video_to_local_drive failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+          }
 
         } catch (err) {
           appLogger.error(CTX, "Video compose failed:", err);
+          logError(
+            "compose_video_failed",
+            `compose_frame_video threw: ${String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            "error"
+          );
         }
       }
 
@@ -329,6 +366,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     hasUploadedFiles.current = true;
 
     try {
+      appLogger.info(CTX, "Upload started — sessionId:", sessionId, "uploadUrls:", uploadUrls.length);
       setUploadStatus("uploading");
       setStatusText("กำลังอัปโหลด...");
 
@@ -355,12 +393,21 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             filePath: composedPath,
             contentType: "image/jpeg",
           });
+          appLogger.info(CTX, "Uploaded frame photo OK — key:", photoUrls[photoIdx].key);
           uploadedFiles.push({
             key: photoUrls[photoIdx].key,
             type: "photo",
             order: photoUrls[photoIdx].order,
           });
-        } catch (err) {}
+        } catch (err) {
+          appLogger.error(CTX, "Upload frame photo failed:", err);
+          logError(
+            "upload_photo_frame_failed",
+            `upload_to_presigned_url (frame photo) failed: ${String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            "error"
+          );
+        }
         photoIdx++;
       }
 
@@ -378,12 +425,21 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             filePath: photoPath,
             contentType: "image/jpeg",
           });
+          appLogger.info(CTX, `Uploaded photo ${i + 1} OK — key:`, photoUrls[photoIdx].key);
           uploadedFiles.push({
             key: photoUrls[photoIdx].key,
             type: "photo",
             order: photoUrls[photoIdx].order,
           });
-        } catch (err) {}
+        } catch (err) {
+          appLogger.error(CTX, `Upload photo ${i + 1} failed:`, err);
+          logError(
+            "upload_photo_failed",
+            `upload_to_presigned_url (photo ${i + 1}) failed: ${String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            "error"
+          );
+        }
         photoIdx++;
       }
 
@@ -396,12 +452,21 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             filePath: finalVideoPath,
             contentType: "video/mp4",
           });
+          appLogger.info(CTX, "Uploaded video OK — key:", videoUrls[0].key);
           uploadedFiles.push({
             key: videoUrls[0].key,
             type: "video",
             order: videoUrls[0].order,
           });
-        } catch (err) {}
+        } catch (err) {
+          appLogger.error(CTX, "Upload video failed:", err);
+          logError(
+            "upload_video_failed",
+            `upload_to_presigned_url (video) failed: ${String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            "error"
+          );
+        }
       }
 
       // คอนเฟิร์มการอัปโหลด
@@ -411,12 +476,32 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             sessionId,
             uploadedFiles,
           });
-        } catch (err) {}
+          appLogger.info(CTX, "confirm_upload OK — files:", uploadedFiles.length);
+        } catch (err) {
+          appLogger.error(CTX, "confirm_upload failed:", err);
+          logError(
+            "confirm_upload_failed",
+            `confirm_upload failed: ${String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            "error"
+          );
+        }
+      } else {
+        appLogger.warn(CTX, "No files uploaded — skipping confirm_upload");
+        logError("upload_no_files", "uploadFiles completed but no files were uploaded successfully", undefined, "warning");
       }
 
+      appLogger.info(CTX, "Upload done — total files uploaded:", uploadedFiles.length);
       setUploadStatus("done");
       setStatusText("อัปโหลดเสร็จสิ้น!");
     } catch (err) {
+      appLogger.error(CTX, "uploadFiles outer error:", err);
+      logError(
+        "upload_files_failed",
+        `uploadFiles threw unexpected error: ${String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+        "error"
+      );
       setUploadStatus("error");
       hasUploadedFiles.current = false; 
     }
@@ -478,6 +563,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }
 
         if (printerName) {
+          appLogger.info(CTX, "Print started — printer:", printerName, "frameType:", frameType, "qty:", printQuantity);
           const printTimeout = printQuantity * 45000; 
           setPrinting(true, printTimeout);
           
@@ -497,14 +583,33 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             }
 
             await invoke("reduce_paper_level", { copies: printQuantity });
+            appLogger.info(CTX, "Print done — qty:", printQuantity);
             setPrintStatus("done");
+          } catch (err) {
+            appLogger.error(CTX, "print_photo failed:", err);
+            logError(
+              "print_failed",
+              `print_photo failed: ${String(err)} (printer=${printerName}, frameType=${frameType}, qty=${printQuantity})`,
+              err instanceof Error ? err.stack : undefined,
+              "error"
+            );
+            setPrintStatus("error");
           } finally {
             setPrinting(false);
           }
         } else {
+          appLogger.warn(CTX, "No printer found — skipping print");
+          logError("print_no_printer", "No printer available — print skipped", undefined, "warning");
           setPrintStatus("no-printer");
         }
       } catch (err) {
+        appLogger.error(CTX, "printFrame outer error:", err);
+        logError(
+          "print_frame_failed",
+          `printFrame threw unexpected error: ${String(err)}`,
+          err instanceof Error ? err.stack : undefined,
+          "error"
+        );
         setPrintStatus("error");
         setPrinting(false);
       }
