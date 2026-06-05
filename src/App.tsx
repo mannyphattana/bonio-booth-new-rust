@@ -255,11 +255,36 @@ function App() {
     [initMachine],
   );
 
+  /**
+   * รับ SSE event "request-live-log" จาก dashboard
+   * ส่ง log snapshot กลับไปยัง backend เฉพาะเมื่ออยู่หน้า Home เท่านั้น
+   * (ไม่ส่งระหว่าง session ถ่ายรูปหรือ payment เพื่อไม่รบกวน UX)
+   */
+  const handleRequestLiveLog = useCallback(async () => {
+    if (!isOnHomePageRef.current) {
+      appLogger.warn("[App]", "request-live-log ignored: not on home page (machine busy)");
+      return;
+    }
+
+    appLogger.info("[App]", "request-live-log received — collecting and sending live log snapshot");
+
+    const entries = appLogger.getEntries();
+    const summary = appLogger.buildSummary();
+
+    try {
+      await invoke("send_live_log", { entries, summary });
+      appLogger.info("[App]", "Live log snapshot sent successfully");
+    } catch (e) {
+      appLogger.error("[App]", `Failed to send live log: ${e}`);
+    }
+  }, []);
+
   const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
     enabled: isVerified && !!machineData?._id,
     onMaintenanceMode: handleMaintenanceMode,
     onConfigUpdated: handleConfigUpdated,
+    onRequestLiveLog: handleRequestLiveLog,
   });
 
   const { state: shutdownState, notifyActivity: notifyShutdownActivity } =

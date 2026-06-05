@@ -347,6 +347,7 @@ pub fn run() {
             api::init_app_session,
             api::send_app_session_log,
             api::update_transaction_session_note,
+            api::send_live_log,
             // Image processing
             image_processing::get_available_filters,
             image_processing::apply_lut_filter,

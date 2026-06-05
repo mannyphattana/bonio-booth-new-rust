@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
+use tauri::Manager;
 
 const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
 
@@ -1007,6 +1008,137 @@ fn days_to_date(days: u64) -> (u64, u64, u64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
+}
+
+// ============ Live Log (ขอ log จากเครื่องที่กำลังเปิดอยู่ ผ่าน SSE command) ============
+
+/// อ่านไฟล์ log ล่าสุดจาก log directory ของ Tauri (Windows: %APPDATA%\com.boniolabs.booth\logs\)
+/// คืน content เป็น String (ตัดเฉพาะ 500KB สุดท้ายเพื่อไม่ให้ request ใหญ่เกินไป)
+async fn read_disk_log_file(app: &tauri::AppHandle) -> String {
+    let log_dir = match app.path().app_log_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("[LiveLog] Cannot resolve app_log_dir: {}", e);
+            return String::new();
+        }
+    };
+
+    // หาไฟล์ .log ล่าสุดใน directory
+    let entries = match std::fs::read_dir(&log_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("[LiveLog] Cannot read log dir {:?}: {}", log_dir, e);
+            return String::new();
+        }
+    };
+
+    let mut log_files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .flatten()
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|x| x == "log")
+                .unwrap_or(false)
+        })
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            Some((modified, e.path()))
+        })
+        .collect();
+
+    log_files.sort_by(|a, b| b.0.cmp(&a.0)); // ล่าสุดก่อน
+
+    if log_files.is_empty() {
+        log::info!("[LiveLog] No .log files found in {:?}", log_dir);
+        return String::new();
+    }
+
+    let latest = &log_files[0].1;
+    log::info!("[LiveLog] Reading log file: {:?}", latest);
+
+    let content = match tokio::fs::read(latest).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::warn!("[LiveLog] Cannot read log file {:?}: {}", latest, e);
+            return String::new();
+        }
+    };
+
+    // ตัดเฉพาะ 500KB สุดท้าย
+    const MAX_BYTES: usize = 500 * 1024;
+    let slice = if content.len() > MAX_BYTES {
+        &content[content.len() - MAX_BYTES..]
+    } else {
+        &content[..]
+    };
+
+    String::from_utf8_lossy(slice).to_string()
+}
+
+/// Tauri command — เรียกจาก frontend เมื่อรับ SSE event "request-live-log"
+/// ส่ง in-memory log entries + disk log content ไปยัง backend
+#[tauri::command]
+pub async fn send_live_log(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    entries: serde_json::Value,
+    summary: Option<String>,
+) -> Result<(), String> {
+    let machine_id = state.machine_id.lock().unwrap().clone();
+    let machine_port = state.machine_port.lock().unwrap().clone();
+
+    if machine_id.is_empty() {
+        log::warn!("[LiveLog] send_live_log skipped: machine_id not set");
+        return Ok(());
+    }
+
+    log::info!("[LiveLog] Collecting disk log file...");
+    let disk_log_content = read_disk_log_file(&app).await;
+
+    let session_id = state.session_id.lock().unwrap().clone();
+    let now = chrono_now_iso();
+
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "requestedAt": now,
+        "summary": summary.unwrap_or_default(),
+        "memoryEntries": entries,
+        "diskLogContent": disk_log_content,
+    });
+
+    let client = Client::new();
+    let url = format!("{}/api/machines-public/live-log", API_BASE_URL);
+
+    log::info!("[LiveLog] Sending live log snapshot to backend (machineId={})", machine_id);
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        client
+            .post(&url)
+            .header("X-Machine-Port", &machine_port)
+            .query(&[("machineId", &machine_id)])
+            .json(&payload)
+            .send(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(res)) => {
+            if res.status().is_success() {
+                log::info!("[LiveLog] Live log snapshot sent successfully");
+            } else {
+                log::warn!("[LiveLog] Server rejected live log: {}", res.status());
+            }
+        }
+        Ok(Err(e)) => {
+            log::error!("[LiveLog] Failed to send live log: {}", e);
+        }
+        Err(_) => {
+            log::warn!("[LiveLog] Live log send timed out (15s)");
+        }
+    }
+
+    Ok(())
 }
 
 /// ส่ง transaction session note ไปยัง backend

@@ -20,6 +20,8 @@ interface UseSSEOptions {
   onMaintenanceMode?: (enabled: boolean) => void;
   onConfigUpdated?: (configType: string, data?: any) => void;
   onConnectionChange?: (connected: boolean) => void;
+  /** เรียกเมื่อ backend ขอ live log snapshot จากเครื่องนี้ */
+  onRequestLiveLog?: () => void;
 }
 
 /**
@@ -41,6 +43,7 @@ export function useSSE(options: UseSSEOptions) {
     onMaintenanceMode,
     onConfigUpdated,
     onConnectionChange,
+    onRequestLiveLog,
   } = options;
 
   const connectedRef = useRef(false);
@@ -56,6 +59,7 @@ export function useSSE(options: UseSSEOptions) {
     onMaintenanceMode,
     onConfigUpdated,
     onConnectionChange,
+    onRequestLiveLog,
   });
 
   // Update callbacks ref when they change
@@ -67,8 +71,9 @@ export function useSSE(options: UseSSEOptions) {
       onMaintenanceMode,
       onConfigUpdated,
       onConnectionChange,
+      onRequestLiveLog,
     };
-  }, [onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConfigUpdated, onConnectionChange]);
+  }, [onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConfigUpdated, onConnectionChange, onRequestLiveLog]);
 
   // Connect SSE via Rust backend
   const connect = useCallback(() => {
@@ -163,6 +168,10 @@ export function useSSE(options: UseSSEOptions) {
                   data?.data,
                 );
               }
+              break;
+            case "request-live-log":
+              appLogger.info(CTX, "[SSE] request-live-log event received");
+              if (callbacks.onRequestLiveLog) callbacks.onRequestLiveLog();
               break;
             // close-app is handled directly in Rust backend (calls app.exit)
           }
