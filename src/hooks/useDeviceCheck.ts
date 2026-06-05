@@ -108,15 +108,7 @@ export function useDeviceCheck(options: DeviceCheckOptions = {}) {
         printerConnected = foundPrinter?.is_online || false;
         if (foundPrinter?.status) printerLastStatus = foundPrinter.status;
 
-        if (foundPrinter) {
-          // appLogger.info(CTX, 
-          //   `[useDeviceCheck] Printer "${savedPrinter}": is_online=${foundPrinter.is_online}, status="${foundPrinter.status}"`,
-          // );
-        } else {
-          appLogger.info(CTX, 
-            `[useDeviceCheck] Printer "${savedPrinter}": not found in printer list`,
-          );
-        }
+        
       } catch (err) {
         appLogger.error(CTX, "[useDeviceCheck] Error checking printers:", err);
         printerConnected = false;

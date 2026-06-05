@@ -218,7 +218,6 @@ function App() {
       const savedMachineId = localStorage.getItem("machineId");
       if (savedMachineId) {
         initRetryTimerRef.current = setInterval(() => {
-          appLogger.info("[App]", "Retrying connection to backend...");
           initMachine(savedMachineId);
         }, REFETCH_INTERVAL.SYSTEM_MAINTENANCE * 1000);
       }
