@@ -8,6 +8,37 @@ mod shutdown;
 mod sse;
 mod video;
 
+/// สร้างชื่อไฟล์ log พร้อม timestamp เวลา startup
+/// เช่น "bonio-booth_2026-06-05_22-14-23"
+/// tauri-plugin-log จะเติม ".log" ให้เองอัตโนมัติ
+fn startup_log_filename() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Time of day components
+    let h = (secs % 86400) / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+
+    // Gregorian date from days since 1970-01-01
+    let days = secs / 86400;
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z % 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+
+    format!("bonio-booth_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", y, mo, d, h, m, s)
+}
+
 use api::AppState;
 use shutdown::ShutdownManager;
 use sse::SseClient;
@@ -181,14 +212,20 @@ fn debug_paths(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // สร้างชื่อไฟล์ log พร้อม timestamp ณ เวลา startup
+    // เช่น bonio-booth_2026-06-05_22-14-23.log
+    let log_file_name = startup_log_filename();
+
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
                 .targets([
-                    // เขียนลงไฟล์ใน log directory ของ OS (Windows: %APPDATA%\bonio-booth\logs\)
+                    // เขียนลงไฟล์ใน log directory ของ OS
+                    // (Windows: %APPDATA%\com.boniolabs.booth\logs\bonio-booth_YYYY-MM-DD_HH-MM-SS.log)
+                    // ใช้ชื่อไฟล์พร้อม timestamp เพื่อไม่ให้ถูกเขียนทับในแต่ละ session
                     tauri_plugin_log::Target::new(
-                        tauri_plugin_log::TargetKind::LogDir { file_name: None },
+                        tauri_plugin_log::TargetKind::LogDir { file_name: Some(log_file_name) },
                     ),
                     // แสดงใน stdout (dev mode / terminal)
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
@@ -347,6 +384,7 @@ pub fn run() {
             api::init_app_session,
             api::send_app_session_log,
             api::update_transaction_session_note,
+            api::send_live_log,
             // Image processing
             image_processing::get_available_filters,
             image_processing::apply_lut_filter,
@@ -374,6 +412,7 @@ pub fn run() {
             video::cleanup_temp,
             video::save_to_local_drive,
             video::copy_video_to_local_drive,
+            video::check_file_exists,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -49,20 +49,10 @@ export function useTimerShutdown({
       const result: any = await invoke("init_machine");
 
       if (!result?.success || !result?.data) {
-        appLogger.info(CTX, "[TimerShutdown] init_machine failed or no data:", result);
+        appLogger.warn(CTX, "[TimerShutdown] init_machine failed or no data");
         onConnectionLost?.();
         return;
       }
-
-      // Log response data for debugging
-      appLogger.info(CTX, "[TimerShutdown] init_machine response:", {
-        success: result.success,
-        hasMachine: !!result.data.machine,
-        isShutdownReady: result.data.isShutdownReady,
-        isClosedAppReady: result.data.isClosedAppReady,
-        isOnHomePage,
-        machineId: result.data.machine?._id,
-      });
 
       // Refresh machine/theme data if callback provided
       if (onMachineDataRefreshed && result.data.machine) {

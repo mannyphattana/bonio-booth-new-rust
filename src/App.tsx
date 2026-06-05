@@ -29,6 +29,7 @@ import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
 import { initSession, sendSessionLog } from "./utils/sessionManager";
 import { appLogger } from "./utils/appLogger";
+import { retryPendingUploads } from "./utils/retryUploadManager";
 import "./App.css";
 
 export interface ThemeData {
@@ -218,7 +219,6 @@ function App() {
       const savedMachineId = localStorage.getItem("machineId");
       if (savedMachineId) {
         initRetryTimerRef.current = setInterval(() => {
-          appLogger.info("[App]", "Retrying connection to backend...");
           initMachine(savedMachineId);
         }, REFETCH_INTERVAL.SYSTEM_MAINTENANCE * 1000);
       }
@@ -255,11 +255,36 @@ function App() {
     [initMachine],
   );
 
+  /**
+   * รับ SSE event "request-live-log" จาก dashboard
+   * ส่ง log snapshot กลับไปยัง backend เฉพาะเมื่ออยู่หน้า Home เท่านั้น
+   * (ไม่ส่งระหว่าง session ถ่ายรูปหรือ payment เพื่อไม่รบกวน UX)
+   */
+  const handleRequestLiveLog = useCallback(async () => {
+    if (!isOnHomePageRef.current) {
+      appLogger.warn("[App]", "request-live-log ignored: not on home page (machine busy)");
+      return;
+    }
+
+    appLogger.info("[App]", "request-live-log received — collecting and sending live log snapshot");
+
+    const entries = appLogger.getEntries();
+    const summary = appLogger.buildSummary();
+
+    try {
+      await invoke("send_live_log", { entries, summary });
+      appLogger.info("[App]", "Live log snapshot sent successfully");
+    } catch (e) {
+      appLogger.error("[App]", `Failed to send live log: ${e}`);
+    }
+  }, []);
+
   const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
     enabled: isVerified && !!machineData?._id,
     onMaintenanceMode: handleMaintenanceMode,
     onConfigUpdated: handleConfigUpdated,
+    onRequestLiveLog: handleRequestLiveLog,
   });
 
   const { state: shutdownState, notifyActivity: notifyShutdownActivity } =
@@ -278,6 +303,33 @@ function App() {
   });
 
   useAutoUpdate({ enabled: true, isOnHomePage });
+
+  // Background retry สำหรับ pending uploads ที่ค้างไว้
+  // เริ่มหลัง machine verified แล้ว 30 วินาที จากนั้น retry ทุก 10 นาที
+  useEffect(() => {
+    if (!isVerified) return;
+
+    appLogger.info("[App]", "Scheduling background retry for pending uploads");
+
+    const initialTimer = setTimeout(() => {
+      appLogger.info("[App]", "Running initial pending upload retry");
+      retryPendingUploads().catch((e) => {
+        appLogger.warn("[App]", `retryPendingUploads (initial) failed: ${e}`);
+      });
+    }, 30_000);
+
+    const periodicInterval = setInterval(() => {
+      appLogger.info("[App]", "Running periodic pending upload retry");
+      retryPendingUploads().catch((e) => {
+        appLogger.warn("[App]", `retryPendingUploads (periodic) failed: ${e}`);
+      });
+    }, 10 * 60 * 1000); // ทุก 10 นาที
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(periodicInterval);
+    };
+  }, [isVerified]);
 
   const handleMachineDataRefreshed = useCallback(
     (data: any) => {

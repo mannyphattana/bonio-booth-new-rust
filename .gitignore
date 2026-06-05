@@ -29,3 +29,7 @@ dist-ssr
 # Build instructions (contains sensitive info)
 BUILD.md
 build.md
+
+# understand-anything (AI codebase analysis — generated files)
+.understand-anything/
+

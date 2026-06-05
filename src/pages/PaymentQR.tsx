@@ -119,15 +119,6 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
           );
           if (pollRef.current) clearInterval(pollRef.current);
           if (timerRef.current) clearInterval(timerRef.current);
-        } else if (
-          paymentStatus === "NOTPAY" ||
-          paymentStatus === "PENDING" ||
-          paymentStatus === "USERPAYING" ||
-          paymentStatus === "NOTSURE" ||
-          paymentStatus === "FAIL"
-        ) {
-          // Still processing — continue polling
-          appLogger.info(CTX, `Payment status: ${paymentStatus} for ${referenceId}, continuing to poll...`);
         }
       }
     } catch (err) {

@@ -84,8 +84,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     setPrinting(true);
     setSavedMessage(`🖨️ กำลัง Test Print (${frameType})...`);
     
-    setPrintingState(true, 45000); 
-    console.log("[PaperPositionModal] Printing state set to true before test print");
+    setPrintingState(true, 45000);
     
     await new Promise(resolve => setTimeout(resolve, 100));
     
@@ -106,8 +105,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
     } catch (err: any) {
       setSavedMessage(`❌ Print Error: ${err?.toString()?.slice(0, 60)}`);
     } finally {
-      setPrinting(false); 
-      console.log("[PaperPositionModal] Test print completed, clearing printing state");
+      setPrinting(false);
       setPrintingState(false);
       setTimeout(() => setSavedMessage(""), 4000);
     }

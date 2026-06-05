@@ -670,4 +670,11 @@ pub async fn copy_video_to_local_drive(
     println!("✅ [Local Save] Saved video to: {}", dest_path.display());
     Ok(dest_path.to_string_lossy().to_string())
 }
+
+/// ตรวจสอบว่าไฟล์มีอยู่บน disk หรือเปล่า
+/// ใช้โดย retryUploadManager เพื่อกรองไฟล์ก่อน retry
+#[tauri::command]
+pub async fn check_file_exists(path: String) -> Result<bool, String> {
+    Ok(std::path::Path::new(&path).exists())
+}
 // =====================================================================
