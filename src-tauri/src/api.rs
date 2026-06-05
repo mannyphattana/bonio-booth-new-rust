@@ -1012,7 +1012,21 @@ fn days_to_date(days: u64) -> (u64, u64, u64) {
 
 // ============ Live Log (ขอ log จากเครื่องที่กำลังเปิดอยู่ ผ่าน SSE command) ============
 
-/// อ่านไฟล์ log ล่าสุดจาก log directory ของ Tauri (Windows: %APPDATA%\com.boniolabs.booth\logs\)
+/// คำนวณ date prefix ของวันนี้ เช่น "2026-06-05" (UTC)
+fn today_date_prefix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let days = secs / 86400;
+    let (y, mo, d) = days_to_date(days);
+    format!("{:04}-{:02}-{:02}", y, mo, d)
+}
+
+/// อ่านไฟล์ log ของวันนี้จาก log directory ของ Tauri
+/// (Windows: %APPDATA%\com.boniolabs.booth\logs\bonio-booth_YYYY-MM-DD_HH-MM-SS.log)
+/// เลือกไฟล์ที่มีชื่อประกอบด้วยวันที่วันนี้ และใหม่สุด
 /// คืน content เป็น String (ตัดเฉพาะ 500KB สุดท้ายเพื่อไม่ให้ request ใหญ่เกินไป)
 async fn read_disk_log_file(app: &tauri::AppHandle) -> String {
     let log_dir = match app.path().app_log_dir() {
@@ -1023,7 +1037,10 @@ async fn read_disk_log_file(app: &tauri::AppHandle) -> String {
         }
     };
 
-    // หาไฟล์ .log ล่าสุดใน directory
+    let today = today_date_prefix();
+    log::info!("[LiveLog] Looking for today's log files (date={}): {:?}", today, log_dir);
+
+    // หาไฟล์ .log ของวันนี้ใน directory (ชื่อไฟล์ต้องประกอบด้วยวันที่วันนี้)
     let entries = match std::fs::read_dir(&log_dir) {
         Ok(e) => e,
         Err(e) => {
@@ -1035,10 +1052,14 @@ async fn read_disk_log_file(app: &tauri::AppHandle) -> String {
     let mut log_files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
         .flatten()
         .filter(|e| {
-            e.path()
-                .extension()
-                .map(|x| x == "log")
-                .unwrap_or(false)
+            let path = e.path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            // เลือกเฉพาะไฟล์ .log ที่มีวันที่วันนี้ในชื่อ
+            // เช่น "bonio-booth_2026-06-05_22-14-23.log"
+            name.ends_with(".log") && name.contains(&today)
         })
         .filter_map(|e| {
             let modified = e.metadata().ok()?.modified().ok()?;
@@ -1049,8 +1070,26 @@ async fn read_disk_log_file(app: &tauri::AppHandle) -> String {
     log_files.sort_by(|a, b| b.0.cmp(&a.0)); // ล่าสุดก่อน
 
     if log_files.is_empty() {
-        log::info!("[LiveLog] No .log files found in {:?}", log_dir);
-        return String::new();
+        // fallback: ถ้าไม่มีไฟล์วันนี้ (อาจเป็น timezone offset) ให้ใช้ไฟล์ล่าสุดแทน
+        log::warn!("[LiveLog] No today's log files found, falling back to latest file");
+        let entries2 = match std::fs::read_dir(&log_dir) {
+            Ok(e) => e,
+            Err(_) => return String::new(),
+        };
+        let mut fallback: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries2
+            .flatten()
+            .filter(|e| e.path().extension().map(|x| x == "log").unwrap_or(false))
+            .filter_map(|e| {
+                let modified = e.metadata().ok()?.modified().ok()?;
+                Some((modified, e.path()))
+            })
+            .collect();
+        fallback.sort_by(|a, b| b.0.cmp(&a.0));
+        if fallback.is_empty() {
+            log::info!("[LiveLog] No .log files found at all in {:?}", log_dir);
+            return String::new();
+        }
+        log_files = fallback;
     }
 
     let latest = &log_files[0].1;
