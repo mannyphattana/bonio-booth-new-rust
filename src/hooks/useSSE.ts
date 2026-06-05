@@ -129,7 +129,11 @@ export function useSSE(options: UseSSEOptions) {
         // Listen for SSE events
         const unlistenEvent = await listen<SSEEvent>("sse-event", (event) => {
           const sseEvent = event.payload;
-          appLogger.info(CTX, "[SSE] Event:", sseEvent);
+          // Skip logging heartbeat events — they fire every 10 s and would
+          // consume ~360 of the 2000-entry buffer quota per hour.
+          if (sseEvent.type !== "heartbeat") {
+            appLogger.info(CTX, "[SSE] Event:", sseEvent);
+          }
 
           const callbacks = callbacksRef.current;
           if (callbacks.onEvent) callbacks.onEvent(sseEvent);
