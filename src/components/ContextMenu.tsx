@@ -21,6 +21,7 @@ interface Props {
   onClose: () => void;
   onFormatReset: () => void;
   onBeforeClose?: () => void;
+  onMirrorModeChange?: (enabled: boolean) => void;
 }
 
 export default function ContextMenu({
@@ -28,6 +29,7 @@ export default function ContextMenu({
   onClose,
   onFormatReset,
   // onBeforeClose,
+  onMirrorModeChange,
 }: Props) {
   const navigate = useNavigate();
   const [activeModal, setActiveModal] = useState<
@@ -58,6 +60,8 @@ export default function ContextMenu({
   const [cameraStatus, setCameraStatus] = useState("");
   const [printerStatus, setPrinterStatus] = useState("");
   const [appVersion, setAppVersion] = useState("");
+  const [mirrorMode, setMirrorModeState] = useState(() => localStorage.getItem("mirrorMode") !== "false");
+  const [cameraIsCanon, setCameraIsCanon] = useState(() => (localStorage.getItem("cameraType") || "webcam") === "canon");
 
   // Load status summaries when menu opens
   useEffect(() => {
@@ -86,6 +90,7 @@ export default function ContextMenu({
 
     // Camera status
     const cameraType = localStorage.getItem("cameraType") || "webcam";
+    setCameraIsCanon(cameraType === "canon");
     if (cameraType === "webcam") {
       const label = localStorage.getItem("selectedCameraLabel");
       setCameraStatus(label ? `Webcam: ${label}` : "Webcam (ยังไม่ได้เลือก)");
@@ -97,6 +102,9 @@ export default function ContextMenu({
     // Printer status
     const printer = localStorage.getItem("selectedPrinter");
     setPrinterStatus(printer || "ยังไม่ได้เลือก");
+
+    // Mirror mode
+    setMirrorModeState(localStorage.getItem("mirrorMode") !== "false");
   }, [open]);
 
   const handleFormatReset = async () => {
@@ -109,6 +117,7 @@ export default function ContextMenu({
     localStorage.removeItem("selectedCameraName");
     localStorage.removeItem("selectedPrinter");
     localStorage.removeItem("paperConfig");
+    localStorage.removeItem("mirrorMode");
     // Clear paper config from persistent store
     await clearPaperConfigs().catch(() => {});
 
@@ -546,7 +555,43 @@ export default function ContextMenu({
           <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
         </button>
 
-        {/* 3. Paper Position Config */}
+        {/* 3. Mirror / Flip Mode (เฉพาะ Webcam — Canon ปิดใช้งานเพื่อรักษาคุณภาพ) */}
+        <button
+          className="context-menu-item context-menu-config-item"
+          disabled={cameraIsCanon}
+          onClick={() => {
+            if (cameraIsCanon) return;
+            const newValue = !mirrorMode;
+            setMirrorModeState(newValue);
+            localStorage.setItem("mirrorMode", String(newValue));
+            onMirrorModeChange?.(newValue);
+          }}
+          style={cameraIsCanon ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+        >
+          <span style={{ fontSize: 24 }}>🪞</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>Mirror / Flip Mode</div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+              {cameraIsCanon
+                ? "ปิดใช้งานสำหรับ Canon (รักษาคุณภาพรูป)"
+                : "เฉพาะ Webcam — รูป/วิดีโอที่บันทึก"}
+            </div>
+          </div>
+          <div style={{
+            padding: "4px 14px",
+            borderRadius: 20,
+            background: cameraIsCanon ? "#444" : (mirrorMode ? "#2a5f2a" : "#5f2a2a"),
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 700,
+            minWidth: 44,
+            textAlign: "center",
+          }}>
+            {cameraIsCanon ? "🔒" : (mirrorMode ? "ON" : "OFF")}
+          </div>
+        </button>
+
+        {/* 4. Paper Position Config */}
         <button
           className="context-menu-item context-menu-config-item"
           onClick={() => setActiveModal("paper")}

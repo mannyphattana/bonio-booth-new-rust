@@ -126,6 +126,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const totalCaptures = totalSlots + 2; 
 
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
+  const [mirrorMode, setMirrorMode] = useState(() => localStorage.getItem("mirrorMode") !== "false");
+  const mirrorModeRef = useRef(mirrorMode);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -493,10 +495,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     });
   }, []);
 
+  useEffect(() => { mirrorModeRef.current = mirrorMode; }, [mirrorMode]);
+
   const takePhoto = useCallback(async (): Promise<string> => {
     if (cameraTypeRef.current === "canon") {
-      const photo = await canonCamera.takePicture();
-      return photo;
+      // Canon: ส่งรูป raw จากกล้องตรงๆ เสมอ ไม่ flip (กัน re-encode ซ้ำ รักษาคุณภาพเต็ม)
+      // ฟีเจอร์ flip ใช้เฉพาะ webcam — ใน context menu จะถูก disable เมื่อเลือก Canon
+      return await canonCamera.takePicture();
     }
 
     if (!videoRef.current || !canvasRef.current) return "";
@@ -518,6 +523,10 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     const ctx = canvas.getContext("2d");
     if (!ctx) return "";
 
+    if (!mirrorModeRef.current) {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, w, h);
     return canvas.toDataURL("image/jpeg", 0.92);
   }, []);
@@ -551,14 +560,20 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const saveVideoToTemp = useCallback(
     async (blob: Blob, index: number): Promise<string> => {
       try {
-        const arrayBuffer = await blob.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        const base64 = btoa(
-          uint8Array.reduce(
-            (data, byte) => data + String.fromCharCode(byte),
-            ""
-          )
-        );
+        // เข้ารหัส base64 ด้วย FileReader (ทำใน native C++) แทนการต่อ string ทีละ byte
+        // ของเดิมเป็น O(n²) สร้าง string ยักษ์ → memory พุ่งจน WebView crash ตอน blob หลาย MB
+        // byte ที่ส่งให้ Rust เหมือนเดิมเป๊ะ — ไม่กระทบคุณภาพหรือ flow
+        const base64: string = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string; // "data:video/webm;base64,XXXX"
+            const commaIdx = result.indexOf(",");
+            resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+          };
+          reader.onerror = () =>
+            reject(reader.error ?? new Error("FileReader failed"));
+          reader.readAsDataURL(blob);
+        });
         const path: string = await invoke("save_temp_video", {
           videoDataBase64: base64,
           filename: `capture_${index}.webm`,
@@ -780,6 +795,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
             missingReason = "save_temp_video_failed";
           }
         }
+      }
+
+      // blob URL ตัวนี้ไม่ถูกใช้ที่ปลายทาง (downstream ใช้ videoPath จาก Rust) —
+      // revoke ทิ้งทันทีเพื่อคืน memory ของ blob หลาย MB กลางลำดับถ่าย ไม่รอจบ session
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+        videoUrl = "";
       }
 
       captureVideoDiagnostics.push({
@@ -1037,7 +1059,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    transform: "scaleX(-1)", 
+                    transform: "scaleX(-1)",
                     borderRadius: 20,
                   }}
                 />
@@ -1052,7 +1074,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    transform: "scaleX(-1)", 
+                    transform: "scaleX(-1)",
                     borderRadius: 20,
                     imageRendering: "auto",
                   }}
@@ -1345,6 +1367,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         onClose={() => setShowContextMenu(false)}
         onFormatReset={onFormatReset}
         onBeforeClose={onBeforeClose}
+        onMirrorModeChange={setMirrorMode}
       />
     </div>
   );

@@ -11,7 +11,9 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { appLogger } from "./appLogger";
+import { appLogger, readPersistedLogs, clearPersistedLogs } from "./appLogger";
+import { logError } from "./logger";
+import type { LogEntry } from "./appLogger";
 
 const STORAGE_KEY = "bonio_current_session";
 
@@ -37,6 +39,11 @@ function getVersion(): string {
  * เรียกตอน App mount — ตรวจสอบ crash recovery และเริ่ม session ใหม่
  */
 export async function initSession(): Promise<void> {
+  // --- อ่าน log ล่าสุดของ session ก่อนหน้า "ก่อน" จะ log บรรทัดใหม่ทับ
+  //     (buffer ใน RAM หายไปกับ crash — ชุดนี้คือบรรทัดก่อน crash ที่ persist ไว้)
+  const persistedLogs: LogEntry[] = readPersistedLogs();
+  clearPersistedLogs();
+
   // --- Crash recovery: ถ้ามี session ค้างอยู่ใน localStorage แสดงว่า app crash ครั้งก่อน
   const prevRaw = localStorage.getItem(STORAGE_KEY);
   if (prevRaw) {
@@ -50,8 +57,8 @@ export async function initSession(): Promise<void> {
         durationSeconds: calcDuration(prev.startedAt),
         closeReason: "crash",
         appVersion: getVersion(),
-        entries: [], // ไม่มี entries สำหรับ crash session
-        summary: "App closed unexpectedly (crash or force-quit detected on next startup)",
+        entries: persistedLogs, // บรรทัดล่าสุดก่อน crash ที่ persist ไว้ (อาจว่างถ้า persist ไม่ทัน)
+        summary: `App closed unexpectedly (crash or force-quit detected on next startup) — ${persistedLogs.length} buffered log line(s) recovered`,
       }).catch((e) => {
         appLogger.error("[SessionManager]", `Failed to send crash recovery log: ${e}`);
       });
@@ -68,6 +75,19 @@ export async function initSession(): Promise<void> {
       const shooting = JSON.parse(shootingRaw);
       if (shooting.transactionCode) {
         appLogger.warn("[SessionManager]", `Crash during shooting detected — transactionCode: ${shooting.transactionCode}`);
+        // ส่ง error log ทันที เพื่อให้เด้งใน error-log feed บน dashboard ไม่ใช่แค่ note ใน transaction
+        // แนบ log บรรทัดก่อน crash ไปใน errorStack เพื่อให้เห็นว่าทำไมถึง crash
+        const crashContext = persistedLogs.length
+          ? persistedLogs
+              .map((e) => `${e.timestamp} [${e.level}] [${e.context}] ${e.message}`)
+              .join("\n")
+          : "(no buffered logs captured before crash)";
+        logError(
+          "app_crash_during_shooting",
+          `App crash detected during shooting (transactionCode: ${shooting.transactionCode}, started: ${shooting.startedAt})`,
+          crashContext,
+          "critical"
+        );
         await invoke("update_transaction_session_note", {
           transactionCode: shooting.transactionCode,
           sessionNote: `App crash detected during shooting (started: ${shooting.startedAt})`,

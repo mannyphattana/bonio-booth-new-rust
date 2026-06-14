@@ -20,6 +20,32 @@ export interface LogEntry {
 
 const MAX_BUFFER_SIZE = 2000; // จำกัดจำนวน entries ใน memory
 
+// Crash-survivable mirror: เก็บ log ล่าสุดไว้ใน localStorage ทุกครั้งที่ log
+// เพื่อให้บรรทัดก่อน crash รอดมาถึง startup ครั้งถัดไป (buffer ใน RAM หายไปกับ process)
+const RECENT_KEY = "bonio_recent_logs";
+const RECENT_MAX = 100; // จำนวนบรรทัดล่าสุดที่ persist (เล็กพอให้ setItem ถูก/เร็ว)
+
+/** อ่าน log ล่าสุดที่ persist ไว้จาก session ก่อนหน้า (ใช้ตอน crash recovery) */
+export function readPersistedLogs(): LogEntry[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** ล้าง log ที่ persist ไว้ (เรียกหลังอ่านมาใช้แล้วตอน startup) */
+export function clearPersistedLogs(): void {
+  try {
+    localStorage.removeItem(RECENT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 class AppLogger {
   private buffer: LogEntry[] = [];
 
@@ -37,9 +63,23 @@ class AppLogger {
       this.buffer.splice(0, this.buffer.length - MAX_BUFFER_SIZE);
     }
 
+    // mirror บรรทัดล่าสุดลง localStorage (best-effort) เพื่อ crash recovery
+    this.persistRecent();
+
     // ส่งไปยัง Tauri log plugin (เขียนลงไฟล์)
     const formatted = `[${context}] ${message}`;
     this.sendToTauri(level, formatted);
+  }
+
+  /** เขียน log ล่าสุด RECENT_MAX บรรทัดลง localStorage — เขียนทุกครั้งแบบ synchronous
+   *  เพื่อรับประกันว่าบรรทัดสุดท้ายก่อน crash ถูกบันทึก */
+  private persistRecent(): void {
+    try {
+      const recent = this.buffer.slice(-RECENT_MAX);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+    } catch {
+      // localStorage quota เต็ม/ใช้ไม่ได้ — ข้ามไป best-effort
+    }
   }
 
   private sendToTauri(level: LogLevel, message: string): void {
