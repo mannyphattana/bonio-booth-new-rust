@@ -12,12 +12,19 @@ interface Props {
   onClose: () => void;
 }
 
+interface PresetStatus {
+  cut: boolean;
+  nocut: boolean;
+}
+
 export default function PrinterConfigModal({ open, onClose }: Props) {
   const [printers, setPrinters] = useState<PrinterInfo[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
+  const [presetStatus, setPresetStatus] = useState<PresetStatus>({ cut: false, nocut: false });
+  const [configuring, setConfiguring] = useState<"cut" | "nocut" | null>(null);
 
   // Load current config
   useEffect(() => {
@@ -37,6 +44,41 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
     }
     setLoading(false);
   }, []);
+
+  // Reload cut/no-cut preset status whenever the chosen printer changes
+  const loadPresetStatus = useCallback(async (printerName: string) => {
+    if (!printerName) {
+      setPresetStatus({ cut: false, nocut: false });
+      return;
+    }
+    try {
+      const status: PresetStatus = await invoke("get_printer_preset_status", { printerName });
+      setPresetStatus(status);
+    } catch {
+      setPresetStatus({ cut: false, nocut: false });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) loadPresetStatus(selectedPrinter);
+  }, [open, selectedPrinter, loadPresetStatus]);
+
+  // Open the driver's Printing Preferences dialog for the operator to set the cut option,
+  // then store the resulting DEVMODE as the cut/no-cut preset (single-driver model).
+  const handleConfigureMode = async (cut: boolean) => {
+    if (!selectedPrinter) return;
+    setConfiguring(cut ? "cut" : "nocut");
+    try {
+      const saved: boolean = await invoke("capture_printer_devmode", {
+        printerName: selectedPrinter,
+        cut,
+      });
+      if (saved) await loadPresetStatus(selectedPrinter);
+    } catch {
+      // dialog failed / not on Windows — leave status unchanged
+    }
+    setConfiguring(null);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -65,12 +107,12 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
           <p className="config-label">เลือกเครื่องปริ้น / Select Printer</p>
 
           <div className="config-info-box">
-            <p>📋 <strong>กฎการตัดกระดาษ:</strong></p>
+            <p>📋 <strong>การตัดกระดาษ (driver เดียว):</strong></p>
             <p style={{ fontSize: 12, marginTop: 4, opacity: 0.8 }}>
-              • Frame 2x6 (Portrait) → <span style={{ color: "#ff6b6b" }}>✂️ ตัดกระดาษ</span>
+              ระบบเลือกตัด/ไม่ตัดเองตาม frame — ใช้ driver เดียว ไม่ต้องลง driver (CUT) แยก
             </p>
             <p style={{ fontSize: 12, opacity: 0.8 }}>
-              • Frame 6x2 (Landscape) → <span style={{ color: "#ff6b6b" }}>✂️ ตัดกระดาษ</span>
+              • Frame 2x6 / 6x2 → <span style={{ color: "#ff6b6b" }}>✂️ ตัดกระดาษ</span>
             </p>
             <p style={{ fontSize: 12, opacity: 0.8 }}>
               • Frame 4x6 / 6x4 → <span style={{ color: "#51cf66" }}>ไม่ตัดกระดาษ</span>
@@ -118,6 +160,40 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
           <button className="config-refresh-btn" onClick={loadPrinters}>
             🔄 Refresh
           </button>
+
+          {selectedPrinter && (
+            <div className="config-info-box" style={{ marginTop: 12 }}>
+              <p>⚙️ <strong>ตั้งค่าโหมดตัด (ทำครั้งเดียวต่อเครื่อง):</strong></p>
+              <p style={{ fontSize: 12, marginTop: 4, opacity: 0.8 }}>
+                กดเพื่อเปิดหน้าตั้งค่าของ driver แล้วเลือกค่า "2 inch cut" ให้ตรงกับแต่ละโหมด
+                ระบบจะจำค่าไว้ใช้พิมพ์อัตโนมัติ
+              </p>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  className="config-refresh-btn"
+                  style={{ flex: 1, margin: 0 }}
+                  onClick={() => handleConfigureMode(true)}
+                  disabled={configuring !== null}
+                >
+                  {configuring === "cut" ? "กำลังตั้งค่า..." : "✂️ โหมดตัด (2x6)"}{" "}
+                  {presetStatus.cut ? "✓" : ""}
+                </button>
+                <button
+                  className="config-refresh-btn"
+                  style={{ flex: 1, margin: 0 }}
+                  onClick={() => handleConfigureMode(false)}
+                  disabled={configuring !== null}
+                >
+                  {configuring === "nocut" ? "กำลังตั้งค่า..." : "▭ โหมดไม่ตัด (4x6)"}{" "}
+                  {presetStatus.nocut ? "✓" : ""}
+                </button>
+              </div>
+              <p style={{ fontSize: 11, marginTop: 8, opacity: 0.7 }}>
+                สถานะ: ตัด {presetStatus.cut ? "✅ ตั้งแล้ว" : "⚠️ ยังไม่ตั้ง"} • ไม่ตัด{" "}
+                {presetStatus.nocut ? "✅ ตั้งแล้ว" : "⚠️ ยังไม่ตั้ง"}
+              </p>
+            </div>
+          )}
         </div>
 
         {savedMessage && (

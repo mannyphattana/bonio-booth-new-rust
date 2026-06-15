@@ -399,6 +399,8 @@ pub fn run() {
             printer::list_dslr_cameras,
             printer::reduce_paper_level,
             printer::get_printer_paper_sizes,
+            printer::capture_printer_devmode,
+            printer::get_printer_preset_status,
             // Video
             video::check_ffmpeg_available,
             video::ensure_ffmpeg,

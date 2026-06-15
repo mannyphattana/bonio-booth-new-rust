@@ -1,7 +1,83 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use tauri::Manager;
+
+/// Per-printer DEVMODE presets for cut / no-cut printing.
+///
+/// Instead of installing two Windows drivers ("DS-RX1" + "DS-RX1 (CUT)") we keep a
+/// single driver and remember the full DEVMODE bytes the user configured for each mode
+/// (e.g. the driver's "2 inch cut: Enable/Disable" dropdown). The DEVMODE is an opaque
+/// blob — we never need to understand its private/driver-specific region — which is how
+/// dslrBooth/LumaBooth support every printer brand without a vendor SDK.
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+struct PrinterModePreset {
+    cut: Option<String>,
+    nocut: Option<String>,
+}
+
+/// Path to the JSON file holding presets for every printer (app config dir).
+fn presets_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("app_config_dir failed: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create config dir failed: {}", e))?;
+    Ok(dir.join("printer_presets.json"))
+}
+
+fn read_all_presets(
+    app: &tauri::AppHandle,
+) -> std::collections::HashMap<String, PrinterModePreset> {
+    presets_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Persist a captured DEVMODE blob for `printer_name` under the cut/no-cut slot.
+fn save_preset(
+    app: &tauri::AppHandle,
+    printer_name: &str,
+    cut: bool,
+    devmode: &[u8],
+) -> Result<(), String> {
+    let mut all = read_all_presets(app);
+    let b64 = STANDARD.encode(devmode);
+    let entry = all.entry(printer_name.to_string()).or_default();
+    if cut {
+        entry.cut = Some(b64);
+    } else {
+        entry.nocut = Some(b64);
+    }
+    let path = presets_path(app)?;
+    let json =
+        serde_json::to_string_pretty(&all).map_err(|e| format!("serialize presets failed: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("write presets failed: {}", e))?;
+    log::info!(
+        "[Printer] Saved DEVMODE preset ({} bytes) for '{}' mode={}",
+        devmode.len(),
+        printer_name,
+        if cut { "cut" } else { "nocut" }
+    );
+    Ok(())
+}
+
+/// Load the DEVMODE blob for `printer_name` for the requested cut/no-cut mode.
+fn load_preset(app: &tauri::AppHandle, printer_name: &str, cut: bool) -> Option<Vec<u8>> {
+    let all = read_all_presets(app);
+    let entry = all.get(printer_name)?;
+    let b64 = if cut { entry.cut.as_ref()? } else { entry.nocut.as_ref()? };
+    match STANDARD.decode(b64) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            log::warn!("[Printer] Failed to decode preset for '{}': {}", printer_name, e);
+            None
+        }
+    }
+}
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -107,33 +183,103 @@ fn win32_get_paper_sizes(printer_name: &str) -> Result<Vec<(i16, String)>, Strin
     }
 }
 
-/// Check if a printer with the given name exists by trying to open it.
+/// Resolve the raw HWND of the main app window (needed to parent the driver dialog).
 #[cfg(target_os = "windows")]
-fn win32_printer_exists(printer_name: &str) -> bool {
-    use windows::Win32::Graphics::Printing::{OpenPrinterW, ClosePrinter};
-    use windows::Win32::Foundation::HANDLE;
+fn get_main_hwnd(app: &tauri::AppHandle) -> Result<isize, String> {
+    let win = app
+        .get_webview_window("main")
+        .or_else(|| app.webview_windows().into_values().next())
+        .ok_or("no app window found")?;
+    let hwnd = win.hwnd().map_err(|e| format!("hwnd() failed: {}", e))?;
+    Ok(hwnd.0 as isize)
+}
+
+/// Open the driver's native "Printing Preferences" dialog so the operator can set the
+/// cut option (e.g. DNP/Sony "2 inch cut: Enable/Disable"), then capture the resulting
+/// full DEVMODE bytes (public header + driver-private region).
+///
+/// Returns `Ok(Some(bytes))` on OK, `Ok(None)` if the user cancelled.
+#[cfg(target_os = "windows")]
+fn win32_capture_devmode(hwnd: isize, printer_name: &str) -> Result<Option<Vec<u8>>, String> {
+    use windows::Win32::Foundation::{HANDLE, HWND};
+    use windows::Win32::Graphics::Gdi::DEVMODEW;
+    use windows::Win32::Graphics::Printing::{ClosePrinter, DocumentPropertiesW, OpenPrinterW};
     use windows::core::PCWSTR;
 
+    const DM_IN_PROMPT: u32 = 4;
+    const DM_IN_BUFFER: u32 = 8;
+    const DM_OUT_BUFFER: u32 = 2;
+    const IDOK: i32 = 1;
+
     let wide_name = to_wide(printer_name);
+
     unsafe {
-        let mut handle = HANDLE::default();
-        let ok = OpenPrinterW(
+        let mut printer_handle = HANDLE::default();
+        OpenPrinterW(PCWSTR(wide_name.as_ptr()), &mut printer_handle, None)
+            .map_err(|e| format!("OpenPrinter failed: {}", e))?;
+
+        // Required DEVMODE buffer size (public + driver-private).
+        let dm_size = DocumentPropertiesW(
+            HWND::default(),
+            printer_handle,
             PCWSTR(wide_name.as_ptr()),
-            &mut handle,
             None,
-        ).is_ok();
-        if ok {
-            let _ = ClosePrinter(handle);
+            None,
+            0,
+        );
+        if dm_size <= 0 {
+            let _ = ClosePrinter(printer_handle);
+            return Err("DocumentProperties: failed to get DEVMODE size".into());
         }
-        ok
+
+        let mut dm_buf = vec![0u8; dm_size as usize];
+        let dm_ptr = dm_buf.as_mut_ptr() as *mut DEVMODEW;
+
+        // Seed with the driver's current settings so the dialog opens pre-populated.
+        DocumentPropertiesW(
+            HWND::default(),
+            printer_handle,
+            PCWSTR(wide_name.as_ptr()),
+            Some(dm_ptr),
+            None,
+            DM_OUT_BUFFER,
+        );
+
+        // Show the modal dialog parented to the app window.
+        let res = DocumentPropertiesW(
+            HWND(hwnd as *mut core::ffi::c_void),
+            printer_handle,
+            PCWSTR(wide_name.as_ptr()),
+            Some(dm_ptr),
+            Some(dm_ptr as *const _),
+            DM_IN_PROMPT | DM_IN_BUFFER | DM_OUT_BUFFER,
+        );
+
+        let _ = ClosePrinter(printer_handle);
+
+        if res != IDOK {
+            log::info!("[Printer] DEVMODE capture cancelled for '{}'", printer_name);
+            return Ok(None);
+        }
+
+        // Capture the full structure (header + private driver bytes).
+        let dm = &*dm_ptr;
+        let full = (dm.dmSize as usize) + (dm.dmDriverExtra as usize);
+        let total = full.min(dm_buf.len());
+        Ok(Some(dm_buf[..total].to_vec()))
     }
 }
 
 /// Print an image using native Win32 GDI API.
 /// No PowerShell, no popup windows, full control over paper size and orientation.
-/// Auto-switches to "{printer_name} (CUT)" driver for cut frames if available.
+/// Uses a single driver: cut vs no-cut is selected from a captured DEVMODE preset.
 #[cfg(target_os = "windows")]
-fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Result<(), String> {
+fn win32_gdi_print(
+    app: &tauri::AppHandle,
+    printer_name: &str,
+    image_path: &str,
+    frame_type: &str,
+) -> Result<(), String> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Graphics::Printing::{
         OpenPrinterW, ClosePrinter, DocumentPropertiesW,
@@ -144,56 +290,25 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
     let needs_cut = frame_type == "2x6" || frame_type == "6x2";
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
-    // Auto-switch drivers: if needs_cut, try various CUT driver name patterns
-    // If no-cut, use base name (strip CUT suffix if present)
-    let actual_printer = if needs_cut {
-        let upper = printer_name.to_uppercase();
-        if upper.contains("CUT") {
-            // Already a CUT driver name
-            printer_name.to_string()
-        } else {
-            // Try common CUT driver naming patterns seen on customer machines:
-            // "DS-RX1 (CUT)", "DS-RX1 (Cut)", "DS-RX1 CUT", "DS-RX1 Cut"
-            let candidates = [
-                format!("{} (CUT)", printer_name),
-                format!("{} (Cut)", printer_name),
-                format!("{} CUT", printer_name),
-                format!("{} Cut", printer_name),
-            ];
-            let mut found: Option<String> = None;
-            for candidate in &candidates {
-                if win32_printer_exists(candidate) {
-                    log::info!("[Printer] Auto-switching to CUT driver: '{}'", candidate);
-                    found = Some(candidate.clone());
-                    break;
-                }
-            }
-            if let Some(cut_name) = found {
-                cut_name
-            } else {
-                log::info!("[Printer] No CUT driver variant found for '{}', using as-is", printer_name);
-                printer_name.to_string()
-            }
-        }
-    } else {
-        // For no-cut: strip any CUT suffix to get base driver name
-        let upper = printer_name.to_uppercase();
-        let base_name = if upper.ends_with(" (CUT)") || upper.ends_with(" (CUT)") {
-            printer_name[..printer_name.len() - 6].to_string()
-        } else if upper.ends_with(" CUT") {
-            printer_name[..printer_name.len() - 4].to_string()
-        } else {
-            printer_name.to_string()
-        };
-        if base_name != printer_name && win32_printer_exists(&base_name) {
-            log::info!("[Printer] Using base (no-cut) driver: '{}'", base_name);
-            base_name
-        } else {
-            printer_name.to_string()
-        }
-    };
-
-    log::info!("[Printer] Actual printer for job: '{}'", actual_printer);
+    // Single-driver model: never switch printers. Cut vs no-cut comes from a captured
+    // DEVMODE preset (the driver's own "2 inch cut" setting). If the operator hasn't
+    // configured this mode yet we fall back to the driver's default DEVMODE.
+    let actual_printer = printer_name.to_string();
+    let preset = load_preset(app, printer_name, needs_cut);
+    match &preset {
+        Some(bytes) => log::info!(
+            "[Printer] Using {} DEVMODE preset ({} bytes) for '{}'",
+            if needs_cut { "cut" } else { "nocut" },
+            bytes.len(),
+            actual_printer
+        ),
+        None => log::warn!(
+            "[Printer] No {} preset for '{}' — using driver default DEVMODE. \
+             Configure cut/no-cut in Printer Config to control cutting.",
+            if needs_cut { "cut" } else { "nocut" },
+            actual_printer
+        ),
+    }
 
     let wide_name = to_wide(&actual_printer);
     let wide_winspool = to_wide("WINSPOOL");
@@ -207,7 +322,7 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
             None,
         ).map_err(|e| format!("OpenPrinter failed: {}", e))?;
 
-        // 2. Get DEVMODE buffer size
+        // 2. Get DEVMODE buffer size required by the driver
         let dm_size = DocumentPropertiesW(
             HWND::default(),
             printer_handle,
@@ -222,22 +337,28 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
             return Err("DocumentProperties: failed to get DEVMODE size".into());
         }
 
-        // 3. Get current DEVMODE
-        let mut dm_buf = vec![0u8; dm_size as usize];
+        // 3. Seed the DEVMODE buffer: from the saved preset when available (carries the
+        //    driver-private cut flag), otherwise the driver's current/default settings.
+        //    Buffer must fit whichever is larger.
+        let buf_len = (dm_size as usize).max(preset.as_ref().map(|b| b.len()).unwrap_or(0));
+        let mut dm_buf = vec![0u8; buf_len];
         let dm_ptr = dm_buf.as_mut_ptr() as *mut DEVMODEW;
 
-        let res = DocumentPropertiesW(
-            HWND::default(),
-            printer_handle,
-            PCWSTR(wide_name.as_ptr()),
-            Some(dm_ptr),
-            None,
-            2, // DM_OUT_BUFFER
-        );
-
-        if res < 0 {
-            let _ = ClosePrinter(printer_handle);
-            return Err("DocumentProperties: failed to get DEVMODE".into());
+        if let Some(bytes) = &preset {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), dm_buf.as_mut_ptr(), bytes.len());
+        } else {
+            let res = DocumentPropertiesW(
+                HWND::default(),
+                printer_handle,
+                PCWSTR(wide_name.as_ptr()),
+                Some(dm_ptr),
+                None,
+                2, // DM_OUT_BUFFER
+            );
+            if res < 0 {
+                let _ = ClosePrinter(printer_handle);
+                return Err("DocumentProperties: failed to get DEVMODE".into());
+            }
         }
 
         // 4. Find and set paper size
@@ -687,6 +808,7 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
 
 #[tauri::command]
 pub async fn print_photo(
+    app: tauri::AppHandle,
     image_path: String,
     printer_name: String,
     frame_type: String,
@@ -810,7 +932,7 @@ pub async fn print_photo(
     // Print using native Win32 GDI API - no PowerShell, no popup windows
     #[cfg(target_os = "windows")]
     {
-        win32_gdi_print(&printer_name, &temp_path_str, &frame_type)
+        win32_gdi_print(&app, &printer_name, &temp_path_str, &frame_type)
             .map(|_| true)
     }
 
@@ -904,6 +1026,7 @@ pub async fn print_test_photo(
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
     print_photo(
+        app,
         test_image_path,
         printer_name,
         frame_type,
@@ -964,4 +1087,54 @@ pub async fn get_printer_paper_sizes(printer_name: String) -> Result<Vec<String>
         let _ = printer_name;
         Ok(vec!["Paper size query not supported on this platform".to_string()])
     }
+}
+
+/// Open the driver's Printing Preferences dialog so the operator can set the cut option
+/// for this mode, then store the resulting DEVMODE as the cut/no-cut preset for the
+/// printer. Returns `true` if saved, `false` if the operator cancelled the dialog.
+///
+/// This is the single-driver replacement for installing a separate "(CUT)" driver.
+#[tauri::command]
+pub async fn capture_printer_devmode(
+    app: tauri::AppHandle,
+    printer_name: String,
+    cut: bool,
+) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd = get_main_hwnd(&app)?;
+        let printer = printer_name.clone();
+        let captured = tauri::async_runtime::spawn_blocking(move || {
+            win32_capture_devmode(hwnd, &printer)
+        })
+        .await
+        .map_err(|e| format!("capture task join error: {}", e))??;
+
+        match captured {
+            Some(bytes) if !bytes.is_empty() => {
+                save_preset(&app, &printer_name, cut, &bytes)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, printer_name, cut);
+        Err("DEVMODE capture is only supported on Windows".to_string())
+    }
+}
+
+/// Report which cut/no-cut presets have been configured for a printer (for admin UI).
+#[tauri::command]
+pub async fn get_printer_preset_status(
+    app: tauri::AppHandle,
+    printer_name: String,
+) -> Result<serde_json::Value, String> {
+    let all = read_all_presets(&app);
+    let entry = all.get(&printer_name);
+    let cut = entry.and_then(|e| e.cut.as_ref()).is_some();
+    let nocut = entry.and_then(|e| e.nocut.as_ref()).is_some();
+    Ok(serde_json::json!({ "cut": cut, "nocut": nocut }))
 }
