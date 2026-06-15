@@ -61,7 +61,6 @@ export default function ContextMenu({
   const [printerStatus, setPrinterStatus] = useState("");
   const [appVersion, setAppVersion] = useState("");
   const [mirrorMode, setMirrorModeState] = useState(() => localStorage.getItem("mirrorMode") !== "false");
-  const [cameraIsCanon, setCameraIsCanon] = useState(() => (localStorage.getItem("cameraType") || "webcam") === "canon");
 
   // Load status summaries when menu opens
   useEffect(() => {
@@ -90,7 +89,6 @@ export default function ContextMenu({
 
     // Camera status
     const cameraType = localStorage.getItem("cameraType") || "webcam";
-    setCameraIsCanon(cameraType === "canon");
     if (cameraType === "webcam") {
       const label = localStorage.getItem("selectedCameraLabel");
       setCameraStatus(label ? `Webcam: ${label}` : "Webcam (ยังไม่ได้เลือก)");
@@ -507,6 +505,9 @@ export default function ContextMenu({
   }
 
   // หน้าจอเมนูหลัก (แสดงเมื่อกรอกรหัส 7053 ผ่านแล้ว)
+  // อ่านสดตอน render เพื่อให้ unlock/lock ถูกต้องเสมอ (รวมถึงตอนกลับจาก Camera Config)
+  const cameraIsCanon = (localStorage.getItem("cameraType") || "webcam") === "canon";
+
   return (
     <div
       className="context-menu-overlay"
