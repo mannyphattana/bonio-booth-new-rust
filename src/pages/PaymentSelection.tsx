@@ -38,6 +38,9 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
   const currentPrice =
     machineData.prices.find((p) => p.quantity === selectedQuantity)?.price || 0;
 
+  // ถ้าหลังบ้านยังไม่ได้ตั้งค่า Ksher ครบ (init ส่ง isKsherEnabled มา) ให้ซ่อนปุ่มจ่ายผ่าน QR
+  const hasKsher = !!machineData.isKsherEnabled;
+
   const handleSetQuantity = (quantity: number) => {
     const price =
       machineData.prices.find((p) => p.quantity === quantity)?.price || 0;
@@ -178,30 +181,32 @@ export default function PaymentSelection({ theme, machineData, onFormatReset, on
             <span className="option-button-subtext">Discount Coupon</span>
           </button>
 
-          {/* QR Payment button - filled */}
-          <button
-            onClick={handleQRCode}
-            className="option-button"
-            style={{
-              border: `2px solid ${theme.primaryColor}`,
-              background: theme.primaryColor,
-              color: theme.textButtonColor || "#fff",
-            }}
-          >
-            <div className="option-button-icon">
-              <img
-                src={qrIcon}
-                alt="QR Code Icon"
-                style={{
-                  width: 100,
-                  height: 100,
-                  filter: "brightness(0) invert(1)", // White icon for filled button
-                }}
-              />
-            </div>
-            <span className="option-button-text">ชำระเงินผ่าน</span>
-            <span className="option-button-subtext">QR Payment</span>
-          </button>
+          {/* QR Payment button - filled (ซ่อนเมื่อหลังบ้านยังไม่มี ksherAppId) */}
+          {hasKsher && (
+            <button
+              onClick={handleQRCode}
+              className="option-button"
+              style={{
+                border: `2px solid ${theme.primaryColor}`,
+                background: theme.primaryColor,
+                color: theme.textButtonColor || "#fff",
+              }}
+            >
+              <div className="option-button-icon">
+                <img
+                  src={qrIcon}
+                  alt="QR Code Icon"
+                  style={{
+                    width: 100,
+                    height: 100,
+                    filter: "brightness(0) invert(1)", // White icon for filled button
+                  }}
+                />
+              </div>
+              <span className="option-button-text">ชำระเงินผ่าน</span>
+              <span className="option-button-subtext">QR Payment</span>
+            </button>
+          )}
         </div>
       </div>
       <ContextMenu

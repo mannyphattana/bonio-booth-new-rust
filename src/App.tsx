@@ -49,6 +49,7 @@ export interface MachineData {
   theme: ThemeData;
   paperLevel: number;
   isMaintenanceMode: boolean;
+  isKsherEnabled?: boolean;
   [key: string]: any;
 }
 
