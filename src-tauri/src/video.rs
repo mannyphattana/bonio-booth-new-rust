@@ -407,6 +407,7 @@ pub async fn compose_frame_video(
     frame_height: u32,
     lut_path: Option<String>,
     output_filename: String,
+    hflip_video: Option<bool>,
 ) -> Result<String, String> {
     let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
@@ -498,9 +499,10 @@ pub async fn compose_frame_video(
         if sw % 2 != 0 { sw += 1; }
         if sh % 2 != 0 { sh += 1; }
 
+        let hflip_prefix = if hflip_video.unwrap_or(false) { "hflip," } else { "" };
         let mut chain = format!(
-            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
-            i, sw+2, sh+2, sw, sh
+            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
+            i, hflip_prefix, sw+2, sh+2, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));

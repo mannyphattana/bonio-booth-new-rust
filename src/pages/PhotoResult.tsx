@@ -318,6 +318,10 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             frameHeight: frameHeight,
             outputFilename: "framed-video.mp4",
             lutPath: lutPath,
+            // flip เฉพาะ webcam — Canon ไม่ flip เสมอ (ตรงกับ takePhoto/รูปนิ่ง)
+            hflipVideo:
+              localStorage.getItem("cameraType") !== "canon" &&
+              localStorage.getItem("mirrorMode") === "false",
           });
 
           // เซฟวิดีโอลงเครื่อง
