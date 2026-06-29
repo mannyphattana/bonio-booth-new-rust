@@ -277,9 +277,12 @@ const handleCountdownComplete = async () => {
                 const captureIdx = photoAssignments[i];
                 const slotX = slot.x * scaleFactor.x + imageOffset.x;
                 const slotY = slot.y * scaleFactor.y + imageOffset.y;
+                // ใช้ photoPreview (ย่อ 420px) ก่อนสำหรับ "แสดงผลบนจอ" เท่านั้น —
+                // รูป full-res (Canon หลาย MB) ถูก WebView2 scaled-decode ลงช่องเล็กๆ แล้วเบลอ
+                // ส่วน print/upload ใช้ captures[].photo (full-res) คนละ path จึงคมเหมือนเดิม
                 const framePhotoSource =
                   captureIdx !== undefined
-                    ? (captures[captureIdx].photo || captures[captureIdx].photoPreview)
+                    ? (captures[captureIdx].photoPreview || captures[captureIdx].photo)
                     : undefined;
                 return (
                   <div

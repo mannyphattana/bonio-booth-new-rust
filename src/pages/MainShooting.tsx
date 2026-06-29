@@ -537,7 +537,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
-        const maxDim = 420;
+        // 900px: คมพอสำหรับช่องในกรอบหน้า SlotSelection (~370px CSS × DPR สูงสุด ~2)
+        // โดยยังเล็กพอที่ WebView2 จะ decode เต็มความละเอียด ไม่โดน scaled-decode จนเบลอ
+        const maxDim = 900;
         const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
         const w = Math.max(1, Math.round(img.width * scale));
         const h = Math.max(1, Math.round(img.height * scale));
@@ -549,8 +551,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
           resolve(photoDataUrl);
           return;
         }
+        // ใช้ downscale คุณภาพสูงเพื่อให้ภาพย่อคมไม่หยัก
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.86));
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
       };
       img.onerror = () => resolve(photoDataUrl);
       img.src = photoDataUrl;
