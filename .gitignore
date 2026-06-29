@@ -33,3 +33,6 @@ build.md
 # understand-anything (AI codebase analysis — generated files)
 .understand-anything/
 
+AGENTS.md
+CLAUDE.md
+
