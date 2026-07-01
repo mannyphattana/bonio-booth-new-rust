@@ -71,8 +71,13 @@ fn get_ffmpeg_path() -> String {
     "ffmpeg".to_string()
 }
 
-/// Copy LUT file to temp directory and return just the filename.
+/// Prepare LUT file in temp directory and return just the filename.
 /// This avoids all FFmpeg filter path escaping issues by using cwd instead of absolute paths.
+///
+/// The LUT written out has the same shadow-desaturation correction baked into its
+/// grid entries that the photo pipeline (image_processing.rs) applies per-pixel after
+/// interpolation. Without this, `lut3d` in FFmpeg produces visibly different shadow
+/// colors (greener/lighter blacks) than the photo output for the same filter.
 fn prepare_lut_in_temp(lut_path: &str, temp_dir: &Path) -> Result<String, String> {
     let lut_src = Path::new(lut_path);
     let lut_filename = lut_src
@@ -81,8 +86,11 @@ fn prepare_lut_in_temp(lut_path: &str, temp_dir: &Path) -> Result<String, String
         .to_string_lossy()
         .to_string();
     let temp_lut = temp_dir.join(&lut_filename);
-    fs::copy(lut_src, &temp_lut)
-        .map_err(|e| format!("Failed to copy LUT to temp: {}", e))?;
+
+    let lut = crate::lut::Lut3D::parse_cube_file(lut_path)?;
+    let corrected = lut.with_shadow_fix();
+    corrected.write_cube_file(&temp_lut)?;
+
     Ok(lut_filename)
 }
 

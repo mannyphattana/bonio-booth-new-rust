@@ -3,6 +3,7 @@ mod canon;
 #[cfg(target_os = "windows")]
 mod edsdk_sys;
 mod image_processing;
+mod lut;
 mod printer;
 mod shutdown;
 mod sse;
