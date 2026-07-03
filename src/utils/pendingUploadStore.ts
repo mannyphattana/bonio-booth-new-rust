@@ -131,3 +131,30 @@ export function getRetryablePending(): PendingUploadRecord[] {
   cleanExpiredAndExhausted();
   return getAllPending().filter((r) => r.retryCount < MAX_RETRY_COUNT);
 }
+
+// ============================================================
+// In-flight guard (in-memory)
+//
+// เก็บ txId ของ session ที่กำลังอัพโหลดสดอยู่ (ในหน้า PhotoResult)
+// เพื่อให้ retry manager ข้ามไป ป้องกันการอัพซ้ำจากการชนกันของ
+// upload ปกติ กับ retry cycle (startup +30s / ทุก 10 นาที)
+// เป็น in-memory ล้วน — เคลียร์เองเมื่อรีสตาร์ทแอป ซึ่งถูกต้อง
+// เพราะหลังรีสตาร์ทย่อมไม่มี upload สดค้างอยู่
+// ============================================================
+
+const _activeUploadTxIds = new Set<string>();
+
+/** ทำเครื่องหมายว่า txId นี้กำลังอัพโหลดสดอยู่ (retry ต้องข้าม) */
+export function markUploadActive(txId: string): void {
+  if (txId) _activeUploadTxIds.add(txId);
+}
+
+/** ยกเลิกเครื่องหมาย in-flight เมื่ออัพโหลดจบ (สำเร็จหรือล้มเหลวก็ตาม) */
+export function markUploadInactive(txId: string): void {
+  if (txId) _activeUploadTxIds.delete(txId);
+}
+
+/** ตรวจว่า txId กำลังอัพโหลดสดอยู่หรือไม่ */
+export function isUploadActive(txId: string): boolean {
+  return _activeUploadTxIds.has(txId);
+}
