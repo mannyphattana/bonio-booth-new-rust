@@ -449,13 +449,16 @@ pub async fn compose_frame_video(
         
     let (orig_w, orig_h) = frame_img.dimensions();
 
+    // Output resolution is raised (1080→1440 / 720→960) so the frame overlay's
+    // text/logo stays sharp, matching the photo composite more closely. The video
+    // footage is upscaled along with it, which is acceptable here.
     let is_portrait = orig_h > orig_w;
     let (mut out_w, mut out_h) = if is_portrait {
-        let tw = 1080u32;
+        let tw = 1440u32;
         let th = (tw as f64 * (orig_h as f64 / orig_w as f64)).round() as u32;
         (tw, th)
     } else {
-        let th = 720u32;
+        let th = 960u32;
         let tw = (th as f64 * (orig_w as f64 / orig_h as f64)).round() as u32;
         (tw, th)
     };
@@ -519,8 +522,9 @@ pub async fn compose_frame_video(
         filter_parts.push(chain);
     }
 
+    // Use lanczos for the frame overlay so its text/logo edges stay crisp when scaled.
     filter_parts.push(format!(
-        "[{}:v]format=rgba,scale={}:{}:flags=accurate_rnd+full_chroma_int[frame_img]",
+        "[{}:v]format=rgba,scale={}:{}:flags=lanczos+accurate_rnd+full_chroma_int[frame_img]",
         num_videos, out_w, out_h
     ));
 
