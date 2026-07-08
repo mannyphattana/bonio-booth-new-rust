@@ -20,6 +20,7 @@ import {
   getRetryablePending,
   removePendingUpload,
   incrementRetryCount,
+  isUploadActive,
   type PendingUploadRecord,
   type PendingUploadFile,
 } from "./pendingUploadStore";
@@ -234,6 +235,16 @@ export async function retryPendingUploads(): Promise<void> {
 
   try {
     for (const record of pending) {
+      // ข้าม record ที่กำลังอัพโหลดสดอยู่ในหน้า PhotoResult
+      // ป้องกันการอัพซ้ำจากการชนกันระหว่าง upload ปกติกับ retry cycle
+      if (isUploadActive(record.txId)) {
+        appLogger.info(
+          CTX,
+          `Skipping txId=${record.txId} — upload currently in-flight`
+        );
+        continue;
+      }
+
       const success = await retryOneRecord(record);
       if (success) {
         removePendingUpload(record.txId);

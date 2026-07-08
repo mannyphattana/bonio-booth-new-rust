@@ -11,7 +11,13 @@ import { setPrinting } from "../utils/printingState";
 import { getPaperConfigForPrint } from "../utils/paperStore";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
-import { addPendingUpload, removePendingUpload } from "../utils/pendingUploadStore";
+import {
+  addPendingUpload,
+  removePendingUpload,
+  markUploadActive,
+  markUploadInactive,
+  type PendingUploadRecord,
+} from "../utils/pendingUploadStore";
 
 const CTX = "[PhotoResult]";
 
@@ -67,6 +73,12 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const hasLoggedMissingVideoRef = useRef(false);
   /** เก็บ txId ที่ใช้ตั้งชื่อไฟล์ local เพื่อให้ uploadFiles ใช้ removePendingUpload ได้ */
   const localTxIdRef = useRef<string>("");
+  /**
+   * เตรียม PendingUploadRecord ไว้ล่วงหน้าใน processMedia แต่ยัง "ไม่" เขียนลง
+   * localStorage — จะ commit ผ่าน addPendingUpload เฉพาะเมื่อ upload ล้มเหลวจริง
+   * เท่านั้น เพื่อกันการอัพซ้ำ (retry จะไม่ทำงานกับ session ที่อัพสำเร็จไปแล้ว)
+   */
+  const pendingRecordRef = useRef<PendingUploadRecord | null>(null);
 
   const buildVideoPathsBySlot = useCallback((): string[] => {
     const slotVideoPaths = frameCaptures.map((cap) => cap.videoPath || "");
@@ -348,7 +360,9 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       }
 
       // =====================================
-      // 3. บันทึก Pending Upload Record (ก่อนเริ่ม upload เพื่อให้ retry ได้ถ้า upload ล้มเหลว)
+      // 3. เตรียม Pending Upload Record ไว้ใน ref (ยังไม่ commit ลง localStorage)
+      //    จะ commit ผ่าน addPendingUpload เฉพาะเมื่อ upload ล้มเหลวจริงใน uploadFiles
+      //    เท่านั้น — กันบัค retry อัพซ้ำในกรณีที่อัพสำเร็จไปแล้ว
       // =====================================
       if (composedImg) {
         try {
@@ -393,17 +407,17 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
               : `TXN-${state.referenceId}`
             : undefined;
 
-          addPendingUpload({
+          pendingRecordRef.current = {
             txId: txIdStr,
             transactionId: transactionIdForRecord,
             transactionCode: transactionCodeForRecord,
             createdAt: new Date().toISOString(),
             files: pendingFiles,
             retryCount: 0,
-          });
-          appLogger.info(CTX, `✅ [PhotoResult] PendingUploadRecord saved — txId=${txIdStr} files=${pendingFiles.length}`);
+          };
+          appLogger.info(CTX, `[PhotoResult] PendingUploadRecord prepared (not committed) — txId=${txIdStr} files=${pendingFiles.length}`);
         } catch (err) {
-          appLogger.warn(CTX, "addPendingUpload failed (non-blocking):", err);
+          appLogger.warn(CTX, "prepare PendingUploadRecord failed (non-blocking):", err);
         }
       }
 
@@ -433,6 +447,23 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     if (!mediaReady || !sessionId || uploadUrls.length === 0) return;
     
     hasUploadedFiles.current = true;
+
+    // ทำเครื่องหมาย in-flight เพื่อให้ retry cycle ข้าม txId นี้ระหว่างอัพโหลดสด
+    markUploadActive(localTxIdRef.current);
+
+    /** commit pending record เพื่อให้ retry manager ลองใหม่ (เรียกเฉพาะตอนล้มเหลว) */
+    const queueForRetry = (reason: string) => {
+      if (!pendingRecordRef.current) return;
+      try {
+        addPendingUpload(pendingRecordRef.current);
+        appLogger.warn(
+          CTX,
+          `Queued pending upload for retry (${reason}) — txId=${pendingRecordRef.current.txId}`
+        );
+      } catch (err) {
+        appLogger.warn(CTX, "queueForRetry addPendingUpload failed:", err);
+      }
+    };
 
     try {
       appLogger.info(CTX, "Upload started — sessionId:", sessionId, "uploadUrls:", uploadUrls.length);
@@ -546,10 +577,11 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             uploadedFiles,
           });
           appLogger.info(CTX, "confirm_upload OK — files:", uploadedFiles.length);
-          // ลบ pending record เมื่อ upload สำเร็จสมบูรณ์
+          // สำเร็จสมบูรณ์ → เคลียร์ pending record ที่อาจค้างจากรอบก่อน (กัน retry อัพซ้ำ)
+          pendingRecordRef.current = null;
           if (localTxIdRef.current) {
             removePendingUpload(localTxIdRef.current);
-            appLogger.info(CTX, "PendingUploadRecord removed — txId:", localTxIdRef.current);
+            appLogger.info(CTX, "PendingUploadRecord cleared — txId:", localTxIdRef.current);
           }
         } catch (err) {
           appLogger.error(CTX, "confirm_upload failed:", err);
@@ -559,10 +591,14 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             err instanceof Error ? err.stack : undefined,
             "error"
           );
+          // confirm ล้มเหลว → คิวไว้ให้ retry (ยอมรับความเสี่ยงซ้ำที่ต่ำ เพื่อให้รูปส่งถึงเสมอ)
+          queueForRetry("confirm_upload failed");
         }
       } else {
         appLogger.warn(CTX, "No files uploaded — skipping confirm_upload");
         logError("upload_no_files", "uploadFiles completed but no files were uploaded successfully", undefined, "warning");
+        // ไม่มีไฟล์ขึ้นเลย → คิวไว้ให้ retry
+        queueForRetry("no files uploaded");
       }
 
       appLogger.info(CTX, "Upload done — total files uploaded:", uploadedFiles.length);
@@ -576,8 +612,13 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         err instanceof Error ? err.stack : undefined,
         "error"
       );
+      // error ที่ไม่คาดคิด → คิวไว้ให้ retry
+      queueForRetry("uploadFiles threw");
       setUploadStatus("error");
-      hasUploadedFiles.current = false; 
+      hasUploadedFiles.current = false;
+    } finally {
+      // ปลด in-flight เสมอ ไม่ว่าจะสำเร็จหรือล้มเหลว
+      markUploadInactive(localTxIdRef.current);
     }
   }, [sessionId, uploadUrls, composedImage, finalVideoPath, frameCaptures, mediaReady]);
 

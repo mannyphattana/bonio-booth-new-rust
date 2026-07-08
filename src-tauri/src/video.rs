@@ -71,8 +71,13 @@ fn get_ffmpeg_path() -> String {
     "ffmpeg".to_string()
 }
 
-/// Copy LUT file to temp directory and return just the filename.
+/// Prepare LUT file in temp directory and return just the filename.
 /// This avoids all FFmpeg filter path escaping issues by using cwd instead of absolute paths.
+///
+/// The LUT written out has the same shadow-desaturation correction baked into its
+/// grid entries that the photo pipeline (image_processing.rs) applies per-pixel after
+/// interpolation. Without this, `lut3d` in FFmpeg produces visibly different shadow
+/// colors (greener/lighter blacks) than the photo output for the same filter.
 fn prepare_lut_in_temp(lut_path: &str, temp_dir: &Path) -> Result<String, String> {
     let lut_src = Path::new(lut_path);
     let lut_filename = lut_src
@@ -81,8 +86,11 @@ fn prepare_lut_in_temp(lut_path: &str, temp_dir: &Path) -> Result<String, String
         .to_string_lossy()
         .to_string();
     let temp_lut = temp_dir.join(&lut_filename);
-    fs::copy(lut_src, &temp_lut)
-        .map_err(|e| format!("Failed to copy LUT to temp: {}", e))?;
+
+    let lut = crate::lut::Lut3D::parse_cube_file(lut_path)?;
+    let corrected = lut.with_shadow_fix();
+    corrected.write_cube_file(&temp_lut)?;
+
     Ok(lut_filename)
 }
 
@@ -441,13 +449,16 @@ pub async fn compose_frame_video(
         
     let (orig_w, orig_h) = frame_img.dimensions();
 
+    // Output resolution is raised (1080→1440 / 720→960) so the frame overlay's
+    // text/logo stays sharp, matching the photo composite more closely. The video
+    // footage is upscaled along with it, which is acceptable here.
     let is_portrait = orig_h > orig_w;
     let (mut out_w, mut out_h) = if is_portrait {
-        let tw = 1080u32;
+        let tw = 1440u32;
         let th = (tw as f64 * (orig_h as f64 / orig_w as f64)).round() as u32;
         (tw, th)
     } else {
-        let th = 720u32;
+        let th = 960u32;
         let tw = (th as f64 * (orig_w as f64 / orig_h as f64)).round() as u32;
         (tw, th)
     };
@@ -511,8 +522,9 @@ pub async fn compose_frame_video(
         filter_parts.push(chain);
     }
 
+    // Use lanczos for the frame overlay so its text/logo edges stay crisp when scaled.
     filter_parts.push(format!(
-        "[{}:v]format=rgba,scale={}:{}:flags=accurate_rnd+full_chroma_int[frame_img]",
+        "[{}:v]format=rgba,scale={}:{}:flags=lanczos+accurate_rnd+full_chroma_int[frame_img]",
         num_videos, out_w, out_h
     ));
 

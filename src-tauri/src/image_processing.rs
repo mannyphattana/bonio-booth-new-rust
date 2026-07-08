@@ -1,107 +1,9 @@
+use crate::lut::{apply_shadow_fix, Lut3D};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-
-#[derive(Debug, Clone)]
-struct Lut3D {
-    size: usize,
-    data: Vec<[f32; 3]>,
-}
-
-impl Lut3D {
-    fn parse_cube_file(path: &str) -> Result<Self, String> {
-        let content = fs::read_to_string(path).map_err(|e| format!("Read LUT file error: {}", e))?;
-        let mut size: usize = 0;
-        let mut data: Vec<[f32; 3]> = Vec::new();
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if line.starts_with("LUT_3D_SIZE") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    size = parts[1].parse().map_err(|e| format!("Parse size error: {}", e))?;
-                }
-                continue;
-            }
-            if line.starts_with("TITLE") || line.starts_with("DOMAIN_MIN") || line.starts_with("DOMAIN_MAX") {
-                continue;
-            }
-
-            let values: Vec<f32> = line
-                .split_whitespace()
-                .filter_map(|v| v.parse::<f32>().ok())
-                .collect();
-
-            if values.len() == 3 {
-                data.push([values[0], values[1], values[2]]);
-            }
-        }
-
-        if size == 0 || data.is_empty() {
-            return Err("Invalid LUT file".to_string());
-        }
-
-        Ok(Lut3D { size, data })
-    }
-
-    fn apply(&self, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-        let max_idx = (self.size - 1) as f32;
-        
-        let ri = r.clamp(0.0, 1.0) * max_idx;
-        let gi = g.clamp(0.0, 1.0) * max_idx;
-        let bi = b.clamp(0.0, 1.0) * max_idx;
-
-        let r0 = ri.floor() as usize;
-        let g0 = gi.floor() as usize;
-        let b0 = bi.floor() as usize;
-        let r1 = (r0 + 1).min(self.size - 1);
-        let g1 = (g0 + 1).min(self.size - 1);
-        let b1 = (b0 + 1).min(self.size - 1);
-
-        let rf = ri - r0 as f32;
-        let gf = gi - g0 as f32;
-        let bf = bi - b0 as f32;
-
-        let idx = |r: usize, g: usize, b: usize| -> usize {
-            b * self.size * self.size + g * self.size + r
-        };
-
-        let c000 = self.data[idx(r0, g0, b0)];
-        let c100 = self.data[idx(r1, g0, b0)];
-        let c010 = self.data[idx(r0, g1, b0)];
-        let c110 = self.data[idx(r1, g1, b0)];
-        let c001 = self.data[idx(r0, g0, b1)];
-        let c101 = self.data[idx(r1, g0, b1)];
-        let c011 = self.data[idx(r0, g1, b1)];
-        let c111 = self.data[idx(r1, g1, b1)];
-
-        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
-
-        let mut result = [0.0f32; 3];
-        for i in 0..3 {
-            let c00 = lerp(c000[i], c100[i], rf);
-            let c10 = lerp(c010[i], c110[i], rf);
-            let c01 = lerp(c001[i], c101[i], rf);
-            let c11 = lerp(c011[i], c111[i], rf);
-
-            let c0 = lerp(c00, c10, gf);
-            let c1 = lerp(c01, c11, gf);
-
-            result[i] = lerp(c0, c1, bf);
-        }
-
-        (
-            result[0].clamp(0.0, 1.0),
-            result[1].clamp(0.0, 1.0),
-            result[2].clamp(0.0, 1.0),
-        )
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct FilterInfo {
@@ -173,20 +75,8 @@ pub async fn apply_lut_filter(
         let g = pixel[1] as f32 / 255.0;
         let b = pixel[2] as f32 / 255.0;
 
-        let (mut nr, mut ng, mut nb) = lut.apply(r, g, b);
-
-        // --- แก้ปัญหาเงาเขียว (อัปเกรดความแรง ครอบคลุมเสื้อ/ฉากหลัง) ---
-        let luma = 0.299 * nr + 0.587 * ng + 0.114 * nb;
-        let shadow_threshold = 0.28; // เพิ่มให้ครอบคลุมถึง 28% (ครอบคลุมเสื้อสีเข้ม/ดำ)
-        
-        if luma < shadow_threshold {
-            let t = luma / shadow_threshold;
-            let curve = t * t; // ใช้สมการ Quadratic ให้เกลี่ยสีเนียนที่สุด ไร้รอยต่อ
-            
-            nr = luma + (nr - luma) * curve;
-            ng = luma + (ng - luma) * curve;
-            nb = luma + (nb - luma) * curve;
-        }
+        let (nr, ng, nb) = lut.apply(r, g, b);
+        let (nr, ng, nb) = apply_shadow_fix(nr, ng, nb);
 
         pixel[0] = (nr * 255.0).clamp(0.0, 255.0) as u8;
         pixel[1] = (ng * 255.0).clamp(0.0, 255.0) as u8;
@@ -265,20 +155,8 @@ pub async fn apply_lut_filter_preview(
         let g = pixel[1] as f32 / 255.0;
         let b = pixel[2] as f32 / 255.0;
 
-        let (mut nr, mut ng, mut nb) = lut.apply(r, g, b);
-
-        // --- แก้ปัญหาเงาเขียว (อัปเกรดความแรง ครอบคลุมเสื้อ/ฉากหลัง) ---
-        let luma = 0.299 * nr + 0.587 * ng + 0.114 * nb;
-        let shadow_threshold = 0.28; 
-        
-        if luma < shadow_threshold {
-            let t = luma / shadow_threshold;
-            let curve = t * t;
-            
-            nr = luma + (nr - luma) * curve;
-            ng = luma + (ng - luma) * curve;
-            nb = luma + (nb - luma) * curve;
-        }
+        let (nr, ng, nb) = lut.apply(r, g, b);
+        let (nr, ng, nb) = apply_shadow_fix(nr, ng, nb);
 
         pixel[0] = (nr * 255.0).clamp(0.0, 255.0) as u8;
         pixel[1] = (ng * 255.0).clamp(0.0, 255.0) as u8;
