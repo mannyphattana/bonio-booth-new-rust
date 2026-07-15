@@ -43,6 +43,10 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
   const { w: frameWidth, h: frameHeight } = getFrameDimensions();
   const frameAspectRatio = frameWidth / frameHeight;
 
+  const cols = frameAspectRatio < 0.5 ? 2 : 1;
+  const rows = frameAspectRatio > 2 ? 2 : 1;
+  const displayAspectRatio = (frameWidth * cols) / (frameHeight * rows);
+
   const [photoAssignments, setPhotoAssignments] = useState<{
     [slotIndex: number]: number;
   }>({});
@@ -59,14 +63,15 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     const container = containerRef.current;
     if (!container || !selectedFrame) return;
 
-    // Use the inner wrapper div for calculations to ensure aspect ratio is respected
     const wrapper = container.firstElementChild as HTMLDivElement;
     if (!wrapper) return;
 
     const containerWidth = wrapper.offsetWidth;
     const containerHeight = wrapper.offsetHeight;
 
-    const imgAspect = frameWidth / frameHeight;
+    const canvasW = frameWidth * cols;
+    const canvasH = frameHeight * rows;
+    const imgAspect = canvasW / canvasH;
     const containerAspect = containerWidth / containerHeight;
 
     let renderedWidth,
@@ -85,11 +90,11 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     }
 
     setScaleFactor({
-      x: renderedWidth / frameWidth,
-      y: renderedHeight / frameHeight,
+      x: renderedWidth / canvasW,
+      y: renderedHeight / canvasH,
     });
     setImageOffset({ x: offsetX, y: offsetY });
-  }, [selectedFrame, frameWidth, frameHeight]);
+  }, [selectedFrame, frameWidth, frameHeight, cols, rows]);
 
   useEffect(() => {
     if (selectedFrame) {
@@ -124,7 +129,6 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
-  // 👇👇👇 แก้ไข Logic การสลับรูปใหม่ทั้งหมดตรงนี้ครับ 👇👇👇
 const handleCountdownComplete = async () => {
     const msg = `Countdown expired on SlotSelection${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
     appLogger.warn(CTX, msg);
@@ -146,42 +150,36 @@ const handleCountdownComplete = async () => {
   const handleNext = () => {
     if (getAssignedCount() < slots.length) return;
 
-    // 1. ดึง Index ที่ลูกค้าเลือกมาทั้งหมด
     let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
       return captureIdx !== undefined ? captureIdx : 0;
     });
 
-    // 2. ค้นหากองหนุน: ดึง Index เฉพาะรูปที่ "ไม่ได้ถูกเลือก" และ "มีวิดีโอสมบูรณ์"
     let spareValidIndexes = captures
       .map((cap, idx) => ({ cap, idx }))
-      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx)) // ต้องไม่ได้ถูกเลือกไปแล้ว
-      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "") // วิดีโอต้องใช้งานได้
+      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx))
+      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "")
       .map((item) => item.idx);
 
-    // 3. สแกนตรวจสอบรูปที่ลูกค้าเลือก ถ้ารูปไหนวิดีโอพัง สลับเอาของดีมาใส่แทนทั้งชุด
     finalSelectedCaptureIndexes = finalSelectedCaptureIndexes.map((currentIdx) => {
       const currentCap = captures[currentIdx];
       const isBroken = !currentCap || !currentCap.videoPath || currentCap.videoPath.trim() === "";
 
       if (isBroken) {
-        appLogger.warn(CTX, `[Smart Fallback] รูปที่ ${currentIdx + 1} ไม่มีวิดีโอ!`);
+        appLogger.warn(CTX, `Photo ${currentIdx + 1} broken`);
         
         if (spareValidIndexes.length > 0) {
-          // ดึงกองหนุนมาสวมรอย "ทั้งรูปภาพและวิดีโอ" จะได้ไม่มีอาการภาพกระตุก
           const spareIdx = spareValidIndexes.shift()!;
-          appLogger.info(CTX, `-> สลับไปใช้รูปและวิดีโอจากช่องที่ ${spareIdx + 1} แทนเรียบร้อย`);
+          appLogger.info(CTX, `swap to ${spareIdx + 1}`);
           return spareIdx; 
         } else {
-          // ท่าไม้ตายก้นหีบ: ถ้ากองหนุนพังเกลี้ยงหมดตู้จริงๆ ให้ดึงวิดีโอไหนก็ได้ที่สมบูรณ์มาใช้กันระบบแครช/จอดำ
           const emergencyIdx = captures.findIndex(c => c && c.videoPath && c.videoPath.trim() !== "");
           return emergencyIdx !== -1 ? emergencyIdx : currentIdx;
         }
       }
-      return currentIdx; // ถ้ารูปปกติ ก็ใช้รูปเดิมที่ลูกค้าเลือก
+      return currentIdx;
     });
 
-    // 4. ประกอบข้อมูลให้พร้อมส่ง
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
 
     navigate("/apply-filter", {
@@ -192,7 +190,6 @@ const handleCountdownComplete = async () => {
       },
     });
   };
-  // 👆👆👆 จบการแก้ไข 👆👆👆
 
   if (!selectedFrame) return null;
 
@@ -211,14 +208,12 @@ const handleCountdownComplete = async () => {
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
     >
-      {/* Countdown */}
       <Countdown
         seconds={COUNTDOWN.SLOT_SELECTION.DURATION}
         onComplete={handleCountdownComplete}
       />
 
       <div className="page-main-content" style={{ marginTop: "60px", height: "calc(100vh - 60px)", display: "flex", flexDirection: "column", padding: "10px 20px" }}>
-        {/* Row 1: Title */}
         <div className="page-row-top" style={{ flex: "0 0 auto", marginBottom: "8px", padding: "40px 0" }}>
           <div className="page-title-section">
             <h1 className="title-thai" style={{ color: theme.fontColor }}>
@@ -230,12 +225,10 @@ const handleCountdownComplete = async () => {
           </div>
         </div>
 
-        {/* Row 2: Body – frame + thumbnails */}
         <div
           className="page-row-body"
           style={{ flexDirection: "column", gap: "20px", flex: 1, overflow: "hidden" }}
         >
-          {/* Frame */}
           <div
             ref={containerRef}
             style={{
@@ -250,86 +243,96 @@ const handleCountdownComplete = async () => {
           >
             <div style={{
               position: "relative",
-              height: frameAspectRatio <= 1 ? "100%" : "auto",
-              width: frameAspectRatio > 1 ? "100%" : "auto",
+              height: displayAspectRatio <= 1 ? "100%" : "auto",
+              width: displayAspectRatio > 1 ? "100%" : "auto",
               maxHeight: "100%",
               maxWidth: "100%",
-              aspectRatio: `${frameAspectRatio}`,
+              aspectRatio: `${displayAspectRatio}`,
             }}>
-              <img
-                ref={frameImgRef}
-                src={selectedFrame.imageUrl}
-                alt=""
-                onLoad={calculateScaleFactor}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "contain",
-                  zIndex: 10,
-                  pointerEvents: "none",
-                }}
-              />
-
-              {slots.map((slot, i) => {
-                const captureIdx = photoAssignments[i];
-                const slotX = slot.x * scaleFactor.x + imageOffset.x;
-                const slotY = slot.y * scaleFactor.y + imageOffset.y;
-                // ใช้ photoPreview (ย่อ 420px) ก่อนสำหรับ "แสดงผลบนจอ" เท่านั้น —
-                // รูป full-res (Canon หลาย MB) ถูก WebView2 scaled-decode ลงช่องเล็กๆ แล้วเบลอ
-                // ส่วน print/upload ใช้ captures[].photo (full-res) คนละ path จึงคมเหมือนเดิม
-                const framePhotoSource =
-                  captureIdx !== undefined
-                    ? (captures[captureIdx].photoPreview || captures[captureIdx].photo)
-                    : undefined;
+              {Array.from({ length: cols * rows }).map((_, copyIdx) => {
+                const c = copyIdx % cols;
+                const r = Math.floor(copyIdx / cols);
                 return (
-                  <div
-                    key={i}
+                  <img
+                    key={`frame-${copyIdx}`}
+                    ref={copyIdx === 0 ? frameImgRef : undefined}
+                    src={selectedFrame.imageUrl}
+                    alt=""
+                    onLoad={copyIdx === 0 ? calculateScaleFactor : undefined}
                     style={{
                       position: "absolute",
-                      zIndex: 5,
-                      overflow: "hidden",
-                      left: `${slotX}px`,
-                      top: `${slotY}px`,
-                      width: `${slot.width * scaleFactor.x}px`,
-                      height: `${slot.height * scaleFactor.y}px`,
-                      borderRadius: `${slot.radius * scaleFactor.x}px`,
-                      background: "rgba(0,0,0,0.05)",
+                      top: `${(r * 100) / rows}%`,
+                      left: `${(c * 100) / cols}%`,
+                      width: `${100 / cols}%`,
+                      height: `${100 / rows}%`,
+                      objectFit: "contain",
+                      zIndex: 10,
+                      pointerEvents: "none",
                     }}
-                  >
-                    {captureIdx !== undefined && (
-                      <img
-                        src={framePhotoSource}
-                        alt=""
-                        decoding="async"
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                        }}
-                      />
-                    )}
-                  </div>
+                  />
                 );
+              })}
+
+              {Array.from({ length: cols * rows }).flatMap((_, copyIdx) => {
+                const c = copyIdx % cols;
+                const r = Math.floor(copyIdx / cols);
+                const colOffsetX = imageOffset.x + c * frameWidth * scaleFactor.x;
+                const colOffsetY = imageOffset.y + r * frameHeight * scaleFactor.y;
+
+                return slots.map((slot, i) => {
+                  const captureIdx = photoAssignments[i];
+                  const slotX = slot.x * scaleFactor.x + colOffsetX;
+                  const slotY = slot.y * scaleFactor.y + colOffsetY;
+                  const framePhotoSource =
+                    captureIdx !== undefined
+                      ? (captures[captureIdx].photoPreview || captures[captureIdx].photo)
+                      : undefined;
+                  return (
+                    <div
+                      key={`${copyIdx}-${i}`}
+                      style={{
+                        position: "absolute",
+                        zIndex: 5,
+                        overflow: "hidden",
+                        left: `${slotX}px`,
+                        top: `${slotY}px`,
+                        width: `${slot.width * scaleFactor.x}px`,
+                        height: `${slot.height * scaleFactor.y}px`,
+                        borderRadius: `${slot.radius * scaleFactor.x}px`,
+                        background: "rgba(0,0,0,0.05)",
+                      }}
+                    >
+                      {captureIdx !== undefined && (
+                        <img
+                          src={framePhotoSource}
+                          alt=""
+                          decoding="async"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                });
               })}
             </div>
           </div>
 
-          {/* 3. Thumbnails */}
           <div
             style={{
               display: "flex",
               flexWrap: "wrap",
               gap: "12px",
               justifyContent: "center",
-              alignItems: "flex-start", // เปลี่ยนจาก center เป็น flex-start เพื่อให้รูปชิดบน
-              alignContent: "flex-start", // จัดกลุ่มบรรทัดให้ชิดบน
+              alignItems: "flex-start",
+              alignContent: "flex-start",
               zIndex: 20,
               width: "90%",
-              flex: 1, // ให้ขยายเต็มพื้นที่ที่เหลือ
-              overflow: "hidden", // ซ่อน scrollbar
+              flex: 1,
+              overflow: "hidden",
               padding: "10px",
             }}
           >
@@ -372,7 +375,6 @@ const handleCountdownComplete = async () => {
                   />
                   {isSelected && (
                     <>
-                      {/* Center Number */}
                       <div
                         style={{
                           position: "absolute",
@@ -397,7 +399,6 @@ const handleCountdownComplete = async () => {
                         {parseInt(slotIdx!) + 1}
                       </div>
 
-                      {/* Top Right 'x' */}
                       <div
                         style={{
                           position: "absolute",
@@ -434,9 +435,7 @@ const handleCountdownComplete = async () => {
             })}
           </div>
         </div>
-        {/* end page-row-body */}
 
-        {/* Row 3: Footer */}
         <div className="page-row-footer" style={{ flex: "0 0 auto", paddingBottom: "50px", paddingTop: "10px", width: "60%" }}>
           <button
             onClick={handleNext}
@@ -448,17 +447,15 @@ const handleCountdownComplete = async () => {
                   ? theme.primaryColor
                   : "gray",
               color: theme.textButtonColor,
-              padding: "12px 40px", // ลดขนาดปุ่มลง
-              fontSize: "20px", // ลดขนาดตัวอักษรลง
+              padding: "12px 40px",
+              fontSize: "20px",
               borderRadius: "30px",
             }}
           >
             Next
           </button>
         </div>
-        {/* end page-row-footer */}
       </div>
-      {/* end page-main-content */}
       <ContextMenu
         open={showContextMenu}
         onClose={() => setShowContextMenu(false)}

@@ -571,6 +571,24 @@ pub async fn compose_frame_video(
         }
     }
 
+    // 2x6/6x2 -> 4x6 duplicate: เหมือนกับ compose_frame ฝั่งภาพนิ่ง (image_processing.rs)
+    // หลังรวม element ทั้งหมดในเฟรมแล้ว (stream `prev`) split ตัวเองเป็น 2 แล้ว
+    // hstack (2x6, สูงแคบ) หรือ vstack (6x2, กว้าง) เพื่อให้ output วิดีโอ/GIF เป็น
+    // layout 4x6 duplicate ตรงกับภาพนิ่งจาก compose_frame. เกณฑ์ตัดสินเดียวกันทุกจุด:
+    // ratio < 0.5 -> 2x6, ratio > 2.0 -> 6x2, อื่นๆ ไม่แตะ.
+    let frame_ratio = frame_width as f64 / frame_height as f64;
+    if frame_ratio < 0.5 {
+        // 2x6 (สูงแคบ) -> hstack ซ้าย-ขวา เป็น 4x6
+        filter_parts.push(format!("[{}]split=2[dupL][dupR]", prev));
+        filter_parts.push("[dupL][dupR]hstack=inputs=2[dup]".to_string());
+        prev = "dup".to_string();
+    } else if frame_ratio > 2.0 {
+        // 6x2 (กว้าง) -> vstack บน-ล่าง เป็น 4x6
+        filter_parts.push(format!("[{}]split=2[dupT][dupB]", prev));
+        filter_parts.push("[dupT][dupB]vstack=inputs=2[dup]".to_string());
+        prev = "dup".to_string();
+    }
+
     let final_label = format!("{}out", prev);
     filter_parts.push(format!(
         "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[{}]",

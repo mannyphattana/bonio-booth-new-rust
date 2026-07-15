@@ -250,6 +250,32 @@ pub async fn compose_frame(
         }
     }
 
+    // 2x6/6x2 -> 4x6 duplicate: ทำ "หลัง" จากที่วางรูปลงช่องครบแล้ว (dup ทั้งกรอบ+รูป
+    // ไม่ใช่แค่กรอบเปล่า) ให้ compose_frame เป็น single-source-of-truth ของภาพ 4x6
+    // ที่ทุก touchpoint ปลายทาง (preview, save, upload, GIF/video, หน้าเว็บ) ใช้ต่อ
+    // โดยอัตโนมัติ. เกณฑ์ตัดสินใช้ frame_width/frame_height ที่รับเข้ามา (grid ต้นฉบับ
+    // ของกรอบ) ให้สอดคล้องกับ logic ฝั่ง frontend (PhotoResult.tsx) และ printer.rs.
+    let frame_ratio = frame_width as f64 / frame_height as f64;
+    let canvas = if frame_ratio < 0.5 {
+        // 2x6 (สูงแคบ) -> canvas กว้าง 2 เท่า วางภาพซ้ำซ้าย-ขวา
+        let (cw, ch) = canvas.dimensions();
+        println!("[compose_frame] 2x6 dup (frame ratio={:.3}): {}x{} -> {}x{}", frame_ratio, cw, ch, cw * 2, ch);
+        let mut doubled: RgbaImage = ImageBuffer::new(cw * 2, ch);
+        image::imageops::overlay(&mut doubled, &canvas, 0, 0);
+        image::imageops::overlay(&mut doubled, &canvas, cw as i64, 0);
+        doubled
+    } else if frame_ratio > 2.0 {
+        // 6x2 (แนวนอนแคบ) -> canvas สูง 2 เท่า วางภาพซ้ำบน-ล่าง
+        let (cw, ch) = canvas.dimensions();
+        println!("[compose_frame] 6x2 dup (frame ratio={:.3}): {}x{} -> {}x{}", frame_ratio, cw, ch, cw, ch * 2);
+        let mut doubled: RgbaImage = ImageBuffer::new(cw, ch * 2);
+        image::imageops::overlay(&mut doubled, &canvas, 0, 0);
+        image::imageops::overlay(&mut doubled, &canvas, 0, ch as i64);
+        doubled
+    } else {
+        canvas
+    };
+
     let mut buf = Vec::new();
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 95);
     DynamicImage::ImageRgba8(canvas)

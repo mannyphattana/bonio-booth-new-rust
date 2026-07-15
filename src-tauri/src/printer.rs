@@ -711,29 +711,50 @@ pub async fn print_photo(
 
     // For cut frames: duplicate image onto full 4x6 paper BEFORE applying scale/offset.
     // This matches the old app's behavior where duplication happened in the frontend.
-    img = match frame_type.as_str() {
-        "2x6" => {
-            let w = img.width();
-            let h = img.height();
+    //
+    // IMPORTANT (idempotent dup): ตั้งแต่ compose_frame ฝั่ง frontend/backend เริ่ม
+    // ผลิตภาพ 4x6 duplicate มาให้แล้วตั้งแต่ต้น (ดู image_processing.rs::compose_frame),
+    // ที่นี่จึงต้องตรวจ ASPECT RATIO ของภาพจริงที่ decode มา แทนที่จะเชื่อ frame_type string
+    // เฉยๆ — ป้องกัน double-duplicate (ภาพถูก dup ซ้ำอีกรอบตอนปริ้น).
+    //   - ภาพสูงแคบ (w/h < 0.5) ยังเป็น 2x6 เดี่ยว (เช่น reprint ภาพเก่า) -> dup แนวนอน
+    //   - ภาพกว้าง (w/h > 2.0) ยังเป็น 6x2 เดี่ยว -> dup แนวตั้ง
+    //   - ภาพใกล้เคียง 4x6 อยู่แล้ว (ratio ~0.67, มาจาก compose_frame ที่ dup มาแล้ว) -> ข้าม
+    let needs_cut_dup = frame_type == "2x6" || frame_type == "6x2";
+    if needs_cut_dup {
+        let w = img.width();
+        let h = img.height();
+        let ratio = w as f64 / h as f64;
+
+        if ratio < 0.5 {
+            // ภาพยังเป็น 2x6 เดี่ยว (สูงแคบ) -> duplicate ซ้าย-ขวา เป็น 4x6
             let canvas_w = w * 2;
-            log::info!("[Printer] 2x6 dup: img {}x{}, canvas {}x{}", w, h, canvas_w, h);
+            log::info!(
+                "[Printer] 2x6 dup (ratio={:.3} < 0.5, single image): img {}x{}, canvas {}x{}",
+                ratio, w, h, canvas_w, h
+            );
             let mut canvas = image::RgbaImage::from_pixel(canvas_w, h, image::Rgba([255, 255, 255, 255]));
             image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, 0);
             image::imageops::overlay(&mut canvas, &img.to_rgba8(), w as i64, 0);
-            image::DynamicImage::ImageRgba8(canvas)
-        }
-        "6x2" => {
-            let w = img.width();
-            let h = img.height();
+            img = image::DynamicImage::ImageRgba8(canvas);
+        } else if ratio > 2.0 {
+            // ภาพยังเป็น 6x2 เดี่ยว (กว้าง) -> duplicate บน-ล่าง เป็น 4x6
             let canvas_h = h * 2;
-            log::info!("[Printer] 6x2 dup: img {}x{}, canvas {}x{}", w, h, w, canvas_h);
+            log::info!(
+                "[Printer] 6x2 dup (ratio={:.3} > 2.0, single image): img {}x{}, canvas {}x{}",
+                ratio, w, h, w, canvas_h
+            );
             let mut canvas = image::RgbaImage::from_pixel(w, canvas_h, image::Rgba([255, 255, 255, 255]));
             image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, 0);
             image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, h as i64);
-            image::DynamicImage::ImageRgba8(canvas)
+            img = image::DynamicImage::ImageRgba8(canvas);
+        } else {
+            // ภาพเป็น 4x6 อยู่แล้ว (compose_frame dup มาแล้ว) -> ข้าม ไม่ dup ซ้ำ
+            log::info!(
+                "[Printer] skip dup (ratio={:.3}, already 4x6-like): img {}x{} — already duplicated upstream",
+                ratio, w, h
+            );
         }
-        _ => img,
-    };
+    }
 
     let original_width = img.width();
     let original_height = img.height();
