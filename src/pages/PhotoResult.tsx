@@ -56,6 +56,17 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const frameWidth = (_imgW > 0 ? _imgW : selectedFrame?.grid?.width) || 1200;
   const frameHeight = (_imgH > 0 ? _imgH : selectedFrame?.grid?.height) || 1800;
 
+  // composedImage ตอนนี้เป็น 4x6 duplicate มาจาก compose_frame แล้ว (สำหรับกรอบ 2x6/6x2)
+  // ใช้ค่านี้แค่คำนวณ aspectRatio ของ "กล่อง preview" ให้ตรงกับภาพจริงที่จะโชว์
+  // (กันภาพถูกบีบแคบผิดสัดส่วนตอน object-fit: contain) — ไม่เกี่ยวกับ frameType ที่ส่งให้
+  // print_photo ด้านล่าง ซึ่งยังต้องคำนวณจาก frameWidth/frameHeight เดิมเท่านั้น
+  const composedAspectRatio = (() => {
+    const ratio = frameWidth / frameHeight;
+    if (ratio < 0.5) return (frameWidth * 2) / frameHeight; // 2x6 -> 4x6 (คอลัมน์คู่)
+    if (ratio > 2) return frameWidth / (frameHeight * 2); // 6x2 -> 4x6 (แถวคู่)
+    return ratio;
+  })();
+
   const [composedImage, setComposedImage] = useState<string>("");
   const [finalVideoPath, setFinalVideoPath] = useState<string>("");
   const [mediaReady, setMediaReady] = useState<boolean>(false);
@@ -71,13 +82,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const hasCreatedPresign = useRef(false);
   const hasUploadedFiles = useRef(false);
   const hasLoggedMissingVideoRef = useRef(false);
-  /** เก็บ txId ที่ใช้ตั้งชื่อไฟล์ local เพื่อให้ uploadFiles ใช้ removePendingUpload ได้ */
   const localTxIdRef = useRef<string>("");
-  /**
-   * เตรียม PendingUploadRecord ไว้ล่วงหน้าใน processMedia แต่ยัง "ไม่" เขียนลง
-   * localStorage — จะ commit ผ่าน addPendingUpload เฉพาะเมื่อ upload ล้มเหลวจริง
-   * เท่านั้น เพื่อกันการอัพซ้ำ (retry จะไม่ทำงานกับ session ที่อัพสำเร็จไปแล้ว)
-   */
   const pendingRecordRef = useRef<PendingUploadRecord | null>(null);
 
   const buildVideoPathsBySlot = useCallback((): string[] => {
@@ -95,7 +100,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       .map((cap, idx) => ({ idx, videoPath: cap.videoPath || "" }))
       .filter((item) => !selectedSet.has(item.idx) && !!item.videoPath);
 
-    // Shuffle once per session so fallback is random and non-repeating.
     for (let i = unselectedCandidates.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [unselectedCandidates[i], unselectedCandidates[j]] = [
@@ -252,22 +256,16 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     createPresignSession();
   }, [state?.transactionId, state?.referenceId]); 
 
-  // 🚨 1. ทำการสร้างรูป, สร้างวิดีโอ และเซฟลงเครื่องแยกต่างหาก (เป็นอิสระจากการอัปโหลด)
   useEffect(() => {
     if (hasStarted.current) return;
     hasStarted.current = true;
 
     const processMedia = async () => {
       const txId = state.transactionId || state.referenceId || new Date().getTime();
-      // เก็บ txId ไว้ใน ref เพื่อให้ uploadFiles สามารถเรียก removePendingUpload ได้
       localTxIdRef.current = String(txId);
 
-      // =====================================
-      // 1. จัดการรูปภาพ (รวมกรอบ + เซฟ + ปริ้นท์)
-      // =====================================
       const composedImg = await composeFrame();
       if (composedImg) {
-        // เซฟรูปที่รวมกรอบแล้ว
         try {
           await invoke("save_to_local_drive", {
             imageDataBase64: composedImg,
@@ -278,7 +276,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
           logError("save_local_photo_failed", `save_to_local_drive frame failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
         }
 
-        // เซฟรูปเดี่ยวทุกรูป
         for (let i = 0; i < frameCaptures.length; i++) {
           if (frameCaptures[i].photo) {
             try {
@@ -294,13 +291,9 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }
         appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
 
-        // สั่งปริ้นท์ทันทีที่รูปเสร็จ (ไม่ต้องรอวิดีโอ)
         printFrame(composedImg, quantity);
       }
 
-      // =====================================
-      // 2. จัดการวิดีโอ (รวมเฟรม + เซฟ)
-      // =====================================
       let composedVid = "";
       const resolvedVideoBySlot = buildVideoPathsBySlot();
       const slotVideoPairs = slots
@@ -330,13 +323,11 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             frameHeight: frameHeight,
             outputFilename: "framed-video.mp4",
             lutPath: lutPath,
-            // flip เฉพาะ webcam — Canon ไม่ flip เสมอ (ตรงกับ takePhoto/รูปนิ่ง)
             hflipVideo:
               localStorage.getItem("cameraType") !== "canon" &&
               localStorage.getItem("mirrorMode") === "false",
           });
 
-          // เซฟวิดีโอลงเครื่อง
           try {
             await invoke("copy_video_to_local_drive", {
               sourcePath: composedVid,
@@ -359,18 +350,12 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }
       }
 
-      // =====================================
-      // 3. เตรียม Pending Upload Record ไว้ใน ref (ยังไม่ commit ลง localStorage)
-      //    จะ commit ผ่าน addPendingUpload เฉพาะเมื่อ upload ล้มเหลวจริงใน uploadFiles
-      //    เท่านั้น — กันบัค retry อัพซ้ำในกรณีที่อัพสำเร็จไปแล้ว
-      // =====================================
       if (composedImg) {
         try {
           const LOCAL_SAVE_DIR = "C:\\boniobooth\\Saved_Photos";
           const txIdStr = String(txId);
           const pendingFiles: import("../utils/pendingUploadStore").PendingUploadFile[] = [];
 
-          // Frame photo
           pendingFiles.push({
             type: "frame",
             localPath: `${LOCAL_SAVE_DIR}\\BonioBooth_${txIdStr}_Frame.jpg`,
@@ -378,7 +363,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             contentType: "image/jpeg",
           });
 
-          // Individual photos
           for (let i = 0; i < frameCaptures.length; i++) {
             if (frameCaptures[i].photo) {
               pendingFiles.push({
@@ -390,7 +374,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             }
           }
 
-          // Video (ถ้ามี)
           if (composedVid) {
             pendingFiles.push({
               type: "video",
@@ -421,7 +404,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }
       }
 
-      // ตั้งค่าให้รู้ว่าการประมวลผลไฟล์ทั้งหมดพร้อมสำหรับการอัปโหลดแล้ว
       setFinalVideoPath(composedVid);
       setMediaReady(true);
     };
@@ -441,17 +423,14 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     state.transactionId,
   ]);
 
-  // 🚨 2. อัปโหลดเมื่อไฟล์พร้อมและได้รับ Session ID แล้วเท่านั้น
   const uploadFiles = useCallback(async () => {
     if (hasUploadedFiles.current) return;
     if (!mediaReady || !sessionId || uploadUrls.length === 0) return;
     
     hasUploadedFiles.current = true;
 
-    // ทำเครื่องหมาย in-flight เพื่อให้ retry cycle ข้าม txId นี้ระหว่างอัพโหลดสด
     markUploadActive(localTxIdRef.current);
 
-    /** commit pending record เพื่อให้ retry manager ลองใหม่ (เรียกเฉพาะตอนล้มเหลว) */
     const queueForRetry = (reason: string) => {
       if (!pendingRecordRef.current) return;
       try {
@@ -480,7 +459,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       const uploadedFiles: { key: string; type: string; order: number }[] = [];
       let photoIdx = 0;
 
-      // อัปโหลดรูปที่รวมกรอบแล้ว
       if (photoIdx < photoUrls.length && composedImage) {
         setStatusText("กำลังอัปโหลดรูปเฟรม...");
         const composedPath: string = await invoke("save_temp_image", {
@@ -511,7 +489,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         photoIdx++;
       }
 
-      // อัปโหลดรูปเดี่ยว
       for (let i = 0; i < frameCaptures.length && photoIdx < photoUrls.length; i++) {
         if (!frameCaptures[i].photo) continue;
         setStatusText(`กำลังอัปโหลดรูป ${i + 1}/${frameCaptures.length}...`);
@@ -543,7 +520,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         photoIdx++;
       }
 
-      // อัปโหลดวิดีโอ
       if (videoUrls.length > 0 && finalVideoPath) {
         setStatusText("กำลังอัปโหลดวิดีโอ...");
         try {
@@ -569,7 +545,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         }
       }
 
-      // คอนเฟิร์มการอัปโหลด
       if (uploadedFiles.length > 0) {
         try {
           await invoke("confirm_upload", {
@@ -577,7 +552,6 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             uploadedFiles,
           });
           appLogger.info(CTX, "confirm_upload OK — files:", uploadedFiles.length);
-          // สำเร็จสมบูรณ์ → เคลียร์ pending record ที่อาจค้างจากรอบก่อน (กัน retry อัพซ้ำ)
           pendingRecordRef.current = null;
           if (localTxIdRef.current) {
             removePendingUpload(localTxIdRef.current);
@@ -591,13 +565,11 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
             err instanceof Error ? err.stack : undefined,
             "error"
           );
-          // confirm ล้มเหลว → คิวไว้ให้ retry (ยอมรับความเสี่ยงซ้ำที่ต่ำ เพื่อให้รูปส่งถึงเสมอ)
           queueForRetry("confirm_upload failed");
         }
       } else {
         appLogger.warn(CTX, "No files uploaded — skipping confirm_upload");
         logError("upload_no_files", "uploadFiles completed but no files were uploaded successfully", undefined, "warning");
-        // ไม่มีไฟล์ขึ้นเลย → คิวไว้ให้ retry
         queueForRetry("no files uploaded");
       }
 
@@ -612,17 +584,14 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         err instanceof Error ? err.stack : undefined,
         "error"
       );
-      // error ที่ไม่คาดคิด → คิวไว้ให้ retry
       queueForRetry("uploadFiles threw");
       setUploadStatus("error");
       hasUploadedFiles.current = false;
     } finally {
-      // ปลด in-flight เสมอ ไม่ว่าจะสำเร็จหรือล้มเหลว
       markUploadInactive(localTxIdRef.current);
     }
   }, [sessionId, uploadUrls, composedImage, finalVideoPath, frameCaptures, mediaReady]);
 
-  // ดักจับและเรียกใช้ Upload เมื่อทุกอย่างพร้อม
   useEffect(() => {
     if (mediaReady && sessionId && uploadUrls.length > 0 && !hasUploadedFiles.current) {
       uploadFiles();
@@ -813,7 +782,7 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              aspectRatio: `${frameWidth} / ${frameHeight}`,
+              aspectRatio: `${composedAspectRatio}`,
             }}
           >
             <img
