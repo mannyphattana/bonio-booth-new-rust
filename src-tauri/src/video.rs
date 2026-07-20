@@ -449,16 +449,23 @@ pub async fn compose_frame_video(
         
     let (orig_w, orig_h) = frame_img.dimensions();
 
+    // เฟรม 2x6/6x2 จะถูก duplicate เป็น 4x6 ตอนท้าย (hstack/vstack ด้านล่าง)
+    // ซึ่งคูณด้านใดด้านหนึ่ง 2 เท่า จึงต้องคิดขนาด base เป็นครึ่งหนึ่งตั้งแต่ต้น
+    // ไม่งั้น 2x6 จะได้ output 2880x4320 (12.4 Mpx) ซึ่งเกินเพดาน H.264 hardware
+    // decoder ของ iOS (สูงสุดราว 4096x2304 / Level 5.2) → Safari เล่นไม่ได้เลย
+    let frame_ratio = frame_width as f64 / frame_height as f64;
+    let will_duplicate = frame_ratio < 0.5 || frame_ratio > 2.0;
+
     // Output resolution is raised (1080→1440 / 720→960) so the frame overlay's
     // text/logo stays sharp, matching the photo composite more closely. The video
     // footage is upscaled along with it, which is acceptable here.
     let is_portrait = orig_h > orig_w;
     let (mut out_w, mut out_h) = if is_portrait {
-        let tw = 1440u32;
+        let tw = if will_duplicate { 720u32 } else { 1440u32 };
         let th = (tw as f64 * (orig_h as f64 / orig_w as f64)).round() as u32;
         (tw, th)
     } else {
-        let th = 960u32;
+        let th = if will_duplicate { 480u32 } else { 960u32 };
         let tw = (th as f64 * (orig_w as f64 / orig_h as f64)).round() as u32;
         (tw, th)
     };
@@ -475,8 +482,11 @@ pub async fn compose_frame_video(
         _ => None,
     };
 
-    println!("[compose_frame_video] frame: {}x{}, output: {}x{}, grid: {}x{}, scale: {:.3}/{:.3}, lut: {:?}",
-        orig_w, orig_h, out_w, out_h, frame_width, frame_height, scale_x, scale_y, lut_filename);
+    println!("[compose_frame_video] frame: {}x{}, output: {}x{} (duplicate: {} → final {}x{}), grid: {}x{}, scale: {:.3}/{:.3}, lut: {:?}",
+        orig_w, orig_h, out_w, out_h, will_duplicate,
+        if will_duplicate && frame_ratio < 0.5 { out_w * 2 } else { out_w },
+        if will_duplicate && frame_ratio > 2.0 { out_h * 2 } else { out_h },
+        frame_width, frame_height, scale_x, scale_y, lut_filename);
 
     let num_videos = video_paths.len().min(slots.len());
     let output_path = temp_dir.join(&output_filename);
@@ -576,7 +586,8 @@ pub async fn compose_frame_video(
     // hstack (2x6, สูงแคบ) หรือ vstack (6x2, กว้าง) เพื่อให้ output วิดีโอ/GIF เป็น
     // layout 4x6 duplicate ตรงกับภาพนิ่งจาก compose_frame. เกณฑ์ตัดสินเดียวกันทุกจุด:
     // ratio < 0.5 -> 2x6, ratio > 2.0 -> 6x2, อื่นๆ ไม่แตะ.
-    let frame_ratio = frame_width as f64 / frame_height as f64;
+    // หมายเหตุ: `frame_ratio`/`will_duplicate` คำนวณไว้ตั้งแต่ต้นฟังก์ชันแล้ว เพราะขนาด
+    // base (out_w/out_h) ต้องถูกหารครึ่งล่วงหน้าให้ผลลัพธ์หลัง stack ไม่เกินเพดาน iOS
     if frame_ratio < 0.5 {
         // 2x6 (สูงแคบ) -> hstack ซ้าย-ขวา เป็น 4x6
         filter_parts.push(format!("[{}]split=2[dupL][dupR]", prev));
@@ -603,10 +614,16 @@ pub async fn compose_frame_video(
         "-map".to_string(), format!("[{}]", final_label),
         "-c:v".to_string(), "libx264".to_string(),
         "-pix_fmt".to_string(), "yuv420p".to_string(),
-        
+
+        // บังคับ profile/level ให้อยู่ในกรอบที่ iOS hardware decoder รองรับแน่นอน
+        // ถ้าอนาคตมีเฟรมที่ทำให้ resolution บานเกิน ffmpeg จะ error ตั้งแต่ encode
+        // แทนที่จะไปเงียบตายบน Safari ของลูกค้า
+        "-profile:v".to_string(), "high".to_string(),
+        "-level".to_string(), "5.1".to_string(),
+
         "-preset".to_string(), "medium".to_string(),
         "-crf".to_string(), "18".to_string(),
-        
+
         "-color_range".to_string(), "1".to_string(), 
         "-colorspace".to_string(), "1".to_string(), 
         "-color_primaries".to_string(), "1".to_string(), 
