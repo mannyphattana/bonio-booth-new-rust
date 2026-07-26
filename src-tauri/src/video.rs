@@ -405,6 +405,57 @@ pub async fn process_frame_video(
     Ok(output_path.to_string_lossy().to_string())
 }
 
+/// เฟรม 2x6/6x2 จะถูก duplicate เป็น 4x6 (hstack/vstack) ตอนท้ายการ compose
+/// คืนค่าตัวคูณของด้านกว้าง/สูง เกณฑ์เดียวกับ compose_frame (image_processing.rs)
+/// และ printer.rs: ratio < 0.5 -> 2x6, ratio > 2.0 -> 6x2, อื่นๆ ไม่แตะ
+fn duplication_factors(frame_ratio: f64) -> (u32, u32) {
+    if frame_ratio < 0.5 {
+        (2, 1) // 2x6 (สูงแคบ) -> hstack ซ้าย-ขวา
+    } else if frame_ratio > 2.0 {
+        (1, 2) // 6x2 (กว้าง) -> vstack บน-ล่าง
+    } else {
+        (1, 1)
+    }
+}
+
+/// คำนวณขนาด base ที่ใช้ compose (ก่อน duplicate) จากขนาดจริงของไฟล์เฟรม
+///
+/// เดิมใช้ค่าคงที่ตายตัว (1080 แล้วขยับเป็น 1440) ซึ่งมีปัญหา 2 ข้อ:
+///   1. เฟรม 2x6 ที่ถูก hstack เป็น 4x6 ได้ output 2880x4320 ทะลุเพดาน H.264
+///      hardware decoder ของ iOS → Safari บน iPhone เล่นไม่ได้เลย
+///   2. ความคมไม่ผูกกับความละเอียดจริงของไฟล์เฟรม ตัวอักษร/โลโก้เลยแตกไม่เท่ากัน
+///      ในแต่ละ layout และสู้ภาพนิ่งไม่ได้
+///
+/// ตอนนี้เล็งที่ด้านยาว 3600px ของขนาด "หลัง duplicate" ให้เท่ากับ
+/// MIN_OUTPUT_DIMENSION ของภาพนิ่งใน compose_frame แล้วบีบลงถ้าชนเพดาน iOS
+/// (H.264 Level 5.1 = 36864 macroblocks, ไม่มีด้านไหนเกิน 4096px)
+fn compose_output_size(orig_w: u32, orig_h: u32, dup_w: u32, dup_h: u32) -> (u32, u32) {
+    const TARGET_LONG_EDGE: f64 = 3600.0;
+    const MAX_DIMENSION: f64 = 4096.0;
+    const MAX_MACROBLOCKS: f64 = 36864.0;
+
+    // ขนาดสุดท้ายที่ผู้ใช้จะได้ (หลัง duplicate) คือตัวที่ต้องอยู่ในเพดาน
+    let final_w = (orig_w * dup_w) as f64;
+    let final_h = (orig_h * dup_h) as f64;
+
+    let mut scale = (TARGET_LONG_EDGE / final_w.max(final_h))
+        .min(MAX_DIMENSION / final_w)
+        .min(MAX_DIMENSION / final_h);
+
+    let macroblocks = (final_w * scale / 16.0).ceil() * (final_h * scale / 16.0).ceil();
+    if macroblocks > MAX_MACROBLOCKS {
+        // เผื่อ margin 1% กันหลุดขอบหลังปัดขึ้นเป็นเลขคู่
+        scale *= (MAX_MACROBLOCKS / macroblocks).sqrt() * 0.99;
+    }
+
+    // ต้องเป็นเลขคู่เพราะ yuv420p (คูณ dup แล้วยังคงเป็นเลขคู่)
+    let mut out_w = (orig_w as f64 * scale).round() as u32;
+    let mut out_h = (orig_h as f64 * scale).round() as u32;
+    if out_w % 2 != 0 { out_w += 1; }
+    if out_h % 2 != 0 { out_h += 1; }
+    (out_w, out_h)
+}
+
 /// Compose multiple videos into a single framed video using a SINGLE FFmpeg call.
 #[tauri::command]
 pub async fn compose_frame_video(
@@ -449,28 +500,10 @@ pub async fn compose_frame_video(
         
     let (orig_w, orig_h) = frame_img.dimensions();
 
-    // เฟรม 2x6/6x2 จะถูก duplicate เป็น 4x6 ตอนท้าย (hstack/vstack ด้านล่าง)
-    // ซึ่งคูณด้านใดด้านหนึ่ง 2 เท่า จึงต้องคิดขนาด base เป็นครึ่งหนึ่งตั้งแต่ต้น
-    // ไม่งั้น 2x6 จะได้ output 2880x4320 (12.4 Mpx) ซึ่งเกินเพดาน H.264 hardware
-    // decoder ของ iOS (สูงสุดราว 4096x2304 / Level 5.2) → Safari เล่นไม่ได้เลย
     let frame_ratio = frame_width as f64 / frame_height as f64;
-    let will_duplicate = frame_ratio < 0.5 || frame_ratio > 2.0;
-
-    // Output resolution is raised (1080→1440 / 720→960) so the frame overlay's
-    // text/logo stays sharp, matching the photo composite more closely. The video
-    // footage is upscaled along with it, which is acceptable here.
-    let is_portrait = orig_h > orig_w;
-    let (mut out_w, mut out_h) = if is_portrait {
-        let tw = if will_duplicate { 720u32 } else { 1440u32 };
-        let th = (tw as f64 * (orig_h as f64 / orig_w as f64)).round() as u32;
-        (tw, th)
-    } else {
-        let th = if will_duplicate { 480u32 } else { 960u32 };
-        let tw = (th as f64 * (orig_w as f64 / orig_h as f64)).round() as u32;
-        (tw, th)
-    };
-    if out_w % 2 != 0 { out_w += 1; }
-    if out_h % 2 != 0 { out_h += 1; }
+    let (dup_w, dup_h) = duplication_factors(frame_ratio);
+    let will_duplicate = dup_w > 1 || dup_h > 1;
+    let (out_w, out_h) = compose_output_size(orig_w, orig_h, dup_w, dup_h);
 
     let scale_x = out_w as f64 / frame_width as f64;
     let scale_y = out_h as f64 / frame_height as f64;
@@ -482,10 +515,11 @@ pub async fn compose_frame_video(
         _ => None,
     };
 
-    println!("[compose_frame_video] frame: {}x{}, output: {}x{} (duplicate: {} → final {}x{}), grid: {}x{}, scale: {:.3}/{:.3}, lut: {:?}",
-        orig_w, orig_h, out_w, out_h, will_duplicate,
-        if will_duplicate && frame_ratio < 0.5 { out_w * 2 } else { out_w },
-        if will_duplicate && frame_ratio > 2.0 { out_h * 2 } else { out_h },
+    let delivered_w = out_w * dup_w;
+    let delivered_h = out_h * dup_h;
+    println!("[compose_frame_video] frame: {}x{}, base: {}x{} (duplicate: {} → final {}x{}, {} MB-units), grid: {}x{}, scale: {:.3}/{:.3}, lut: {:?}",
+        orig_w, orig_h, out_w, out_h, will_duplicate, delivered_w, delivered_h,
+        (delivered_w as f64 / 16.0).ceil() * (delivered_h as f64 / 16.0).ceil(),
         frame_width, frame_height, scale_x, scale_y, lut_filename);
 
     let num_videos = video_paths.len().min(slots.len());
@@ -624,6 +658,12 @@ pub async fn compose_frame_video(
         "-preset".to_string(), "medium".to_string(),
         "-crf".to_string(), "18".to_string(),
 
+        // เพดาน bitrate กันไฟล์บวมจนลูกค้าโหลดผ่านมือถือไม่ไหว
+        // ที่ 16 Mbps คลิป 9 วินาทีจะไม่เกินราว 18 MB (ปกติ crf 18 จะต่ำกว่านี้อยู่แล้ว
+        // เพราะกรอบเป็นภาพนิ่ง — เพดานนี้จะทำงานเฉพาะฉากที่มีการเคลื่อนไหวหนักจริงๆ)
+        "-maxrate".to_string(), "16M".to_string(),
+        "-bufsize".to_string(), "32M".to_string(),
+
         "-color_range".to_string(), "1".to_string(), 
         "-colorspace".to_string(), "1".to_string(), 
         "-color_primaries".to_string(), "1".to_string(), 
@@ -727,3 +767,82 @@ pub async fn check_file_exists(path: String) -> Result<bool, String> {
     Ok(std::path::Path::new(&path).exists())
 }
 // =====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ขนาดที่ลูกค้าได้จริง = ขนาด base คูณตัวคูณ duplicate
+    fn delivered(orig_w: u32, orig_h: u32, ratio: f64) -> (u32, u32) {
+        let (dw, dh) = duplication_factors(ratio);
+        let (w, h) = compose_output_size(orig_w, orig_h, dw, dh);
+        (w * dw, h * dh)
+    }
+
+    /// เพดานที่ iOS hardware decoder รับได้: H.264 Level 5.1
+    fn assert_ios_safe(w: u32, h: u32) {
+        assert!(w <= 4096 && h <= 4096, "เกิน 4096px: {}x{}", w, h);
+        let mb = w.div_ceil(16) * h.div_ceil(16);
+        assert!(mb <= 36864, "เกิน Level 5.1: {}x{} = {} macroblocks", w, h, mb);
+        assert!(w % 2 == 0 && h % 2 == 0, "ไม่ใช่เลขคู่ (yuv420p): {}x{}", w, h);
+    }
+
+    #[test]
+    fn frame_2x6_duplicated_fits_ios_decoder() {
+        // เคสที่พังจริง: เฟรม 2x6 → hstack เป็น 4x6
+        let (w, h) = delivered(1200, 3600, 2.0 / 6.0);
+        assert_ios_safe(w, h);
+        assert_eq!((w, h), (2400, 3600));
+    }
+
+    #[test]
+    fn frame_6x2_duplicated_fits_ios_decoder() {
+        let (w, h) = delivered(3600, 1200, 6.0 / 2.0);
+        assert_ios_safe(w, h);
+        assert_eq!((w, h), (3600, 2400));
+    }
+
+    #[test]
+    fn frame_4x6_is_not_duplicated() {
+        let (dw, dh) = duplication_factors(4.0 / 6.0);
+        assert_eq!((dw, dh), (1, 1));
+        let (w, h) = delivered(1800, 2700, 4.0 / 6.0);
+        assert_ios_safe(w, h);
+        assert_eq!((w, h), (2400, 3600));
+    }
+
+    #[test]
+    fn small_frame_asset_is_upscaled_to_target() {
+        // ไฟล์เฟรมเล็ก ต้องถูกดันขึ้นไปที่เป้าหมาย ไม่ปล่อยให้ตัวอักษรแตก
+        let (w, h) = delivered(600, 1800, 2.0 / 6.0);
+        assert_eq!((w, h), (2400, 3600));
+    }
+
+    #[test]
+    fn oversized_frame_asset_is_capped() {
+        // ไฟล์เฟรมความละเอียดสูงมาก ต้องถูกบีบลงให้อยู่ในเพดาน
+        let (w, h) = delivered(6000, 18000, 2.0 / 6.0);
+        assert_ios_safe(w, h);
+        assert_eq!((w, h), (2400, 3600));
+    }
+
+    #[test]
+    fn square_frame_hits_macroblock_cap_not_dimension_cap() {
+        // จัตุรัสคือทรงที่กิน macroblock เยอะสุดต่อด้านยาว — เคสที่ cap ต้องทำงาน
+        let (w, h) = delivered(3600, 3600, 1.0);
+        assert_ios_safe(w, h);
+        assert!(w < 3600 && h < 3600, "ควรถูกบีบลง แต่ได้ {}x{}", w, h);
+    }
+
+    #[test]
+    fn every_layout_stays_within_ios_limits() {
+        // กวาดอัตราส่วนทั้งช่วง กันเฟรมทรงแปลกๆ ในอนาคตหลุดเพดานเงียบๆ
+        for w in [400u32, 900, 1200, 1800, 2400, 3600, 6000] {
+            for h in [400u32, 900, 1200, 1800, 2400, 3600, 6000] {
+                let ratio = w as f64 / h as f64;
+                let (dw, dh) = delivered(w, h, ratio);
+                assert_ios_safe(dw, dh);
+            }
+        }
+    }
+}
