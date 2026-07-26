@@ -231,6 +231,8 @@ pub async fn create_payment(
     amount: f64,
     number_photo: Option<i32>,
     coupon_code_id: Option<String>,
+    is_reprint: Option<bool>,
+    reprint_from_transaction_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
@@ -243,6 +245,12 @@ pub async fn create_payment(
     }
     if let Some(ref cid) = coupon_code_id {
         payload["couponCodeId"] = serde_json::json!(cid);
+    }
+    if is_reprint == Some(true) {
+        payload["isReprint"] = serde_json::json!(true);
+    }
+    if let Some(ref rid) = reprint_from_transaction_id {
+        payload["reprintFromTransactionId"] = serde_json::json!(rid);
     }
 
     let res = client
