@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
+import PrintAgainModal from "../components/PrintAgainModal";
 import { COUNTDOWN } from "../config/appConfig";
 import { setPrinting } from "../utils/printingState";
 import { useContextMenu } from "../hooks/useContextMenu";
@@ -23,7 +24,7 @@ interface Props {
   onBeforeClose?: () => void;
 }
 
-export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Props) {
+export default function PhotoResult({ theme, machineData, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as any) || {};
@@ -62,11 +63,19 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
   const [error, setError] = useState("");
   const [, setStatusText] = useState("กำลังประมวลผล...");
 
+  // ปุ่ม "Print again" — modal เลือกจำนวน/จ่ายเงินแล้วพิมพ์รูปเดิมซ้ำ
+  const [showReprintModal, setShowReprintModal] = useState(false);
+  // เพิ่มค่าเพื่อ remount Countdown ให้เริ่มนับใหม่สดๆ หลังปิด modal
+  const [countdownKey, setCountdownKey] = useState(0);
+  const originalTransactionId: string =
+    state.transactionId || state.referenceId || state.transaction_id || "";
+
   const hasStarted = useRef(false);
   const hasCreatedPresign = useRef(false);
   const hasUploadedFiles = useRef(false);
   const hasLoggedMissingVideoRef = useRef(false);
-  useIdleTimeout();
+  // ระหว่างเปิด modal พิมพ์ซ้ำ (รอลูกค้าสแกนจ่าย) ต้องไม่เด้งกลับหน้าหลักเอง
+  useIdleTimeout("/", !showReprintModal);
 
   const buildVideoPathsBySlot = useCallback((): string[] => {
     const slotVideoPaths = frameCaptures.map((cap) => cap.videoPath || "");
@@ -548,6 +557,32 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
     navigate("/");
   };
 
+  // เปิด modal พิมพ์ซ้ำ — countdown หน้านี้จะถูก pause (ยึดเวลาตาม modal แทน)
+  const handleOpenReprint = () => {
+    if (!composedImage) return;
+    setShowReprintModal(true);
+  };
+
+  // ปิด modal โดยไม่มีการชำระเงิน (ยกเลิก/ครบ 5 นาที) → เริ่มนับ countdown ใหม่ตาม flow เดิม
+  const handleReprintClose = useCallback(() => {
+    setShowReprintModal(false);
+    setCountdownKey((k) => k + 1);
+  }, []);
+
+  // ชำระเงินสำเร็จ → พิมพ์รูปเดิมซ้ำตามจำนวน (ไม่อัปโหลดใหม่) แล้วเริ่มนับ countdown ใหม่
+  const handleReprintPaid = useCallback(
+    async ({ quantity: reprintQty }: { transactionId: string; quantity: number }) => {
+      setShowReprintModal(false);
+      setCountdownKey((k) => k + 1);
+      if (composedImage) {
+        await printFrame(composedImage, reprintQty);
+      }
+    },
+    // printFrame เป็น useCallback ที่ผูกกับ frameWidth/frameHeight เท่านั้น
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [composedImage],
+  );
+
   const isUploading = uploadStatus === "processing" || uploadStatus === "uploading";
 
   return (
@@ -562,9 +597,11 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
       onTouchStart={handleTouchStart}
     >
       <Countdown
+        key={countdownKey}
         seconds={COUNTDOWN.PHOTO_RESULT.DURATION}
         onComplete={handleHome}
         visible={COUNTDOWN.PHOTO_RESULT.VISIBLE}
+        paused={showReprintModal}
       />
 
       <h1
@@ -723,21 +760,61 @@ export default function PhotoResult({ theme, onFormatReset, onBeforeClose }: Pro
         </p>
       )}
 
-      <button
-        className="primary-button"
-        onClick={handleHome}
-        disabled={isUploading}
+      <div
         style={{
-          background: isUploading ? "#888888" : theme.primaryColor,
-          color: theme.textButtonColor,
+          display: "flex",
+          gap: 12,
           marginBottom: 20,
-          cursor: isUploading ? "not-allowed" : "pointer",
-          opacity: isUploading ? 0.7 : 1,
-          transition: "all 0.3s ease" 
+          width: "100%",
+          padding: "0 24px",
+          justifyContent: "center",
         }}
       >
-        {isUploading ? "⏳ กำลังอัปโหลดภาพและวิดีโอ..." : "กลับหน้าหลัก / HOME"}
-      </button>
+        <button
+          className="primary-button"
+          onClick={handleOpenReprint}
+          disabled={!composedImage || printStatus === "printing"}
+          style={{
+            flex: 1,
+            maxWidth: 260,
+            background: "#fff",
+            color: theme.primaryColor,
+            border: `2px solid ${theme.primaryColor}`,
+            cursor: !composedImage || printStatus === "printing" ? "not-allowed" : "pointer",
+            opacity: !composedImage || printStatus === "printing" ? 0.6 : 1,
+            transition: "all 0.3s ease",
+          }}
+        >
+          🖨️ พิมพ์อีกครั้ง / PRINT AGAIN
+        </button>
+
+        <button
+          className="primary-button"
+          onClick={handleHome}
+          disabled={isUploading}
+          style={{
+            flex: 1,
+            maxWidth: 260,
+            background: isUploading ? "#888888" : theme.primaryColor,
+            color: theme.textButtonColor,
+            cursor: isUploading ? "not-allowed" : "pointer",
+            opacity: isUploading ? 0.7 : 1,
+            transition: "all 0.3s ease",
+          }}
+        >
+          {isUploading ? "⏳ กำลังอัปโหลด..." : "กลับหน้าหลัก / HOME"}
+        </button>
+      </div>
+
+      {showReprintModal && (
+        <PrintAgainModal
+          theme={theme}
+          machineData={machineData}
+          originalTransactionId={originalTransactionId}
+          onClose={handleReprintClose}
+          onPaid={handleReprintPaid}
+        />
+      )}
       <ContextMenu
         open={showContextMenu}
         onClose={() => setShowContextMenu(false)}

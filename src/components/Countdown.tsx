@@ -7,6 +7,8 @@ interface CountdownProps {
   onComplete?: () => void;
   /** แสดง countdown หรือไม่ (default: true) */
   visible?: boolean;
+  /** หยุดนับชั่วคราว (เช่น ตอนเปิด modal print again) — ไม่ tick และไม่ยิง onComplete */
+  paused?: boolean;
   /** CSS class เพิ่มเติม */
   className?: string; // Kept for compatibility, though styles are inline
 }
@@ -15,6 +17,7 @@ export default function Countdown({
   seconds = 60,
   onComplete,
   visible = true,
+  paused = false,
 }: CountdownProps): React.JSX.Element | null {
   const [timeLeft, setTimeLeft] = useState<number>(seconds);
   const [isHovered, setIsHovered] = useState(false);
@@ -22,11 +25,17 @@ export default function Countdown({
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const onCompleteRef = useRef(onComplete);
   const hasCompletedRef = useRef(false);
+  const pausedRef = useRef(paused);
 
   // keep latest onComplete
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+
+  // keep latest paused (อ่านใน interval โดยไม่ต้อง re-create interval)
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   // reset when seconds change
   useEffect(() => {
@@ -37,6 +46,8 @@ export default function Countdown({
   // main countdown interval (run once)
   useEffect(() => {
     intervalRef.current = setInterval(() => {
+      // หยุดนับขณะ paused (modal เปิดอยู่) — คงเวลาปัจจุบันไว้
+      if (pausedRef.current) return;
       setTimeLeft((prev) => {
         if (prev <= 1) {
           // stop interval

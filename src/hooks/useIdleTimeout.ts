@@ -6,8 +6,11 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /**
  * Auto-navigate to home ("/") after 5 minutes of user inactivity.
  * Resets timer on mouse/touch/keyboard events.
+ *
+ * `enabled = false` ปิดการทำงานชั่วคราว (เช่น ตอนเปิด modal print again
+ * ที่รอลูกค้าสแกนจ่ายเงิน — ห้ามเด้งกลับหน้าหลักระหว่างนั้น)
  */
-export function useIdleTimeout(redirectTo = "/") {
+export function useIdleTimeout(redirectTo = "/", enabled = true) {
   const navigate = useNavigate();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -19,6 +22,14 @@ export function useIdleTimeout(redirectTo = "/") {
   }, [navigate, redirectTo]);
 
   useEffect(() => {
+    if (!enabled) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
     const events = ["mousedown", "mousemove", "keydown", "touchstart", "scroll"];
     events.forEach((e) => window.addEventListener(e, resetTimer));
     resetTimer(); // start timer immediately
@@ -27,5 +38,5 @@ export function useIdleTimeout(redirectTo = "/") {
       events.forEach((e) => window.removeEventListener(e, resetTimer));
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [resetTimer]);
+  }, [resetTimer, enabled]);
 }
