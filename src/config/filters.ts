@@ -10,6 +10,12 @@ export interface FilterConfig {
   name: string;
   lutFile: string; // filename in /filters directory (e.g., 'B&W.cube')
   type: "lut" | "none";
+  /**
+   * CSS filter ที่ใช้ "ประมาณ" หน้าตาของ LUT ตัวนี้บนภาพสด (live view)
+   * — รัน LUT จริงบนเฟรมสด 30fps ไม่ไหว จึงใช้ CSS แทนเฉพาะตอนพรีวิว
+   * รูปที่ถ่ายจริงยังผ่าน LUT ตัวเต็มเสมอ
+   */
+  previewCss?: string;
 }
 
 export const FILTERS: FilterConfig[] = [
@@ -49,6 +55,7 @@ export const FILTERS: FilterConfig[] = [
     name: "Black & White",
     lutFile: "B&W.cube",
     type: "lut",
+    previewCss: "grayscale(1)",
   },
   {
     id: "evolution",

@@ -7,6 +7,16 @@ import { useCanon } from "../hooks/useCanon";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
+import { FORCED_FILTER_ID } from "../config/appConfig";
+import { FILTERS } from "../config/filters";
+
+/**
+ * ตู้ที่ล็อกฟิลเตอร์ไว้ตัวเดียว (ไม่มีหน้าให้เลือก) — ต้องใส่ฟิลเตอร์ตั้งแต่หน้าถ่ายรูป
+ * ลูกค้าจะได้เห็นผลจริงระหว่างถ่าย ไม่ใช่ไปโผล่ตอนหน้าสุดท้าย
+ * null = ตู้ปกติ ไม่ยุ่งกับภาพระหว่างถ่าย
+ */
+const FORCED_FILTER =
+  FILTERS.find((f) => f.id === FORCED_FILTER_ID && f.type === "lut") || null;
 
 function CropOverlay({
   slotWidth,
@@ -123,6 +133,8 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // path ของ LUT ที่ถูกล็อกไว้สำหรับตู้นี้ (ว่าง = ยังหาไม่เจอ/ตู้ปกติ)
+  const forcedLutPathRef = useRef<string>("");
   const cameraContainerRef = useRef<HTMLDivElement>(null);
   const canonLiveViewRef = useRef<HTMLImageElement>(null);
   
@@ -193,6 +205,18 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
     return () => {
       stopCamera();
     };
+  }, []);
+
+  // หา path ของ LUT ที่ล็อกไว้ตั้งแต่เข้าหน้านี้ จะได้ไม่ต้องรอตอนถ่ายจริง
+  useEffect(() => {
+    if (!FORCED_FILTER) return;
+    invoke<string>("resolve_lut_path", { lutFile: FORCED_FILTER.lutFile })
+      .then((path) => {
+        forcedLutPathRef.current = path;
+      })
+      .catch((err) => {
+        console.warn(`[MainShooting] LUT not found for ${FORCED_FILTER?.id}:`, err);
+      });
   }, []);
 
   const drawCanonFrame = useCallback(() => {
@@ -656,6 +680,20 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
         // fallback
       }
 
+      // ตู้ที่ล็อกฟิลเตอร์ไว้: ยัด LUT ตั้งแต่ตอนนี้เลย รูปที่โชว์ในแถบด้านล่าง
+      // และทุกหน้าถัดไปจะเป็นภาพที่ผ่านฟิลเตอร์แล้วจริงๆ
+      // ถ้าพังก็ใช้ต้นฉบับไปก่อน — ห้ามให้ลูกค้าไม่ได้รูปเพราะฟิลเตอร์
+      if (FORCED_FILTER && forcedLutPathRef.current && photoData) {
+        try {
+          photoData = await invoke<string>("apply_lut_filter", {
+            imageDataBase64: photoData,
+            lutFilePath: forcedLutPathRef.current,
+          });
+        } catch (err) {
+          console.error(`[MainShooting] apply_lut_filter failed on capture ${i + 1}:`, err);
+        }
+      }
+
       const recordingResult = await recordingPromise;
       let videoUrl = recordingResult.url;
       let videoPath = "";
@@ -929,8 +967,10 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    transform: "scaleX(-1)", 
+                    transform: "scaleX(-1)",
                     borderRadius: 20,
+                    // ให้ภาพสดหน้าตาใกล้เคียงฟิลเตอร์ที่ล็อกไว้ (รูปจริงผ่าน LUT เต็มอยู่แล้ว)
+                    filter: FORCED_FILTER?.previewCss,
                   }}
                 />
               )}
@@ -944,9 +984,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    transform: "scaleX(-1)", 
+                    transform: "scaleX(-1)",
                     borderRadius: 20,
-                    filter: "blur(1px)",
+                    filter: FORCED_FILTER?.previewCss
+                      ? `blur(1px) ${FORCED_FILTER.previewCss}`
+                      : "blur(1px)",
                   }}
                 />
               )}

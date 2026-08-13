@@ -137,75 +137,37 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     FILTERS.find((f) => f.id === FORCED_FILTER_ID && f.type === "lut") || null;
 
   /**
-   * ยิง LUT ที่ล็อกไว้ใส่ทุกรูปแล้วไปหน้า photo-result เลย (ข้ามหน้าเลือกฟิลเตอร์)
-   * รูปไหน apply ไม่ผ่านก็ใช้ต้นฉบับไปก่อน — ห้ามให้ลูกค้าไม่ได้รูปเพราะฟิลเตอร์พัง
+   * ข้ามหน้าเลือกฟิลเตอร์ไปหน้า photo-result เลย
+   *
+   * รูปผ่าน LUT มาตั้งแต่ตอนถ่ายแล้ว (ดู MainShooting) ตรงนี้จึงไม่ยิง LUT ซ้ำ
+   * แต่ยังส่ง selectedFilter ต่อไปให้ PhotoResult เอาไปใส่ LUT เดียวกันกับวิดีโอ
    */
-  const applyForcedFilterAndGo = async (
+  const skipFilterPageAndGo = async (
     frameCaptures: Capture[],
     selectedCaptureIndexes: number[],
   ) => {
     setApplying(true);
+    setApplyProgress("Processing...");
+    // เตรียม ffmpeg ไว้ล่วงหน้า — เดิมหน้า apply-filter ทำหน้าที่นี้ให้ก่อนรวมวิดีโอ
     try {
-      // เตรียม ffmpeg ไว้ล่วงหน้าเหมือน flow เดิมของหน้า apply-filter
+      await invoke<boolean>("ensure_ffmpeg");
+    } catch {
       try {
-        await invoke<boolean>("ensure_ffmpeg");
+        await invoke<boolean>("check_ffmpeg_available");
       } catch {
-        try {
-          await invoke<boolean>("check_ffmpeg_available");
-        } catch {
-          // ไม่มี ffmpeg ก็ไปต่อ — วิดีโอจะจัดการ error ของตัวเองทีหลัง
-        }
+        // ไม่มี ffmpeg ก็ไปต่อ — วิดีโอจะจัดการ error ของตัวเองทีหลัง
       }
-
-      let lutPath = "";
-      try {
-        lutPath = await invoke<string>("resolve_lut_path", {
-          lutFile: forcedFilter!.lutFile,
-        });
-      } catch (err) {
-        console.warn(`[SlotSelection] LUT not found for ${forcedFilter!.id}:`, err);
-      }
-
-      let filteredCaptures = frameCaptures;
-      if (lutPath) {
-        filteredCaptures = await Promise.all(
-          frameCaptures.map(async (cap, idx) => {
-            setApplyProgress(`Processing ${idx + 1}/${frameCaptures.length}...`);
-            try {
-              const filteredPhoto: string = await invoke("apply_lut_filter", {
-                imageDataBase64: cap.photo,
-                lutFilePath: lutPath,
-              });
-              return { ...cap, photo: filteredPhoto };
-            } catch (err) {
-              console.error(`[SlotSelection] apply_lut_filter failed on photo ${idx + 1}:`, err);
-              return cap;
-            }
-          }),
-        );
-      }
-
-      navigate("/photo-result", {
-        state: {
-          ...state,
-          frameCaptures: filteredCaptures,
-          selectedCaptureIndexes,
-          selectedFilter: forcedFilter,
-        },
-      });
-    } catch (err) {
-      console.error("[SlotSelection] forced filter failed:", err);
-      navigate("/photo-result", {
-        state: {
-          ...state,
-          frameCaptures,
-          selectedCaptureIndexes,
-          selectedFilter: forcedFilter,
-        },
-      });
-    } finally {
-      setApplying(false);
     }
+
+    navigate("/photo-result", {
+      state: {
+        ...state,
+        frameCaptures,
+        selectedCaptureIndexes,
+        selectedFilter: forcedFilter,
+      },
+    });
+    setApplying(false);
   };
 
   // 👇👇👇 แก้ไข Logic การสลับรูปใหม่ทั้งหมดตรงนี้ครับ 👇👇👇
@@ -251,9 +213,9 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     // 4. ประกอบข้อมูลให้พร้อมส่ง
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
 
-    // ตู้พิเศษ: ไม่ให้เลือกฟิลเตอร์ — ยัดฟิลเตอร์ที่กำหนดไว้ให้แล้วข้ามหน้า decorate ไปเลย
+    // ตู้พิเศษ: ไม่มีหน้าให้เลือกฟิลเตอร์ (รูปผ่านฟิลเตอร์มาตั้งแต่ตอนถ่ายแล้ว)
     if (forcedFilter) {
-      applyForcedFilterAndGo(frameCaptures, finalSelectedCaptureIndexes);
+      skipFilterPageAndGo(frameCaptures, finalSelectedCaptureIndexes);
       return;
     }
 
