@@ -5,6 +5,7 @@ import BackButton from "../components/BackButton";
 import Countdown from "../components/Countdown";
 import type { ThemeData } from "../App";
 import { setPrinting } from "../utils/printingState";
+import { BORDERLESS_PRINT } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import {
@@ -172,6 +173,7 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
             verticalOffset,
             horizontalOffset,
             isLandscape,
+            borderless: BORDERLESS_PRINT,
           });
         }
 

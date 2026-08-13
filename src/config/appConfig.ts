@@ -116,3 +116,16 @@ export const DEVICE_CHECK = {
  * ตั้งเป็น null = กลับไปใช้หน้าเลือกฟิลเตอร์ตามเดิม
  */
 export const FORCED_FILTER_ID: string | null = "bw";
+
+/**
+ * ตู้พิเศษ (A4 / กระดาษปกติ) พิมพ์เต็มแผ่นไม่เหลือขอบ
+ *
+ * เปิดแล้วฝั่ง Rust จะ:
+ *   - วาดลงขนาดกระดาษจริง (PHYSICALWIDTH/HEIGHT) แทนพื้นที่ที่พิมพ์ได้
+ *   - ขยายรูปแบบ cover (ยอมให้ล้นออกนอกกระดาษ) แทนการย่อให้เห็นทั้งรูป
+ *   - ข้าม logic ตัดกระดาษ 2x6/6x2 ทั้งหมด (ตู้นี้ไม่มีเครื่องตัด)
+ *
+ * เครื่องพิมพ์ที่ไม่รองรับ borderless จะยังเหลือขอบบางๆ ตามที่ฮาร์ดแวร์บังคับ
+ * (ดูค่า hardware margin ได้จาก log "[Printer] Borderless: ...")
+ */
+export const BORDERLESS_PRINT = true;

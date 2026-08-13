@@ -139,6 +139,7 @@ fn win32_gdi_print(
     frame_type: &str,
     paper_type: Option<&str>,
     cut_mode: Option<&str>,
+    borderless: bool,
 ) -> Result<(), String> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Graphics::Printing::{
@@ -152,10 +153,16 @@ fn win32_gdi_print(
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    let needs_cut = match cut_mode_normalized.as_str() {
-        "cut" => true,
-        "no-cut" | "nocut" | "no_cut" => false,
-        _ => frame_needs_cut,
+    // ตู้กระดาษปกติ (A4) ไม่มีเรื่องตัดกระดาษ — บังคับ no-cut ไปเลย
+    // ไม่ต้องสนว่า frontend ส่ง frame_type/cut_mode อะไรมา
+    let needs_cut = if borderless {
+        false
+    } else {
+        match cut_mode_normalized.as_str() {
+            "cut" => true,
+            "no-cut" | "nocut" | "no_cut" => false,
+            _ => frame_needs_cut,
+        }
     };
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
@@ -355,10 +362,42 @@ fn win32_gdi_print(
             return Err("CreateDC failed".into());
         }
 
-        // 6. Get printable area
-        let page_w = GetDeviceCaps(hdc, HORZRES);
-        let page_h = GetDeviceCaps(hdc, VERTRES);
-        log::info!("[Printer] Page: {}x{} device units", page_w, page_h);
+        // 6. หาพื้นที่วาด
+        //
+        // ปกติใช้ HORZRES/VERTRES = "พื้นที่ที่พิมพ์ได้" ซึ่งเล็กกว่ากระดาษจริงเสมอ
+        // (หัวพิมพ์เอื้อมไม่ถึงขอบ) จึงเหลือขอบขาวรอบรูปตลอด
+        //
+        // โหมด borderless ใช้ขนาดกระดาษจริง (PHYSICALWIDTH/HEIGHT) แล้วเลื่อนจุดเริ่ม
+        // ไปลบ PHYSICALOFFSET เพื่อให้ภาพกินเต็มแผ่น — ส่วนที่ล้นพื้นที่พิมพ์ได้จะถูก
+        // driver ตัดทิ้งเอง (เครื่องที่ไม่รองรับ borderless จะยังเหลือขอบเท่าที่ฮาร์ดแวร์บังคับ)
+        let printable_w = GetDeviceCaps(hdc, HORZRES);
+        let printable_h = GetDeviceCaps(hdc, VERTRES);
+        let (page_w, page_h, origin_x, origin_y) = if borderless {
+            let phys_w = GetDeviceCaps(hdc, PHYSICALWIDTH);
+            let phys_h = GetDeviceCaps(hdc, PHYSICALHEIGHT);
+            let off_x = GetDeviceCaps(hdc, PHYSICALOFFSETX);
+            let off_y = GetDeviceCaps(hdc, PHYSICALOFFSETY);
+            if phys_w > 0 && phys_h > 0 {
+                log::info!(
+                    "[Printer] Borderless: physical {}x{}, printable {}x{}, hardware margin ({}, {}) device units",
+                    phys_w, phys_h, printable_w, printable_h, off_x, off_y
+                );
+                if off_x == 0 && off_y == 0 && phys_w == printable_w && phys_h == printable_h {
+                    log::info!("[Printer] Printer reports true borderless capability");
+                } else {
+                    log::warn!(
+                        "[Printer] Printer keeps a hardware margin — the sheet may still show a thin white edge"
+                    );
+                }
+                (phys_w, phys_h, -off_x, -off_y)
+            } else {
+                log::warn!("[Printer] PHYSICALWIDTH/HEIGHT unavailable — falling back to printable area");
+                (printable_w, printable_h, 0, 0)
+            }
+        } else {
+            (printable_w, printable_h, 0, 0)
+        };
+        log::info!("[Printer] Page: {}x{} device units (borderless={})", page_w, page_h, borderless);
 
         // 7. Load image and convert to BGRA bottom-up (Windows bitmap format)
         let img = image::open(image_path)
@@ -413,15 +452,32 @@ fn win32_gdi_print(
         let img_h_f = img_h as f64;
         let scale_w = page_w_f / img_w_f;
         let scale_h = page_h_f / img_h_f;
-        let scale = scale_w.min(scale_h);
+        // borderless = cover (ขยายจนเต็มแผ่น ส่วนเกินยอมให้ล้นออกนอกกระดาษ)
+        // ปกติ = contain (ย่อให้เห็นทั้งรูป เหลือขอบขาวถ้าสัดส่วนไม่ตรง)
+        let scale = if borderless {
+            scale_w.max(scale_h)
+        } else {
+            scale_w.min(scale_h)
+        };
         let dst_w = (img_w_f * scale).round() as i32;
         let dst_h = (img_h_f * scale).round() as i32;
-        let dst_x = (page_w - dst_w) / 2;
-        let dst_y = (page_h - dst_h) / 2;
+        let dst_x = origin_x + (page_w - dst_w) / 2;
+        let dst_y = origin_y + (page_h - dst_h) / 2;
         log::info!(
-            "[Printer] Scale mode (needs_cut={}): page {}x{}, image {}x{}, scale {:.4}, draw at ({},{}) size {}x{}",
-            needs_cut, page_w, page_h, img_w, img_h, scale, dst_x, dst_y, dst_w, dst_h
+            "[Printer] Scale mode (needs_cut={}, borderless={}): page {}x{}, image {}x{}, scale {:.4}, draw at ({},{}) size {}x{}",
+            needs_cut, borderless, page_w, page_h, img_w, img_h, scale, dst_x, dst_y, dst_w, dst_h
         );
+        if borderless {
+            // สัดส่วนรูปกับกระดาษต่างกันมาก = โดนครอบเยอะ ต้องรู้ตัวตั้งแต่อ่าน log
+            let overflow_w = (dst_w - page_w).max(0) as f64 / page_w as f64 * 100.0;
+            let overflow_h = (dst_h - page_h).max(0) as f64 / page_h as f64 * 100.0;
+            if overflow_w > 10.0 || overflow_h > 10.0 {
+                log::warn!(
+                    "[Printer] Borderless crop is large ({:.1}% wide / {:.1}% tall) — frame aspect does not match the paper",
+                    overflow_w, overflow_h
+                );
+            }
+        }
 
         let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -750,10 +806,21 @@ pub async fn print_photo(
     vertical_offset: Option<f64>,
     horizontal_offset: Option<f64>,
     _is_landscape: Option<bool>,
+    // borderless: true = พิมพ์เต็มแผ่นไม่เหลือขอบ (ตู้กระดาษปกติ A4)
+    // และข้าม logic ตัดกระดาษ 2x6/6x2 ทั้งหมด
+    borderless: Option<bool>,
 ) -> Result<bool, String> {
     let scale_val = scale.unwrap_or(100.0);
     let vert_val = vertical_offset.unwrap_or(0.0);
     let horiz_val = horizontal_offset.unwrap_or(0.0);
+    let borderless_val = borderless.unwrap_or(false);
+
+    if borderless_val && scale_val < 100.0 {
+        log::warn!(
+            "[Printer] Borderless requested but paper scale is {}% — scaling below 100% pads the image and puts the white border back",
+            scale_val
+        );
+    }
 
     // Load original image (auto-detect format from content, not extension)
     let mut img = {
@@ -767,7 +834,16 @@ pub async fn print_photo(
 
     // For cut frames: duplicate image onto full 4x6 paper BEFORE applying scale/offset.
     // This matches the old app's behavior where duplication happened in the frontend.
-    img = match frame_type.as_str() {
+    //
+    // ตู้กระดาษปกติ (borderless) ไม่มีการตัดกระดาษ จึงไม่ต้องปั๊มรูปซ้ำลงแผ่น —
+    // ใช้รูปเดียวเต็มแผ่น A4 ไปเลย
+    img = if borderless_val {
+        if frame_type == "2x6" || frame_type == "6x2" {
+            log::info!("[Printer] Borderless: skipping {} duplication (no paper cutter here)", frame_type);
+        }
+        img
+    } else {
+        match frame_type.as_str() {
         "2x6" => {
             let w = img.width();
             let h = img.height();
@@ -788,7 +864,8 @@ pub async fn print_photo(
             image::imageops::overlay(&mut canvas, &img.to_rgba8(), 0, h as i64);
             image::DynamicImage::ImageRgba8(canvas)
         }
-        _ => img,
+            _ => img,
+        }
     };
 
     let original_width = img.width();
@@ -872,6 +949,7 @@ pub async fn print_photo(
             &frame_type,
             paper_type.as_deref(),
             cut_mode.as_deref(),
+            borderless_val,
         )
             .map(|_| true)
     }
@@ -902,6 +980,8 @@ pub async fn print_test_photo(
     vertical_offset: f64,
     horizontal_offset: f64,
     frame_type: String,
+    // ให้หน้าเทสกระดาษพิมพ์แบบเดียวกับที่ลูกค้าจะได้ (เต็มแผ่น ไม่มีขอบ)
+    borderless: Option<bool>,
 ) -> Result<bool, String> {
     // Find test.jpg - check multiple possible locations
     let test_image_path = {
@@ -977,6 +1057,7 @@ pub async fn print_test_photo(
         Some(vertical_offset),
         Some(horizontal_offset),
         Some(is_landscape),
+        borderless,
     )
     .await
 }

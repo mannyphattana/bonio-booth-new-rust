@@ -6,7 +6,7 @@ import type { ThemeData, MachineData, Capture, FrameSlot } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
 import PrintAgainModal from "../components/PrintAgainModal";
-import { COUNTDOWN } from "../config/appConfig";
+import { COUNTDOWN, BORDERLESS_PRINT } from "../config/appConfig";
 import { setPrinting } from "../utils/printingState";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
@@ -519,6 +519,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
                 verticalOffset,
                 horizontalOffset,
                 isLandscape,
+                borderless: BORDERLESS_PRINT,
               });
             }
 

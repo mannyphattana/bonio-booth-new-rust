@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { setPrinting as setPrintingState } from "../utils/printingState";
+import { BORDERLESS_PRINT } from "../config/appConfig";
 import {
   ACTIVE_PAPER_TYPE,
   ENABLE_OFFICE_PAPER_MENU,
@@ -161,6 +162,7 @@ export default function PaperPositionModal({ open, onClose }: Props) {
         frameType,
         paperType: selectedPaperType,
         cutMode,
+        borderless: BORDERLESS_PRINT,
       });
       try {
         await invoke("reduce_paper_level", { copies: 1 });
