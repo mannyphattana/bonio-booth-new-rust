@@ -355,10 +355,17 @@ fn win32_gdi_print(
             return Err("CreateDC failed".into());
         }
 
-        // 6. Get printable area
+        // 6. Get printable area and physical page info
         let page_w = GetDeviceCaps(hdc, HORZRES);
         let page_h = GetDeviceCaps(hdc, VERTRES);
-        log::info!("[Printer] Page: {}x{} device units", page_w, page_h);
+        let phys_w = GetDeviceCaps(hdc, PHYSICALWIDTH);
+        let phys_h = GetDeviceCaps(hdc, PHYSICALHEIGHT);
+        let phys_off_x = GetDeviceCaps(hdc, PHYSICALOFFSETX);
+        let phys_off_y = GetDeviceCaps(hdc, PHYSICALOFFSETY);
+        log::info!(
+            "[Printer] Printable: {}x{}, Physical: {}x{}, Offset: ({},{})",
+            page_w, page_h, phys_w, phys_h, phys_off_x, phys_off_y
+        );
 
         // 7. Load image and convert to BGRA bottom-up (Windows bitmap format)
         let img = image::open(image_path)
@@ -407,20 +414,37 @@ fn win32_gdi_print(
         SetStretchBltMode(hdc, HALFTONE);
 
         // Fit image to page preserving aspect ratio, centered.
-        let page_w_f = page_w as f64;
-        let page_h_f = page_h as f64;
         let img_w_f = img_w as f64;
         let img_h_f = img_h as f64;
-        let scale_w = page_w_f / img_w_f;
-        let scale_h = page_h_f / img_h_f;
-        let scale = scale_w.min(scale_h);
-        let dst_w = (img_w_f * scale).round() as i32;
-        let dst_h = (img_h_f * scale).round() as i32;
-        let dst_x = (page_w - dst_w) / 2;
-        let dst_y = (page_h - dst_h) / 2;
+
+        // For A3/A4 (normal office printers): scale to physical page size and compensate
+        // for hardware margins by drawing at negative coordinates — this achieves near-borderless
+        // output without cropping the image content.
+        let (dst_x, dst_y, dst_w, dst_h) = if (paper_mode == "a3" || paper_mode == "a4")
+            && phys_w > page_w && phys_h > page_h
+        {
+            let scale_w = phys_w as f64 / img_w_f;
+            let scale_h = phys_h as f64 / img_h_f;
+            let scale = scale_w.min(scale_h);
+            let dw = (img_w_f * scale).round() as i32;
+            let dh = (img_h_f * scale).round() as i32;
+            // Center on physical page, then convert to printable-area coordinates
+            let dx = (phys_w - dw) / 2 - phys_off_x;
+            let dy = (phys_h - dh) / 2 - phys_off_y;
+            (dx, dy, dw, dh)
+        } else {
+            let scale_w = page_w as f64 / img_w_f;
+            let scale_h = page_h as f64 / img_h_f;
+            let scale = scale_w.min(scale_h);
+            let dw = (img_w_f * scale).round() as i32;
+            let dh = (img_h_f * scale).round() as i32;
+            let dx = (page_w - dw) / 2;
+            let dy = (page_h - dh) / 2;
+            (dx, dy, dw, dh)
+        };
         log::info!(
-            "[Printer] Scale mode (needs_cut={}): page {}x{}, image {}x{}, scale {:.4}, draw at ({},{}) size {}x{}",
-            needs_cut, page_w, page_h, img_w, img_h, scale, dst_x, dst_y, dst_w, dst_h
+            "[Printer] Scale mode (paper={}, needs_cut={}): printable {}x{}, phys {}x{}, image {}x{}, draw at ({},{}) size {}x{}",
+            paper_mode, needs_cut, page_w, page_h, phys_w, phys_h, img_w, img_h, dst_x, dst_y, dst_w, dst_h
         );
 
         let bmi = BITMAPINFO {

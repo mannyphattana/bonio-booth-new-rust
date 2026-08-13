@@ -3,7 +3,7 @@ export type PaperType = "photo_4x6" | "a4" | "a3";
 export type PaperSizeOption = "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3";
 
 // Temporary rollout switch: hide office-paper menu (A4/A3) until customer enables it.
-export const ENABLE_OFFICE_PAPER_MENU = false;
+export const ENABLE_OFFICE_PAPER_MENU = true;
 
 export interface PaperConfig {
   scale: number;
@@ -40,7 +40,7 @@ export const PRINT_STORAGE_KEYS = {
 } as const;
 
 export const ACTIVE_PAPER_TYPE: PaperType =
-  ACTIVE_PRINT_PROFILE === "customer_a4" ? "a4" : "photo_4x6";
+  ACTIVE_PRINT_PROFILE === "customer_a4" ? "a3" : "photo_4x6";
 
 const readStorageWithFallback = (activeKey: string, legacyKey: string): string | null => {
   const activeValue = localStorage.getItem(activeKey);

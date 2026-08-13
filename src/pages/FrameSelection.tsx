@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData, FrameData } from "../App";
@@ -24,6 +24,17 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [selectedFrame, setSelectedFrame] = useState<FrameData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // A3 (4961×7016) and A4 (4962×7014) frames are tall full-bleed artwork.
+  // Use cover so they fill the preview box without letterboxing.
+  const isA3A4 = useMemo(() => {
+    if (!selectedFrame) return false;
+    const size = (selectedFrame.imageSize || "").toLowerCase();
+    if (size === "a3" || size === "a4") return true;
+    const w = selectedFrame.grid?.width ?? 0;
+    const h = selectedFrame.grid?.height ?? 0;
+    return (w >= 4900 && h >= 6900) || (h >= 4900 && w >= 6900);
+  }, [selectedFrame]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -278,23 +289,36 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                 {selectedFrame && (
                   <div
                     style={{
-                      display: "inline-block",
                       backgroundColor: "#EEE",
                       overflow: "hidden",
                       lineHeight: 0,
                       boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+                      // For A3/A4: fixed container sized to the frame aspect ratio
+                      ...(isA3A4
+                        ? {
+                            height: "30vh",
+                            width: `calc(30vh * ${
+                              (selectedFrame.grid?.width ?? 4962) /
+                              (selectedFrame.grid?.height ?? 7014)
+                            })`,
+                          }
+                        : { display: "inline-block" }),
                     }}
                   >
                     <img
                       src={selectedFrame.imageUrl}
                       alt="Selected"
                       style={{
-                        height: "auto",
-                        width: "auto",
-                        maxHeight: "30vh",
-                        maxWidth: "80vw",
-                        objectFit: "contain",
                         display: "block",
+                        ...(isA3A4
+                          ? { width: "100%", height: "100%", objectFit: "cover" }
+                          : {
+                              height: "auto",
+                              width: "auto",
+                              maxHeight: "30vh",
+                              maxWidth: "80vw",
+                              objectFit: "contain",
+                            }),
                       }}
                     />
                   </div>
