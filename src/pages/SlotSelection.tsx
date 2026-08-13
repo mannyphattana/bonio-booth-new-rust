@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   ThemeData,
   MachineData,
@@ -9,7 +10,8 @@ import type {
 } from "../App";
 import { useIdleTimeout } from "../hooks/useIdleTimeout";
 import Countdown from "../components/Countdown";
-import { COUNTDOWN } from "../config/appConfig";
+import { COUNTDOWN, FORCED_FILTER_ID } from "../config/appConfig";
+import { FILTERS } from "../config/filters";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 
@@ -50,6 +52,9 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [slotIndex: number]: number;
   }>({});
   const [selectedPhotos, setSelectedPhotos] = useState<number[]>([]);
+  // ตอนบังคับใส่ฟิลเตอร์ให้อัตโนมัติ (ตู้ที่ไม่มีหน้าเลือกฟิลเตอร์)
+  const [applying, setApplying] = useState(false);
+  const [applyProgress, setApplyProgress] = useState("");
   const [scaleFactor, setScaleFactor] = useState({ x: 1, y: 1 });
   const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
 
@@ -127,8 +132,85 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
+  // ฟิลเตอร์ที่ถูกล็อกไว้สำหรับตู้นี้ (null = ให้ลูกค้าเลือกเองตาม flow ปกติ)
+  const forcedFilter =
+    FILTERS.find((f) => f.id === FORCED_FILTER_ID && f.type === "lut") || null;
+
+  /**
+   * ยิง LUT ที่ล็อกไว้ใส่ทุกรูปแล้วไปหน้า photo-result เลย (ข้ามหน้าเลือกฟิลเตอร์)
+   * รูปไหน apply ไม่ผ่านก็ใช้ต้นฉบับไปก่อน — ห้ามให้ลูกค้าไม่ได้รูปเพราะฟิลเตอร์พัง
+   */
+  const applyForcedFilterAndGo = async (
+    frameCaptures: Capture[],
+    selectedCaptureIndexes: number[],
+  ) => {
+    setApplying(true);
+    try {
+      // เตรียม ffmpeg ไว้ล่วงหน้าเหมือน flow เดิมของหน้า apply-filter
+      try {
+        await invoke<boolean>("ensure_ffmpeg");
+      } catch {
+        try {
+          await invoke<boolean>("check_ffmpeg_available");
+        } catch {
+          // ไม่มี ffmpeg ก็ไปต่อ — วิดีโอจะจัดการ error ของตัวเองทีหลัง
+        }
+      }
+
+      let lutPath = "";
+      try {
+        lutPath = await invoke<string>("resolve_lut_path", {
+          lutFile: forcedFilter!.lutFile,
+        });
+      } catch (err) {
+        console.warn(`[SlotSelection] LUT not found for ${forcedFilter!.id}:`, err);
+      }
+
+      let filteredCaptures = frameCaptures;
+      if (lutPath) {
+        filteredCaptures = await Promise.all(
+          frameCaptures.map(async (cap, idx) => {
+            setApplyProgress(`Processing ${idx + 1}/${frameCaptures.length}...`);
+            try {
+              const filteredPhoto: string = await invoke("apply_lut_filter", {
+                imageDataBase64: cap.photo,
+                lutFilePath: lutPath,
+              });
+              return { ...cap, photo: filteredPhoto };
+            } catch (err) {
+              console.error(`[SlotSelection] apply_lut_filter failed on photo ${idx + 1}:`, err);
+              return cap;
+            }
+          }),
+        );
+      }
+
+      navigate("/photo-result", {
+        state: {
+          ...state,
+          frameCaptures: filteredCaptures,
+          selectedCaptureIndexes,
+          selectedFilter: forcedFilter,
+        },
+      });
+    } catch (err) {
+      console.error("[SlotSelection] forced filter failed:", err);
+      navigate("/photo-result", {
+        state: {
+          ...state,
+          frameCaptures,
+          selectedCaptureIndexes,
+          selectedFilter: forcedFilter,
+        },
+      });
+    } finally {
+      setApplying(false);
+    }
+  };
+
   // 👇👇👇 แก้ไข Logic การสลับรูปใหม่ทั้งหมดตรงนี้ครับ 👇👇👇
   const handleNext = () => {
+    if (applying) return;
     if (getAssignedCount() < slots.length) return;
 
     // 1. ดึง Index ที่ลูกค้าเลือกมาทั้งหมด
@@ -168,6 +250,12 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
 
     // 4. ประกอบข้อมูลให้พร้อมส่ง
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
+
+    // ตู้พิเศษ: ไม่ให้เลือกฟิลเตอร์ — ยัดฟิลเตอร์ที่กำหนดไว้ให้แล้วข้ามหน้า decorate ไปเลย
+    if (forcedFilter) {
+      applyForcedFilterAndGo(frameCaptures, finalSelectedCaptureIndexes);
+      return;
+    }
 
     navigate("/apply-filter", {
       state: {
@@ -416,20 +504,22 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
         <div className="page-row-footer" style={{ flex: "0 0 auto", paddingBottom: "50px", paddingTop: "10px", width: "60%" }}>
           <button
             onClick={handleNext}
-            disabled={selectedPhotos.length < slots.length}
+            disabled={selectedPhotos.length < slots.length || applying}
             className="page-action-btn"
             style={{
               background:
-                selectedPhotos.length >= slots.length
-                  ? theme.primaryColor
-                  : "gray",
+                applying
+                  ? "#666"
+                  : selectedPhotos.length >= slots.length
+                    ? theme.primaryColor
+                    : "gray",
               color: theme.textButtonColor,
               padding: "12px 40px", // ลดขนาดปุ่มลง
               fontSize: "20px", // ลดขนาดตัวอักษรลง
               borderRadius: "30px",
             }}
           >
-            Next
+            {applying ? applyProgress || "Processing..." : "Next"}
           </button>
         </div>
         {/* end page-row-footer */}

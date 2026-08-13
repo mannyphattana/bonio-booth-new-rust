@@ -107,3 +107,12 @@ export const DEVICE_CHECK = {
   /** true = ข้าม maintenance เมื่อไม่เจอกล้อง/ปริ้น (สำหรับเทส) */
   ALLOW_TEST_WITHOUT_DEVICES: false,
 };
+
+/**
+ * ตู้พิเศษ (A4 / กระดาษปกติ) ไม่ให้ลูกค้าเลือกฟิลเตอร์ —
+ * ข้ามหน้า "Decorate your photo" แล้วบังคับใช้ฟิลเตอร์ตัวนี้ตัวเดียวเสมอ
+ *
+ * ค่าต้องตรงกับ `id` ใน src/config/filters.ts
+ * ตั้งเป็น null = กลับไปใช้หน้าเลือกฟิลเตอร์ตามเดิม
+ */
+export const FORCED_FILTER_ID: string | null = "bw";
