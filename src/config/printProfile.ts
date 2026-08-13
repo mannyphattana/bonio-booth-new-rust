@@ -151,7 +151,11 @@ export const getPaperTypeByOrientation = (
   orientation: PrintOrientation,
 ): PaperType => {
   if (!ENABLE_OFFICE_PAPER_MENU) {
-    return "photo_4x6";
+    // ซ่อน "เมนู" เลือกกระดาษ ≠ ตู้นี้ใช้กระดาษรูป
+    // ต้องคืนกระดาษตาม profile ที่ตู้ใช้จริง (customer_a4 → "a4")
+    // ไม่งั้นฝั่ง Rust จะไปเข้า legacy branch แล้วสั่ง media 4x6 ลงบนแผ่น A4
+    // → รูปออกมาเล็กอยู่ส่วนเดียวของแผ่น ที่เหลือว่างเปล่า
+    return ACTIVE_PAPER_TYPE;
   }
 
   const selected = getPaperSize(orientation);
