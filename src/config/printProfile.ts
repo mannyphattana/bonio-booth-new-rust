@@ -2,8 +2,9 @@ export type PrintProfile = "legacy_4x6" | "customer_a4";
 export type PaperType = "photo_4x6" | "a4" | "a3";
 export type PaperSizeOption = "2x6" | "4x6" | "6x2" | "6x4" | "a4" | "a3";
 
-// Temporary rollout switch: hide office-paper menu (A4/A3) until customer enables it.
-export const ENABLE_OFFICE_PAPER_MENU = false;
+// สวิตช์เมนูเลือกกระดาษ A4/A3 ในหน้า Paper Position Config
+// เปิดไว้ เพราะตู้นี้ (profile customer_a4) ใช้กระดาษ A4/A3 จริง แอดมินต้องเลือกได้
+export const ENABLE_OFFICE_PAPER_MENU = true;
 
 export interface PaperConfig {
   scale: number;
