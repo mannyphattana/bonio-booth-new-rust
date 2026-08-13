@@ -9,6 +9,7 @@ import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
 import { FORCED_FILTER_ID } from "../config/appConfig";
 import { FILTERS } from "../config/filters";
+import LutLivePreview from "../components/LutLivePreview";
 
 /**
  * ตู้ที่ล็อกฟิลเตอร์ไว้ตัวเดียว (ไม่มีหน้าให้เลือก) — ต้องใส่ฟิลเตอร์ตั้งแต่หน้าถ่ายรูป
@@ -135,6 +136,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // path ของ LUT ที่ถูกล็อกไว้สำหรับตู้นี้ (ว่าง = ยังหาไม่เจอ/ตู้ปกติ)
   const forcedLutPathRef = useRef<string>("");
+  const [forcedLutPath, setForcedLutPath] = useState<string>("");
+  // true = canvas ที่เกรดสีด้วย LUT จริงวาดได้แล้ว → ซ่อนภาพดิบไว้ข้างหลัง
+  const [lutPreviewReady, setLutPreviewReady] = useState(false);
   const cameraContainerRef = useRef<HTMLDivElement>(null);
   const canonLiveViewRef = useRef<HTMLImageElement>(null);
   
@@ -208,11 +212,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   }, []);
 
   // หา path ของ LUT ที่ล็อกไว้ตั้งแต่เข้าหน้านี้ จะได้ไม่ต้องรอตอนถ่ายจริง
+  // และเอาไปให้ LutLivePreview ใช้เกรดภาพสดด้วย
   useEffect(() => {
     if (!FORCED_FILTER) return;
     invoke<string>("resolve_lut_path", { lutFile: FORCED_FILTER.lutFile })
       .then((path) => {
         forcedLutPathRef.current = path;
+        setForcedLutPath(path);
       })
       .catch((err) => {
         console.warn(`[MainShooting] LUT not found for ${FORCED_FILTER?.id}:`, err);
@@ -969,8 +975,11 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     objectFit: "cover",
                     transform: "scaleX(-1)",
                     borderRadius: 20,
-                    // ให้ภาพสดหน้าตาใกล้เคียงฟิลเตอร์ที่ล็อกไว้ (รูปจริงผ่าน LUT เต็มอยู่แล้ว)
-                    filter: FORCED_FILTER?.previewCss,
+                    // ตู้ที่ล็อกฟิลเตอร์: ซ่อนภาพดิบไว้ข้างหลัง แล้วโชว์ canvas ที่ผ่าน LUT แทน
+                    // (ยังต้องเล่นอยู่ เพราะเป็นต้นทางเฟรมให้ canvas)
+                    opacity: lutPreviewReady ? 0 : 1,
+                    // เครื่องไหน WebGL2 ใช้ไม่ได้ ยังพอเห็นโทนใกล้เคียงจาก CSS
+                    filter: lutPreviewReady ? undefined : FORCED_FILTER?.previewCss,
                   }}
                 />
               )}
@@ -986,9 +995,38 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     objectFit: "cover",
                     transform: "scaleX(-1)",
                     borderRadius: 20,
-                    filter: FORCED_FILTER?.previewCss
-                      ? `blur(1px) ${FORCED_FILTER.previewCss}`
-                      : "blur(1px)",
+                    filter: lutPreviewReady
+                      ? "blur(1px)"
+                      : FORCED_FILTER?.previewCss
+                        ? `blur(1px) ${FORCED_FILTER.previewCss}`
+                        : "blur(1px)",
+                    opacity: lutPreviewReady ? 0 : 1,
+                  }}
+                />
+              )}
+
+              {/* ตู้ที่ล็อกฟิลเตอร์: เกรดภาพสดด้วย LUT ตัวจริงบน GPU
+                  ลูกค้าเห็นสีเดียวกับรูปที่จะได้ ไม่ใช่ CSS ประมาณเอา */}
+              {FORCED_FILTER && forcedLutPath && (
+                <LutLivePreview
+                  sourceRef={cameraType === "canon" ? canonLiveViewRef : videoRef}
+                  lutPath={forcedLutPath}
+                  onReadyChange={setLutPreviewReady}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    transform: "scaleX(-1)",
+                    borderRadius: 20,
+                    filter: cameraType === "canon" ? "blur(1px)" : undefined,
+                    // canon: ถ้ายังไม่มีเฟรมสด อย่าเอาเฟรมค้างไปบังหน้าจอ "กำลังเชื่อมต่อ"
+                    display:
+                      lutPreviewReady &&
+                      (cameraType !== "canon" || !!canonCamera.liveViewFrame)
+                        ? "block"
+                        : "none",
                   }}
                 />
               )}

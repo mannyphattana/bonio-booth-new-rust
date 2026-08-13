@@ -318,6 +318,7 @@ pub fn run() {
             image_processing::get_available_filters,
             image_processing::apply_lut_filter,
             image_processing::apply_lut_filter_preview,
+            image_processing::load_lut_texture,
             image_processing::compose_frame,
             image_processing::save_temp_image,
             // Printer

@@ -710,3 +710,40 @@ pub async fn save_temp_image(
 
     Ok(file_path.to_string_lossy().to_string())
 }
+#[derive(Serialize, Deserialize)]
+pub struct LutTextureData {
+    /// ขนาดกริดของ LUT (เช่น 33 = 33x33x33)
+    pub size: usize,
+    /// ข้อมูล RGB8 ขนาด size^3 * 3 ไบต์ เรียงแบบเดียวกับไฟล์ .cube
+    /// (r เปลี่ยนเร็วสุด → g → b) พร้อมอัปเป็น 3D texture ได้เลย
+    pub data_base64: String,
+}
+
+/// ส่ง LUT ออกไปให้ฝั่งหน้าเว็บเอาไปรันบน GPU (live view)
+///
+/// หน้าถ่ายรูปต้องโชว์ฟิลเตอร์ตัวจริงบนภาพสด ซึ่งรัน `apply_lut_filter` ทีละเฟรม
+/// ไม่ไหว จึงส่งตาราง LUT ไปให้ WebGL sample เอง — ได้ภาพเดียวกับที่รูปถ่ายจะได้
+#[tauri::command]
+pub async fn load_lut_texture(lut_file_path: String) -> Result<LutTextureData, String> {
+    let lut = Lut3D::parse_cube_file(&lut_file_path)?;
+    let expected = lut.size * lut.size * lut.size;
+    if lut.data.len() < expected {
+        return Err(format!(
+            "LUT data too small: got {} entries, need {}",
+            lut.data.len(),
+            expected
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(expected * 3);
+    for color in lut.data.iter().take(expected) {
+        for channel in color.iter() {
+            bytes.push((channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+    }
+
+    Ok(LutTextureData {
+        size: lut.size,
+        data_base64: STANDARD.encode(&bytes),
+    })
+}
