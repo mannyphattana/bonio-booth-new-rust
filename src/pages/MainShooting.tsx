@@ -929,8 +929,9 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    transform: "scaleX(-1)", 
+                    transform: "scaleX(-1)",
                     borderRadius: 20,
+                    filter: "grayscale(100%)",
                   }}
                 />
               )}
@@ -946,7 +947,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                     objectFit: "cover",
                     transform: "scaleX(-1)", 
                     borderRadius: 20,
-                    filter: "blur(1px)",
+                    filter: "grayscale(100%) blur(1px)",
                   }}
                 />
               )}
@@ -1193,6 +1194,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                         width: "100%",
                         height: "100%",
                         objectFit: "cover",
+                        filter: "grayscale(100%)",
                       }}
                     />
                   ) : (

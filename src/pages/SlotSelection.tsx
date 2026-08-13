@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   ThemeData,
   MachineData,
@@ -52,6 +53,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
   const [selectedPhotos, setSelectedPhotos] = useState<number[]>([]);
   const [scaleFactor, setScaleFactor] = useState({ x: 1, y: 1 });
   const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const frameImgRef = useRef<HTMLImageElement>(null);
@@ -127,57 +129,65 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
-  // 👇👇👇 แก้ไข Logic การสลับรูปใหม่ทั้งหมดตรงนี้ครับ 👇👇👇
-  const handleNext = () => {
+  const handleNext = async () => {
     if (getAssignedCount() < slots.length) return;
+    setIsProcessing(true);
 
-    // 1. ดึง Index ที่ลูกค้าเลือกมาทั้งหมด
+    // 1. Resolve final capture indexes (with video fallback)
     let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
       return captureIdx !== undefined ? captureIdx : 0;
     });
 
-    // 2. ค้นหากองหนุน: ดึง Index เฉพาะรูปที่ "ไม่ได้ถูกเลือก" และ "มีวิดีโอสมบูรณ์"
     let spareValidIndexes = captures
       .map((cap, idx) => ({ cap, idx }))
-      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx)) // ต้องไม่ได้ถูกเลือกไปแล้ว
-      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "") // วิดีโอต้องใช้งานได้
+      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx))
+      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "")
       .map((item) => item.idx);
 
-    // 3. สแกนตรวจสอบรูปที่ลูกค้าเลือก ถ้ารูปไหนวิดีโอพัง สลับเอาของดีมาใส่แทนทั้งชุด
     finalSelectedCaptureIndexes = finalSelectedCaptureIndexes.map((currentIdx) => {
       const currentCap = captures[currentIdx];
       const isBroken = !currentCap || !currentCap.videoPath || currentCap.videoPath.trim() === "";
-
       if (isBroken) {
-        console.warn(`[Smart Fallback] รูปที่ ${currentIdx + 1} ไม่มีวิดีโอ!`);
-        
         if (spareValidIndexes.length > 0) {
-          // ดึงกองหนุนมาสวมรอย "ทั้งรูปภาพและวิดีโอ" จะได้ไม่มีอาการภาพกระตุก
-          const spareIdx = spareValidIndexes.shift()!;
-          console.log(`-> สลับไปใช้รูปและวิดีโอจากช่องที่ ${spareIdx + 1} แทนเรียบร้อย`);
-          return spareIdx; 
+          return spareValidIndexes.shift()!;
         } else {
-          // ท่าไม้ตายก้นหีบ: ถ้ากองหนุนพังเกลี้ยงหมดตู้จริงๆ ให้ดึงวิดีโอไหนก็ได้ที่สมบูรณ์มาใช้กันระบบแครช/จอดำ
           const emergencyIdx = captures.findIndex(c => c && c.videoPath && c.videoPath.trim() !== "");
           return emergencyIdx !== -1 ? emergencyIdx : currentIdx;
         }
       }
-      return currentIdx; // ถ้ารูปปกติ ก็ใช้รูปเดิมที่ลูกค้าเลือก
+      return currentIdx;
     });
 
-    // 4. ประกอบข้อมูลให้พร้อมส่ง
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
 
-    navigate("/apply-filter", {
+    // 2. Auto-apply B&W filter (skip ApplyFilter page)
+    const bwFilter = { id: "bw", name: "Black & White", lutFile: "B&W.cube", type: "lut" as const };
+    let filteredCaptures = [...frameCaptures];
+    try {
+      const lutPath: string = await invoke("resolve_lut_path", { lutFile: bwFilter.lutFile });
+      const photoPromises = frameCaptures.map(async (cap) => {
+        const filteredPhoto: string = await invoke("apply_lut_filter", {
+          imageDataBase64: cap.photo,
+          lutFilePath: lutPath,
+        });
+        return { ...cap, photo: filteredPhoto };
+      });
+      filteredCaptures = await Promise.all(photoPromises);
+    } catch (err) {
+      console.warn("[SlotSelection] B&W filter failed, proceeding without filter:", err);
+    }
+
+    setIsProcessing(false);
+    navigate("/photo-result", {
       state: {
         ...state,
-        frameCaptures,
+        frameCaptures: filteredCaptures,
         selectedCaptureIndexes: finalSelectedCaptureIndexes,
+        selectedFilter: bwFilter,
       },
     });
   };
-  // 👆👆👆 จบการแก้ไข 👆👆👆
 
   if (!selectedFrame) return null;
 
@@ -285,6 +295,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                           width: "100%",
                           height: "100%",
                           objectFit: "cover",
+                          filter: "grayscale(100%)",
                         }}
                       />
                     )}
@@ -343,7 +354,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                       objectFit: "cover",
                       display: "block",
                       opacity: isSelected ? 0.7 : 1,
-                      filter: isSelected ? "brightness(0.7)" : "brightness(1)",
+                      filter: isSelected ? "grayscale(100%) brightness(0.7)" : "grayscale(100%)",
                     }}
                   />
                   {isSelected && (
@@ -416,20 +427,20 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
         <div className="page-row-footer" style={{ flex: "0 0 auto", paddingBottom: "50px", paddingTop: "10px", width: "60%" }}>
           <button
             onClick={handleNext}
-            disabled={selectedPhotos.length < slots.length}
+            disabled={selectedPhotos.length < slots.length || isProcessing}
             className="page-action-btn"
             style={{
               background:
-                selectedPhotos.length >= slots.length
+                selectedPhotos.length >= slots.length && !isProcessing
                   ? theme.primaryColor
                   : "gray",
               color: theme.textButtonColor,
-              padding: "12px 40px", // ลดขนาดปุ่มลง
-              fontSize: "20px", // ลดขนาดตัวอักษรลง
+              padding: "12px 40px",
+              fontSize: "20px",
               borderRadius: "30px",
             }}
           >
-            Next
+            {isProcessing ? "Processing..." : "Next"}
           </button>
         </div>
         {/* end page-row-footer */}

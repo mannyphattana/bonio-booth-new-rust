@@ -26,6 +26,11 @@ import { useDeviceCheck } from "./hooks/useDeviceCheck";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
+import {
+  checkAndReportCrash,
+  initSession,
+  closeSession,
+} from "./utils/appSession";
 import "./App.css";
 
 export interface ThemeData {
@@ -141,10 +146,16 @@ function App() {
         if (verifyResult.success) {
           const initResult: any = await invoke("init_machine");
           if (initResult.success && initResult.data?.machine) {
-            setMachineData(initResult.data.machine);
+            const machine = initResult.data.machine;
+            setMachineData(machine);
             setThemeData(
-              initResult.data.theme || initResult.data.machine.theme,
+              initResult.data.theme || machine.theme,
             );
+
+            // Report crash from previous session (if any), then start new session
+            await checkAndReportCrash(machine._id);
+            initSession(machine._id, machine.workspaceId);
+
             setIsVerified(true);
 
             if (maintenanceConfig === "network") {
@@ -152,12 +163,12 @@ function App() {
               setShowMaintenance(false);
             }
 
-            if (initResult.data.machine?.lineUrl) {
-              setLineUrl(initResult.data.machine.lineUrl);
+            if (machine.lineUrl) {
+              setLineUrl(machine.lineUrl);
             }
 
-            const backendMaintenance = !!initResult.data.machine?.isMaintenanceMode;
-            const paperLevel = initResult.data.paperLevel ?? initResult.data.machine?.paperLevel ?? -1;
+            const backendMaintenance = !!machine.isMaintenanceMode;
+            const paperLevel = initResult.data.paperLevel ?? machine.paperLevel ?? -1;
 
             if (backendMaintenance) {
               setShowMaintenance(true);
@@ -239,6 +250,13 @@ function App() {
     onMaintenanceMode: handleMaintenanceMode,
     onConfigUpdated: handleConfigUpdated,
   });
+
+  // Called before exit_app in all close paths (ContextMenu exit, etc.)
+  // Closes the session log then tears down SSE.
+  const handleBeforeClose = useCallback(async () => {
+    await closeSession("user_exit");
+    destroySSE();
+  }, [destroySSE]);
 
   const { state: shutdownState, notifyActivity: notifyShutdownActivity } =
     useShutdown({
@@ -345,11 +363,13 @@ function App() {
   if (!isVerified) {
     return (
       <MachineVerify
-        onVerified={(data) => {
+        onVerified={async (data) => {
           setMachineData(data.machine);
           setThemeData(data.theme || data.machine?.theme);
-          setIsVerified(true);
           localStorage.setItem("machineId", data.machine._id);
+          await checkAndReportCrash(data.machine._id);
+          initSession(data.machine._id, data.machine.workspaceId);
+          setIsVerified(true);
         }}
       />
     );
@@ -382,7 +402,7 @@ function App() {
               theme={themeData!}
               lineUrl={lineUrl || ""}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
               isOverlay
               onPaperRefilled={handleMaintenanceResolved}
             />
@@ -393,7 +413,7 @@ function App() {
               backgroundSecond={themeData?.backgroundSecond}
               isNetworkError={maintenanceConfig === "network"}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
               isMaintenanceFromBackend={maintenanceFromBackend}
             />
           )}
@@ -408,7 +428,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -418,7 +438,7 @@ function App() {
             <TermsAndServices
               theme={themeData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -429,7 +449,7 @@ function App() {
               theme={themeData!}
               lineUrl={lineUrl || ""}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -441,7 +461,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -452,7 +472,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -463,7 +483,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -474,7 +494,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -485,7 +505,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -496,7 +516,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -507,7 +527,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -518,7 +538,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -529,7 +549,7 @@ function App() {
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -540,7 +560,7 @@ function App() {
               theme={themeData!}
               lineUrl={lineUrl || ""}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
@@ -550,7 +570,7 @@ function App() {
             <RequestImage
               theme={themeData!}
               onFormatReset={handleFormatReset}
-              onBeforeClose={destroySSE}
+              onBeforeClose={handleBeforeClose}
             />
           }
         />
