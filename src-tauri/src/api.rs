@@ -445,6 +445,8 @@ pub async fn upload_to_presigned_url(
         .await
         .map_err(|e| format!("File read error: {}", e))?;
 
+    let file_size = file_data.len();
+
     let res = client
         .put(&url)
         .header("Content-Type", &content_type)
@@ -456,10 +458,23 @@ pub async fn upload_to_presigned_url(
 
     let status = res.status();
 
+    // เดิมคืน Ok(success:false) ตอน PUT ไม่ผ่าน → ฝั่ง React ที่ใช้ try/catch
+    // ไม่มีทางรู้ แล้วเขียน log ว่า "Uploaded OK" พร้อมส่ง key ที่ไม่มีไฟล์จริง
+    // ไปให้ confirm-upload → backend ตั้ง session เป็น failed → ลูกค้าเปิด QR เจอ 404
+    // ตอนนี้ล้มเหลวคือ Err เสมอ พร้อมบอก status + body ที่ S3 ตอบกลับมา
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        let snippet: String = body.chars().take(300).collect();
+        return Err(format!(
+            "Upload failed: HTTP {} ({} bytes sent) — {}",
+            status, file_size, snippet
+        ));
+    }
+
     Ok(ApiResponse {
-        success: status.is_success(),
+        success: true,
         data: None,
-        error: if !status.is_success() { Some(format!("Upload status: {}", status)) } else { None },
+        error: None,
     })
 }
 
@@ -489,10 +504,26 @@ pub async fn confirm_upload(
 
     let (status, body) = parse_response_body(res).await;
 
+    // confirm-upload ที่ไม่ผ่านคือเรื่องใหญ่ — backend อาจตั้ง session เป็น failed
+    // (เมื่อ verify ไฟล์ไม่ครบ) แล้วลูกค้าจะเปิด QR ไม่ได้เลย ต้องเป็น Err
+    // เพื่อให้ผู้เรียกเก็บ pending record ไว้ retry และเขียน log ตามจริง
+    if !status.is_success() {
+        let message = body
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| body.to_string());
+        return Err(format!(
+            "confirm_upload failed: HTTP {} — {}",
+            status,
+            message.chars().take(300).collect::<String>()
+        ));
+    }
+
     Ok(ApiResponse {
-        success: status.is_success(),
+        success: true,
         data: Some(body),
-        error: if !status.is_success() { Some(format!("Status: {}", status)) } else { None },
+        error: None,
     })
 }
 

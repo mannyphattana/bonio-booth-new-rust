@@ -465,6 +465,9 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         .sort((a: any, b: any) => a.order - b.order);
 
       const uploadedFiles: { key: string; type: string; order: number }[] = [];
+      // ไฟล์ที่ยิงขึ้น storage ไม่ผ่าน — ต้องไม่ถูกส่งไปให้ confirm-upload
+      // (ถ้าส่ง key ที่ไม่มีไฟล์จริง backend จะตั้ง session เป็น failed ทั้งชุด)
+      const failedUploads: string[] = [];
       let photoIdx = 0;
 
       if (photoIdx < photoUrls.length && composedImage) {
@@ -486,6 +489,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             order: photoUrls[photoIdx].order,
           });
         } catch (err) {
+          failedUploads.push(`frame (${photoUrls[photoIdx].key})`);
           appLogger.error(CTX, "Upload frame photo failed:", err);
           logError(
             "upload_photo_frame_failed",
@@ -517,6 +521,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             order: photoUrls[photoIdx].order,
           });
         } catch (err) {
+          failedUploads.push(`photo ${i + 1} (${photoUrls[photoIdx].key})`);
           appLogger.error(CTX, `Upload photo ${i + 1} failed:`, err);
           logError(
             "upload_photo_failed",
@@ -543,6 +548,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             order: videoUrls[0].order,
           });
         } catch (err) {
+          failedUploads.push(`video (${videoUrls[0].key})`);
           appLogger.error(CTX, "Upload video failed:", err);
           logError(
             "upload_video_failed",
@@ -553,13 +559,24 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         }
       }
 
+      // มีไฟล์หลุด แต่ยังเหลือของที่ขึ้นสำเร็จ → ยืนยันเท่าที่มี ลูกค้าจะได้เปิด QR ได้
+      // (ถ้าส่ง key ที่ล้มเหลวไปด้วย backend จะ verify ไม่ผ่านแล้วทิ้งทั้งชุด)
+      if (failedUploads.length > 0) {
+        const summary = `${failedUploads.length}/${uploadUrls.length} file(s) failed to upload: ${failedUploads.join(", ")}`;
+        appLogger.warn(CTX, summary);
+        logError("upload_partial_failure", summary, undefined, "error");
+      }
+
       if (uploadedFiles.length > 0) {
         try {
           await invoke("confirm_upload", {
             sessionId,
             uploadedFiles,
           });
-          appLogger.info(CTX, "confirm_upload OK — files:", uploadedFiles.length);
+          appLogger.info(
+            CTX,
+            `confirm_upload OK — files: ${uploadedFiles.length}/${uploadUrls.length}`,
+          );
           pendingRecordRef.current = null;
           if (localTxIdRef.current) {
             removePendingUpload(localTxIdRef.current);
