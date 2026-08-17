@@ -4,6 +4,8 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize)]
 pub struct FilterInfo {
@@ -172,6 +174,157 @@ pub async fn apply_lut_filter_preview(
     Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(&buf)))
 }
 
+/// จำนวนครั้งที่ยอมโหลดรูปกรอบใหม่ก่อนยอมแพ้
+const FRAME_FETCH_ATTEMPTS: u32 = 3;
+/// จำนวนกรอบที่เก็บ cache ไว้ (ตู้หนึ่งใช้กรอบไม่กี่แบบต่อวัน)
+const FRAME_CACHE_CAPACITY: usize = 8;
+const FRAME_FETCH_TIMEOUT_SECS: u64 = 30;
+
+/// cache ไบต์ของกรอบที่โหลด "และ decode เป็นรูปได้จริง" แล้ว (key = URL)
+/// ตู้ใช้กรอบเดิมซ้ำทั้งวัน — โหลดสำเร็จครั้งเดียวก็ไม่ต้องพึ่งเน็ตอีกจนกว่าจะปิดแอป
+static FRAME_CACHE: LazyLock<Mutex<Vec<(String, Vec<u8>)>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn cached_frame(url: &str) -> Option<Vec<u8>> {
+    let cache = FRAME_CACHE.lock().ok()?;
+    cache
+        .iter()
+        .find(|(cached_url, _)| cached_url == url)
+        .map(|(_, bytes)| bytes.clone())
+}
+
+fn cache_frame(url: &str, bytes: &[u8]) {
+    if let Ok(mut cache) = FRAME_CACHE.lock() {
+        if cache.iter().any(|(cached_url, _)| cached_url == url) {
+            return;
+        }
+        if cache.len() >= FRAME_CACHE_CAPACITY {
+            cache.remove(0);
+        }
+        cache.push((url.to_string(), bytes.to_vec()));
+    }
+}
+
+/// โหลดรูปกรอบเฟรมให้ได้ไบต์ที่ "decode เป็นรูปได้จริง"
+///
+/// เดิมโค้ดยิง request ครั้งเดียว ไม่เช็ค HTTP status และไม่ลองใหม่ — พอ CDN/S3
+/// ตอบ error body (หรือเน็ตสะดุด) ไบต์ที่ได้ไม่ใช่รูป แล้ว `image::load_from_memory`
+/// ล้มด้วย "The image format could not be determined" ทำให้ compose_frame คืน error
+/// ทันทีและลูกค้าไม่ได้รูปพิมพ์เลย (เจอหน้างานตู้ Tha Chang Bangsaen 2026-08-12)
+///
+/// ตอนนี้: เช็ค status, validate ว่าเป็นรูปก่อนคืนค่า, retry พร้อม backoff และ
+/// cache ไว้ให้ transaction ถัดไป
+pub async fn fetch_frame_image_bytes(frame_image_url: &str) -> Result<Vec<u8>, String> {
+    if frame_image_url.starts_with("data:") {
+        let clean = frame_image_url.split(',').nth(1).unwrap_or("");
+        return STANDARD
+            .decode(clean)
+            .map_err(|e| format!("Frame base64 decode: {}", e));
+    }
+
+    if let Some(bytes) = cached_frame(frame_image_url) {
+        println!("[frame_fetch] cache hit ({} bytes) for {}", bytes.len(), frame_image_url);
+        return Ok(bytes);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(FRAME_FETCH_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Frame client error: {}", e))?;
+
+    let mut last_err = String::new();
+    for attempt in 1..=FRAME_FETCH_ATTEMPTS {
+        match try_fetch_frame(&client, frame_image_url).await {
+            Ok(bytes) => {
+                if attempt > 1 {
+                    println!("[frame_fetch] succeeded on attempt {}", attempt);
+                }
+                cache_frame(frame_image_url, &bytes);
+                return Ok(bytes);
+            }
+            Err(e) => {
+                println!("[frame_fetch] attempt {}/{} failed: {}", attempt, FRAME_FETCH_ATTEMPTS, e);
+                last_err = e;
+                if attempt < FRAME_FETCH_ATTEMPTS {
+                    // backoff สั้นๆ ให้ CDN/เน็ตได้หายสะดุด แต่ลูกค้าไม่รอนาน
+                    tokio::time::sleep(Duration::from_millis(400 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Frame fetch failed after {} attempts: {}",
+        FRAME_FETCH_ATTEMPTS, last_err
+    ))
+}
+
+/// ยิง 1 ครั้ง แล้วตรวจให้ครบว่าได้ "รูป" จริงๆ ไม่ใช่ error body
+async fn try_fetch_frame(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("download error: {}", e))?;
+
+    let status = res.status();
+    let content_type = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| format!("read body error (HTTP {}): {}", status, e))?
+        .to_vec();
+
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {} (content-type: {}, {} bytes): {}",
+            status,
+            content_type,
+            bytes.len(),
+            body_snippet(&bytes)
+        ));
+    }
+
+    if bytes.is_empty() {
+        return Err(format!("empty body (HTTP {}, content-type: {})", status, content_type));
+    }
+
+    // decode ตรงนี้เลย เพื่อไม่ให้ไบต์เสียๆ หลุดไปถึงคนเรียก (และไม่ถูก cache)
+    if let Err(e) = image::load_from_memory(&bytes) {
+        return Err(format!(
+            "not an image (HTTP {}, content-type: {}, {} bytes): {} — body: {}",
+            status,
+            content_type,
+            bytes.len(),
+            e,
+            body_snippet(&bytes)
+        ));
+    }
+
+    Ok(bytes)
+}
+
+/// ตัด body มาโชว์ใน log พอให้รู้ว่า S3/CDN ตอบอะไรกลับมา
+fn body_snippet(bytes: &[u8]) -> String {
+    const MAX: usize = 180;
+    let end = bytes.len().min(MAX);
+    let snippet = String::from_utf8_lossy(&bytes[..end])
+        .replace(['\n', '\r'], " ")
+        .trim()
+        .to_string();
+    if bytes.len() > MAX {
+        format!("{}…", snippet)
+    } else {
+        snippet
+    }
+}
+
 #[tauri::command]
 pub async fn compose_frame(
     frame_image_url: String,
@@ -180,23 +333,7 @@ pub async fn compose_frame(
     frame_width: u32,
     frame_height: u32,
 ) -> Result<String, String> {
-    let frame_bytes = if frame_image_url.starts_with("data:") {
-        let clean = frame_image_url.split(',').nth(1).unwrap_or("");
-        STANDARD
-            .decode(clean)
-            .map_err(|e| format!("Frame base64 decode: {}", e))?
-    } else {
-        let client = reqwest::Client::new();
-        let res = client
-            .get(&frame_image_url)
-            .send()
-            .await
-            .map_err(|e| format!("Frame download error: {}", e))?;
-        res.bytes()
-            .await
-            .map_err(|e| format!("Frame bytes error: {}", e))?
-            .to_vec()
-    };
+    let frame_bytes = fetch_frame_image_bytes(&frame_image_url).await?;
 
     let frame_img = image::load_from_memory(&frame_bytes)
         .map_err(|e| format!("Frame load error: {}", e))?;

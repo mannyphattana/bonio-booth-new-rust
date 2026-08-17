@@ -475,23 +475,19 @@ pub async fn compose_frame_video(
     
     println!("[compose_frame_video] 📥 Downloading frame from: {}", frame_image_url);
 
-    let client = reqwest::Client::new();
-    let response = client.get(&frame_image_url)
-        .send()
+    // ใช้ตัวโหลดกลาง (retry + validate + cache) ตัวเดียวกับ compose_frame —
+    // ไม่งั้น CDN สะดุดครั้งเดียวก็เสียวิดีโอทั้งเซ็ต
+    let frame_bytes = crate::image_processing::fetch_frame_image_bytes(&frame_image_url)
         .await
-        .map_err(|e| format!("Frame download error: {}", e))?;
+        .map_err(|e| {
+            let err_msg = format!(
+                "❌ ลิงก์รูปกรอบเฟรมมีปัญหา: {} — กรุณาเช็คว่าลิงก์เป็น Public และไม่ใช่ไฟล์ที่ถูกลบไปแล้ว",
+                e
+            );
+            println!("{}", err_msg);
+            err_msg
+        })?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let err_msg = format!("❌ ลิงก์รูปกรอบเฟรมมีปัญหา (HTTP {}): กรุณาเช็คว่าลิงก์เป็น Public และไม่ใช่ไฟล์ที่ถูกลบไปแล้ว", status);
-        println!("{}", err_msg);
-        return Err(err_msg);
-    }
-
-    let frame_bytes = response.bytes()
-        .await
-        .map_err(|e| format!("Frame bytes error: {}", e))?;
-        
     fs::write(&frame_path, &frame_bytes)
         .map_err(|e| format!("Frame write error: {}", e))?;
 
