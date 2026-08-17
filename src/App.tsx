@@ -307,24 +307,34 @@ function App() {
 
   // Background retry สำหรับ pending uploads ที่ค้างไว้
   // เริ่มหลัง machine verified แล้ว 30 วินาที จากนั้น retry ทุก 10 นาที
+  //
+  // ยิงเฉพาะตอนตู้อยู่หน้า home (ไม่มีลูกค้าใช้งาน) — วิดีโอย้อนหลังไฟล์ละสิบกว่า MB
+  // ถ้าไปยิงตอนลูกค้ากำลังถ่าย/รอ QR จะแย่งแบนด์วิดท์กับ upload ของรอบปัจจุบัน
+  // ถึงรอบแล้วตู้ไม่ว่างก็ข้ามไปรอบถัดไป (อีก 10 นาที) — ไม่ได้ยกเลิก แค่เลื่อน
   useEffect(() => {
     if (!isVerified) return;
 
     appLogger.info("[App]", "Scheduling background retry for pending uploads");
 
-    const initialTimer = setTimeout(() => {
-      appLogger.info("[App]", "Running initial pending upload retry");
+    const runRetryWhenIdle = (label: string) => {
+      if (!isOnHomePageRef.current) {
+        appLogger.info(
+          "[App]",
+          `Skipping ${label} pending upload retry — booth is mid-session, will try next cycle`,
+        );
+        return;
+      }
+      appLogger.info("[App]", `Running ${label} pending upload retry`);
       retryPendingUploads().catch((e) => {
-        appLogger.warn("[App]", `retryPendingUploads (initial) failed: ${e}`);
+        appLogger.warn("[App]", `retryPendingUploads (${label}) failed: ${e}`);
       });
-    }, 30_000);
+    };
 
-    const periodicInterval = setInterval(() => {
-      appLogger.info("[App]", "Running periodic pending upload retry");
-      retryPendingUploads().catch((e) => {
-        appLogger.warn("[App]", `retryPendingUploads (periodic) failed: ${e}`);
-      });
-    }, 10 * 60 * 1000); // ทุก 10 นาที
+    const initialTimer = setTimeout(() => runRetryWhenIdle("initial"), 30_000);
+    const periodicInterval = setInterval(
+      () => runRetryWhenIdle("periodic"),
+      10 * 60 * 1000,
+    ); // ทุก 10 นาที
 
     return () => {
       clearTimeout(initialTimer);
