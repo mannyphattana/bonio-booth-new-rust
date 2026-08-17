@@ -414,6 +414,7 @@ pub fn run() {
             video::save_to_local_drive,
             video::copy_video_to_local_drive,
             video::check_file_exists,
+            video::list_saved_transaction_files,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

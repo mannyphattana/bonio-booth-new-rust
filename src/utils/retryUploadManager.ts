@@ -21,6 +21,7 @@ import {
   removePendingUpload,
   incrementRetryCount,
   isUploadActive,
+  addPendingUpload,
   type PendingUploadRecord,
   type PendingUploadFile,
 } from "./pendingUploadStore";
@@ -262,4 +263,82 @@ export async function retryPendingUploads(): Promise<void> {
   }
 
   appLogger.info(CTX, "Retry cycle complete");
+}
+
+/**
+ * อัปโหลดไฟล์ของ transaction เดิมซ้ำ โดยดึงจากไฟล์ที่ยังอยู่บนดิสก์ของตู้
+ *
+ * ใช้ตอน dashboard สั่งมาทาง SSE (`request-reupload`) — ไม่ต้องพึ่ง pending record
+ * เดิมซึ่งอาจถูกลบไปแล้ว แต่ประกอบรายการใหม่จากชื่อไฟล์ใน Saved_Photos ตรงๆ
+ *
+ * ยิงทันทีไม่รอรอบ 10 นาที เพราะเป็นคำสั่งที่คนกดเองและกำลังรอดูผล
+ */
+export async function reuploadTransactionFromDisk(
+  transactionId: string,
+): Promise<{ success: boolean; message: string; files: number }> {
+  const txId = (transactionId || "").trim();
+  if (!txId) {
+    return { success: false, message: "transactionId is empty", files: 0 };
+  }
+
+  appLogger.info(CTX, `Re-upload requested for transaction ${txId}`);
+
+  let saved: Array<{
+    file_type: string;
+    local_path: string;
+    order: number;
+    content_type: string;
+  }>;
+  try {
+    saved = await invoke("list_saved_transaction_files", {
+      transactionId: txId,
+    });
+  } catch (err) {
+    appLogger.error(CTX, `list_saved_transaction_files failed for ${txId}:`, err);
+    return { success: false, message: `ไม่สามารถอ่านไฟล์ในเครื่อง: ${err}`, files: 0 };
+  }
+
+  if (!saved || saved.length === 0) {
+    appLogger.warn(CTX, `No saved files on disk for transaction ${txId}`);
+    return {
+      success: false,
+      message: "ไม่พบไฟล์ของ transaction นี้ในเครื่อง (อาจถูกลบไปแล้ว)",
+      files: 0,
+    };
+  }
+
+  const record: PendingUploadRecord = {
+    txId,
+    transactionId: txId,
+    createdAt: new Date().toISOString(),
+    retryCount: 0,
+    files: saved.map((f) => ({
+      type: f.file_type as PendingUploadFile["type"],
+      localPath: f.local_path,
+      order: f.order,
+      contentType: f.content_type,
+    })),
+  };
+
+  addPendingUpload(record);
+  appLogger.info(
+    CTX,
+    `Queued re-upload for ${txId} — ${record.files.length} file(s) found on disk`,
+  );
+
+  // ยิงรอบ retry ทันที (ตัว guard ภายในกันการรันซ้อนอยู่แล้ว)
+  await retryPendingUploads();
+
+  const stillPending = getRetryablePending().some((r) => r.txId === txId);
+  return stillPending
+    ? {
+        success: false,
+        message: "อัปโหลดซ้ำยังไม่สำเร็จ ระบบจะลองอีกใน 10 นาที",
+        files: record.files.length,
+      }
+    : {
+        success: true,
+        message: "อัปโหลดซ้ำสำเร็จ ลิงก์เดิมของลูกค้าใช้งานได้แล้ว",
+        files: record.files.length,
+      };
 }

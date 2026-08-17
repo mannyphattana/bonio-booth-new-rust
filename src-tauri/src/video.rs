@@ -846,3 +846,101 @@ mod tests {
         }
     }
 }
+
+/// ไฟล์ของ transaction หนึ่งรายการที่ยังเก็บอยู่บนดิสก์ของตู้
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SavedTransactionFile {
+    /// "frame" | "photo" | "video" — ตรงกับ PendingUploadFile ฝั่ง frontend
+    pub file_type: String,
+    pub local_path: String,
+    pub order: u32,
+    pub content_type: String,
+}
+
+/// หาไฟล์ทั้งหมดของ transaction จาก C:\boniobooth\Saved_Photos
+///
+/// ใช้ตอน dashboard สั่ง re-upload ย้อนหลัง (SSE `request-reupload`) — ตู้เก็บไฟล์
+/// ต้นฉบับไว้ตามชื่อ `BonioBooth_<txId>_Frame.jpg` / `_Photo_N.jpg` / `_Video.mp4`
+/// จึงประกอบรายการคืนได้จากชื่อไฟล์ตรงๆ ไม่ต้องพึ่ง record ที่อาจถูกลบไปแล้ว
+///
+/// คืนรายการที่เรียงแบบเดียวกับตอนอัปโหลดครั้งแรก (frame ก่อน แล้วรูปเดี่ยวตามลำดับ
+/// ปิดท้ายด้วยวิดีโอ) ถ้าไม่เจอไฟล์เลยจะคืน list ว่าง
+#[tauri::command]
+pub async fn list_saved_transaction_files(
+    transaction_id: String,
+) -> Result<Vec<SavedTransactionFile>, String> {
+    if transaction_id.trim().is_empty() {
+        return Err("transaction_id is required".to_string());
+    }
+
+    let save_dir = std::path::PathBuf::from(r"C:\boniobooth\Saved_Photos");
+    if !save_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let prefix = format!("BonioBooth_{}_", transaction_id.trim());
+    let mut frame: Option<SavedTransactionFile> = None;
+    let mut photos: Vec<SavedTransactionFile> = Vec::new();
+    let mut video: Option<SavedTransactionFile> = None;
+
+    let entries = std::fs::read_dir(&save_dir).map_err(|e| format!("Read dir error: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let suffix = &name[prefix.len()..];
+        let local_path = path.to_string_lossy().to_string();
+
+        if suffix.eq_ignore_ascii_case("Frame.jpg") {
+            frame = Some(SavedTransactionFile {
+                file_type: "frame".to_string(),
+                local_path,
+                order: 0,
+                content_type: "image/jpeg".to_string(),
+            });
+        } else if suffix.eq_ignore_ascii_case("Video.mp4") {
+            video = Some(SavedTransactionFile {
+                file_type: "video".to_string(),
+                local_path,
+                order: 0,
+                content_type: "video/mp4".to_string(),
+            });
+        } else if let Some(rest) = suffix.strip_prefix("Photo_") {
+            // "Photo_3.jpg" → order 3
+            if let Some(num) = rest.strip_suffix(".jpg").or_else(|| rest.strip_suffix(".JPG")) {
+                if let Ok(order) = num.parse::<u32>() {
+                    photos.push(SavedTransactionFile {
+                        file_type: "photo".to_string(),
+                        local_path,
+                        order,
+                        content_type: "image/jpeg".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    photos.sort_by_key(|p| p.order);
+
+    let mut files: Vec<SavedTransactionFile> = Vec::new();
+    if let Some(f) = frame {
+        files.push(f);
+    }
+    files.extend(photos);
+    if let Some(v) = video {
+        files.push(v);
+    }
+
+    log::info!(
+        "[Reupload] Found {} saved file(s) for transaction {}",
+        files.len(),
+        transaction_id
+    );
+
+    Ok(files)
+}
