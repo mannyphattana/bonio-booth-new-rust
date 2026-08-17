@@ -175,42 +175,32 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     if (applying) return;
     if (getAssignedCount() < slots.length) return;
 
-    // 1. ดึง Index ที่ลูกค้าเลือกมาทั้งหมด
+    // 1. Resolve final capture indexes (with video fallback)
     let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
       const captureIdx = photoAssignments[slotIdx];
       return captureIdx !== undefined ? captureIdx : 0;
     });
 
-    // 2. ค้นหากองหนุน: ดึง Index เฉพาะรูปที่ "ไม่ได้ถูกเลือก" และ "มีวิดีโอสมบูรณ์"
     let spareValidIndexes = captures
       .map((cap, idx) => ({ cap, idx }))
-      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx)) // ต้องไม่ได้ถูกเลือกไปแล้ว
-      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "") // วิดีโอต้องใช้งานได้
+      .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx))
+      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "")
       .map((item) => item.idx);
 
-    // 3. สแกนตรวจสอบรูปที่ลูกค้าเลือก ถ้ารูปไหนวิดีโอพัง สลับเอาของดีมาใส่แทนทั้งชุด
     finalSelectedCaptureIndexes = finalSelectedCaptureIndexes.map((currentIdx) => {
       const currentCap = captures[currentIdx];
       const isBroken = !currentCap || !currentCap.videoPath || currentCap.videoPath.trim() === "";
-
       if (isBroken) {
-        console.warn(`[Smart Fallback] รูปที่ ${currentIdx + 1} ไม่มีวิดีโอ!`);
-        
         if (spareValidIndexes.length > 0) {
-          // ดึงกองหนุนมาสวมรอย "ทั้งรูปภาพและวิดีโอ" จะได้ไม่มีอาการภาพกระตุก
-          const spareIdx = spareValidIndexes.shift()!;
-          console.log(`-> สลับไปใช้รูปและวิดีโอจากช่องที่ ${spareIdx + 1} แทนเรียบร้อย`);
-          return spareIdx; 
+          return spareValidIndexes.shift()!;
         } else {
-          // ท่าไม้ตายก้นหีบ: ถ้ากองหนุนพังเกลี้ยงหมดตู้จริงๆ ให้ดึงวิดีโอไหนก็ได้ที่สมบูรณ์มาใช้กันระบบแครช/จอดำ
           const emergencyIdx = captures.findIndex(c => c && c.videoPath && c.videoPath.trim() !== "");
           return emergencyIdx !== -1 ? emergencyIdx : currentIdx;
         }
       }
-      return currentIdx; // ถ้ารูปปกติ ก็ใช้รูปเดิมที่ลูกค้าเลือก
+      return currentIdx;
     });
 
-    // 4. ประกอบข้อมูลให้พร้อมส่ง
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
 
     // ตู้พิเศษ: ไม่มีหน้าให้เลือกฟิลเตอร์ (รูปผ่านฟิลเตอร์มาตั้งแต่ตอนถ่ายแล้ว)
@@ -219,6 +209,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
       return;
     }
 
+    // ตู้ปกติ (FORCED_FILTER_ID = null) ยังไปหน้าเลือกฟิลเตอร์ตามเดิม
     navigate("/apply-filter", {
       state: {
         ...state,
@@ -227,7 +218,6 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
       },
     });
   };
-  // 👆👆👆 จบการแก้ไข 👆👆👆
 
   if (!selectedFrame) return null;
 
@@ -335,6 +325,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                           width: "100%",
                           height: "100%",
                           objectFit: "cover",
+                          filter: "grayscale(100%)",
                         }}
                       />
                     )}
@@ -393,7 +384,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                       objectFit: "cover",
                       display: "block",
                       opacity: isSelected ? 0.7 : 1,
-                      filter: isSelected ? "brightness(0.7)" : "brightness(1)",
+                      filter: isSelected ? "grayscale(100%) brightness(0.7)" : "grayscale(100%)",
                     }}
                   />
                   {isSelected && (
@@ -476,8 +467,8 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                     ? theme.primaryColor
                     : "gray",
               color: theme.textButtonColor,
-              padding: "12px 40px", // ลดขนาดปุ่มลง
-              fontSize: "20px", // ลดขนาดตัวอักษรลง
+              padding: "12px 40px",
+              fontSize: "20px",
               borderRadius: "30px",
             }}
           >

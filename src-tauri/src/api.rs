@@ -649,6 +649,109 @@ pub async fn send_error_log(
     Ok(())
 }
 
+// ============ App Session Log ============
+
+#[tauri::command]
+pub async fn create_app_session_log(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    machine_id: String,
+    workspace_id: Option<String>,
+    started_at: String,
+    app_version: Option<String>,
+) -> Result<(), String> {
+    let machine_port = state.machine_port.lock().unwrap().clone();
+    let client = &state.http_client;
+    let url = format!("{}/api/app-session-logs", API_BASE_URL);
+
+    let mut payload = serde_json::json!({
+        "sessionId": session_id,
+        "machineId": machine_id,
+        "startedAt": started_at,
+        "closeReason": "unknown",
+    });
+
+    if let Some(wid) = workspace_id {
+        payload["workspaceId"] = serde_json::Value::String(wid);
+    }
+    if let Some(ver) = app_version {
+        payload["appVersion"] = serde_json::Value::String(ver);
+    }
+
+    let result = client
+        .post(&url)
+        .header("X-Machine-Port", &machine_port)
+        .query(&[("machineId", &machine_id)])
+        .json(&payload)
+        .send()
+        .await;
+
+    match result {
+        Ok(res) => {
+            log::info!("[API] create_app_session_log: {} ({})", session_id, res.status());
+        }
+        Err(e) => {
+            log::warn!("[API] create_app_session_log failed: {}", e);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_app_session_log(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+    ended_at: String,
+    close_reason: String,
+    duration_seconds: Option<i64>,
+    entries: Option<serde_json::Value>,
+    summary: Option<String>,
+) -> Result<(), String> {
+    let machine_id = state.machine_id.lock().unwrap().clone();
+    let machine_port = state.machine_port.lock().unwrap().clone();
+    let client = &state.http_client;
+    let url = format!("{}/api/app-session-logs/{}", API_BASE_URL, session_id);
+
+    let mut payload = serde_json::json!({
+        "endedAt": ended_at,
+        "closeReason": close_reason,
+    });
+
+    if let Some(dur) = duration_seconds {
+        payload["durationSeconds"] = serde_json::json!(dur);
+    }
+    if let Some(e) = entries {
+        payload["entries"] = e;
+    }
+    if let Some(s) = summary {
+        payload["summary"] = serde_json::Value::String(s);
+    }
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client
+            .patch(&url)
+            .header("X-Machine-Port", &machine_port)
+            .query(&[("machineId", &machine_id)])
+            .json(&payload)
+            .send(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(res)) => {
+            log::info!("[API] update_app_session_log: {} ({})", session_id, res.status());
+        }
+        Ok(Err(e)) => {
+            log::warn!("[API] update_app_session_log failed: {}", e);
+        }
+        Err(_) => {
+            log::warn!("[API] update_app_session_log timed out (5s)");
+        }
+    }
+    Ok(())
+}
+
 // ============ Device Alert ============
 
 #[tauri::command]

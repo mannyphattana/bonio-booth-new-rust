@@ -1273,6 +1273,7 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
                         width: "100%",
                         height: "100%",
                         objectFit: "cover",
+                        filter: "grayscale(100%)",
                       }}
                     />
                   ) : (

@@ -592,7 +592,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
       style={{
         backgroundImage: `url(${theme.backgroundSecond})`,
         justifyContent: "flex-start",
-        padding: "120px 0",
+        padding: "65px 0 10px",
       }}
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
@@ -632,22 +632,20 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "8px 24px",
+          padding: "4px 24px",
           width: "100%",
           minHeight: 0,
+          overflow: "hidden",
         }}
       >
         {composedImage ? (
           <div
             style={{
-              maxWidth: "80%",
-              maxHeight: "45vh",
+              height: "100%",
+              maxWidth: "90%",
               borderRadius: 12,
               overflow: "hidden",
               boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
               aspectRatio: `${frameWidth} / ${frameHeight}`,
             }}
           >
@@ -655,9 +653,9 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
               src={composedImage}
               alt="Final Photo"
               style={{
-                maxWidth: "100%",
-                maxHeight: "45vh",
-                objectFit: "contain",
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
                 borderRadius: 12,
               }}
             />

@@ -41,7 +41,7 @@ export const PRINT_STORAGE_KEYS = {
 } as const;
 
 export const ACTIVE_PAPER_TYPE: PaperType =
-  ACTIVE_PRINT_PROFILE === "customer_a4" ? "a4" : "photo_4x6";
+  ACTIVE_PRINT_PROFILE === "customer_a4" ? "a3" : "photo_4x6";
 
 const readStorageWithFallback = (activeKey: string, legacyKey: string): string | null => {
   const activeValue = localStorage.getItem(activeKey);
