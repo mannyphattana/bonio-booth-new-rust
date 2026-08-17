@@ -162,6 +162,140 @@ fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
     Err("Filters directory not found".to_string())
 }
 
+/// เพิ่ม Windows Defender exclusion ให้ตัวอัปเดตดาวน์โหลด/ติดตั้ง/รีสตาร์ทได้
+/// โดยไม่ถูกสแกนกั้นหรือ quarantine ไฟล์ installer
+///
+/// ต้องสิทธิ์ Administrator จึงยกสิทธิ์ด้วย PowerShell `Start-Process -Verb RunAs`
+/// (เด้ง UAC ให้พนักงานกดยอมรับหนึ่งครั้ง) — คำสั่งนี้ **เพิ่ม exclusion เท่านั้น**
+/// ไม่มีการปิด real-time protection หรือแตะการตั้งค่าความปลอดภัยอื่นเลย
+///
+/// คืนข้อความสรุปว่ารายการไหนเพิ่มผ่าน/ไม่ผ่าน เพื่อให้เห็นผลจริงบนหน้าจอ
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn whitelist_updater() -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let exe_path = std::env::current_exe().map_err(|e| format!("current_exe failed: {}", e))?;
+    let exe_name = exe_path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Bonio Booth.exe".to_string());
+    let install_dir = exe_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "cannot resolve install dir".to_string())?;
+    // โฟลเดอร์ผู้ผลิตที่ครอบ install dir (NSIS ติดตั้งเป็น ...\Bonio Booth\)
+    let vendor_dir = exe_path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_string_lossy().to_string());
+    // updater ของ Tauri โหลด installer ลง temp ก่อนรัน
+    let temp_dir = std::env::temp_dir().to_string_lossy().to_string();
+
+    let mut exclusion_paths = vec![install_dir.clone(), temp_dir.clone()];
+    if let Some(vendor) = vendor_dir {
+        if vendor != install_dir {
+            exclusion_paths.push(vendor);
+        }
+    }
+
+    let work_dir = std::env::temp_dir().join("bonio-booth");
+    std::fs::create_dir_all(&work_dir).map_err(|e| format!("create temp dir failed: {}", e))?;
+    let script_path = work_dir.join("whitelist-updater.ps1");
+    let result_path = work_dir.join("whitelist-updater-result.txt");
+    let _ = std::fs::remove_file(&result_path);
+
+    // PowerShell array literal — escape single quote ตามกฎ PS ('' คือ ' หนึ่งตัว)
+    let ps_list = |items: &[String]| -> String {
+        items
+            .iter()
+            .map(|i| format!("'{}'", i.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+
+    let script = format!(
+        r#"$ErrorActionPreference = 'Continue'
+$lines = @()
+$paths = @({paths})
+foreach ($p in $paths) {{
+  try {{
+    Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+    $lines += "OK   path    $p"
+  }} catch {{
+    $lines += "FAIL path    $p :: $($_.Exception.Message)"
+  }}
+}}
+$procs = @({procs})
+foreach ($proc in $procs) {{
+  try {{
+    Add-MpPreference -ExclusionProcess $proc -ErrorAction Stop
+    $lines += "OK   process $proc"
+  }} catch {{
+    $lines += "FAIL process $proc :: $($_.Exception.Message)"
+  }}
+}}
+$lines | Out-File -FilePath '{result}' -Encoding utf8
+"#,
+        paths = ps_list(&exclusion_paths),
+        procs = ps_list(&[exe_name.clone()]),
+        result = result_path.to_string_lossy().replace('\'', "''"),
+    );
+
+    std::fs::write(&script_path, script).map_err(|e| format!("write script failed: {}", e))?;
+
+    // ยกสิทธิ์แล้วรอให้เสร็จ ถ้าพนักงานกด "No" ที่ UAC ตัว Start-Process จะ error
+    let launcher = format!(
+        "Start-Process -FilePath 'powershell' -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'",
+        script_path.to_string_lossy().replace('\'', "''")
+    );
+
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &launcher,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("launch elevated powershell failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let hint = if stderr.contains("canceled") || stderr.contains("cancelled") {
+            "ผู้ใช้กดยกเลิก UAC"
+        } else {
+            "ยกสิทธิ์ Administrator ไม่สำเร็จ"
+        };
+        log::warn!("[Whitelist] elevation failed: {}", stderr.trim());
+        return Err(format!("{} — {}", hint, stderr.trim()));
+    }
+
+    let report = std::fs::read_to_string(&result_path)
+        .map_err(|e| format!("อ่านผลลัพธ์ไม่ได้ (สคริปต์อาจไม่ได้รัน): {}", e))?;
+    let report = report.trim().to_string();
+    log::info!("[Whitelist] Defender exclusions applied:\n{}", report);
+
+    if report.is_empty() {
+        return Err("สคริปต์รันแล้วแต่ไม่มีผลลัพธ์กลับมา".to_string());
+    }
+    if report.lines().all(|l| l.starts_with("FAIL")) {
+        return Err(report);
+    }
+
+    Ok(report)
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn whitelist_updater() -> Result<String, String> {
+    Err("รองรับเฉพาะ Windows".to_string())
+}
+
 /// Resolve LUT file path: takes a .cube filename and returns its absolute path
 #[tauri::command]
 fn resolve_lut_path(app: tauri::AppHandle, lut_file: String) -> Result<String, String> {
@@ -306,6 +440,7 @@ pub fn run() {
             get_app_dir,
             resolve_lut_path,
             debug_paths,
+            whitelist_updater,
             exit_app,
             connect_sse,
             destroy_sse,
