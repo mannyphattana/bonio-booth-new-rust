@@ -280,12 +280,35 @@ function App() {
     }
   }, []);
 
+  /**
+   * dashboard สั่งอัปโหลดไฟล์ของ transaction เดิมซ้ำ (จากไฟล์ที่ยังอยู่บนดิสก์เครื่องนี้)
+   *
+   * ทำได้แม้ไม่ได้อยู่หน้า home เพราะเป็นคำสั่งที่คนกดเองและกำลังรอดูผลอยู่
+   * ต่างจาก request-live-log ที่เป็นการดึงข้อมูลเฉยๆ
+   */
+  const handleRequestReupload = useCallback(async (transactionId: string) => {
+    appLogger.info("[App]", `request-reupload received — transactionId: ${transactionId}`);
+    try {
+      const { reuploadTransactionFromDisk } = await import(
+        "./utils/retryUploadManager"
+      );
+      const result = await reuploadTransactionFromDisk(transactionId);
+      appLogger.info(
+        "[App]",
+        `re-upload result for ${transactionId}: success=${result.success} files=${result.files} — ${result.message}`,
+      );
+    } catch (e) {
+      appLogger.error("[App]", `reuploadTransactionFromDisk failed: ${e}`);
+    }
+  }, []);
+
   const { destroy: destroySSE } = useSSE({
     machineId: machineData?._id || "",
     enabled: isVerified && !!machineData?._id,
     onMaintenanceMode: handleMaintenanceMode,
     onConfigUpdated: handleConfigUpdated,
     onRequestLiveLog: handleRequestLiveLog,
+    onRequestReupload: handleRequestReupload,
   });
 
   const { state: shutdownState, notifyActivity: notifyShutdownActivity } =

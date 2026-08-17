@@ -22,6 +22,8 @@ interface UseSSEOptions {
   onConnectionChange?: (connected: boolean) => void;
   /** เรียกเมื่อ backend ขอ live log snapshot จากเครื่องนี้ */
   onRequestLiveLog?: () => void;
+  /** dashboard สั่งให้อัปโหลดไฟล์ของ transaction เดิมซ้ำจากไฟล์ในเครื่อง */
+  onRequestReupload?: (transactionId: string) => void;
 }
 
 /**
@@ -44,6 +46,7 @@ export function useSSE(options: UseSSEOptions) {
     onConfigUpdated,
     onConnectionChange,
     onRequestLiveLog,
+    onRequestReupload,
   } = options;
 
   const connectedRef = useRef(false);
@@ -60,6 +63,7 @@ export function useSSE(options: UseSSEOptions) {
     onConfigUpdated,
     onConnectionChange,
     onRequestLiveLog,
+    onRequestReupload,
   });
 
   // Update callbacks ref when they change
@@ -72,8 +76,9 @@ export function useSSE(options: UseSSEOptions) {
       onConfigUpdated,
       onConnectionChange,
       onRequestLiveLog,
+    onRequestReupload,
     };
-  }, [onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConfigUpdated, onConnectionChange, onRequestLiveLog]);
+  }, [onEvent, onShutdown, onShutdownCancel, onMaintenanceMode, onConfigUpdated, onConnectionChange, onRequestLiveLog, onRequestReupload]);
 
   // Connect SSE via Rust backend
   const connect = useCallback(() => {
@@ -177,6 +182,20 @@ export function useSSE(options: UseSSEOptions) {
               appLogger.info(CTX, "[SSE] request-live-log event received");
               if (callbacks.onRequestLiveLog) callbacks.onRequestLiveLog();
               break;
+            case "request-reupload": {
+              const data = sseEvent.data as Record<string, unknown>;
+              const transactionId = (data?.transactionId as string) || "";
+              appLogger.info(
+                CTX,
+                `[SSE] request-reupload event received — transactionId: ${transactionId}`,
+              );
+              if (transactionId && callbacks.onRequestReupload) {
+                callbacks.onRequestReupload(transactionId);
+              } else if (!transactionId) {
+                appLogger.warn(CTX, "[SSE] request-reupload without transactionId — ignored");
+              }
+              break;
+            }
             // close-app is handled directly in Rust backend (calls app.exit)
           }
         });
