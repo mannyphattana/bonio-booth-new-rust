@@ -468,6 +468,8 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
       // ไฟล์ที่ยิงขึ้น storage ไม่ผ่าน — ต้องไม่ถูกส่งไปให้ confirm-upload
       // (ถ้าส่ง key ที่ไม่มีไฟล์จริง backend จะตั้ง session เป็น failed ทั้งชุด)
       const failedUploads: string[] = [];
+      // รูปรวมกรอบ = ไฟล์แรกของชุดเสมอ ถ้าใบนี้หายผลลัพธ์ที่ลูกค้าเห็นจะไม่สมบูรณ์
+      let frameUploadFailed = false;
       let photoIdx = 0;
 
       if (photoIdx < photoUrls.length && composedImage) {
@@ -490,6 +492,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
           });
         } catch (err) {
           failedUploads.push(`frame (${photoUrls[photoIdx].key})`);
+          frameUploadFailed = true;
           appLogger.error(CTX, "Upload frame photo failed:", err);
           logError(
             "upload_photo_frame_failed",
@@ -565,6 +568,28 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         const summary = `${failedUploads.length}/${uploadUrls.length} file(s) failed to upload: ${failedUploads.join(", ")}`;
         appLogger.warn(CTX, summary);
         logError("upload_partial_failure", summary, undefined, "error");
+      }
+
+      // รูปรวมกรอบเป็นไฟล์แรกเสมอ (photoUrls[0]) และเป็นพระเอกของเซ็ต —
+      // ถ้าใบนี้หลุด ยังไม่ต้อง confirm: ปล่อยให้ session คาสถานะ pending ไว้
+      // หน้าเว็บลูกค้าจะโชว์ "กำลังประมวลผล" แล้ว poll ต่อเอง ส่วน retry manager
+      // จะยิงซ้ำให้ครบภายในไม่เกิน 10 นาที ดีกว่า confirm ไปแล้วได้เซ็ตที่ขาดรูปหลัก
+      if (frameUploadFailed) {
+        appLogger.warn(
+          CTX,
+          "Frame photo missing — leaving session pending so the customer sees the processing screen; retry will complete it",
+        );
+        logError(
+          "upload_frame_missing_pending",
+          `Frame photo (first file) failed to upload — session ${sessionId} left pending for retry. txId=${localTxIdRef.current}`,
+          undefined,
+          "error",
+        );
+        queueForRetry("frame photo upload failed");
+        appLogger.info(CTX, "Upload done — total files uploaded:", uploadedFiles.length);
+        setUploadStatus("done");
+        setStatusText("กำลังประมวลผล...");
+        return;
       }
 
       if (uploadedFiles.length > 0) {
