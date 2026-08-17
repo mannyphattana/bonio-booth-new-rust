@@ -36,6 +36,11 @@ export default function ContextMenu({
     "camera" | "printer" | "paper" | "pin" | null
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // ปุ่มขออนุญาต Defender ให้ตัวอัปเดตทำงานได้ (เด้ง UAC ครั้งเดียว)
+  const [whitelistBusy, setWhitelistBusy] = useState(false);
+  const [whitelistMsg, setWhitelistMsg] = useState("");
+  const [whitelistOk, setWhitelistOk] = useState<boolean | null>(null);
   
   // State สำหรับรหัสปิดแอป (ของเดิม)
   const [showPinModal, setShowPinModal] = useState(false);
@@ -131,6 +136,36 @@ export default function ContextMenu({
       await invoke("exit_app");
     } catch {
       window.close();
+    }
+  };
+
+  /**
+   * ขอสิทธิ์ Administrator เพื่อเพิ่ม Windows Defender exclusion ให้ updater
+   * ทำครั้งเดียวต่อเครื่อง — หลังจากนี้ auto update จะไม่ถูกสแกนกั้น/quarantine
+   */
+  const handleWhitelistUpdater = async () => {
+    if (whitelistBusy) return;
+    setWhitelistBusy(true);
+    setWhitelistMsg("");
+    setWhitelistOk(null);
+    try {
+      const report = await invoke<string>("whitelist_updater");
+      appLogger.info("[ContextMenu]", "whitelist_updater OK:", report);
+      const failed = report
+        .split("\n")
+        .filter((line) => line.startsWith("FAIL")).length;
+      setWhitelistOk(failed === 0);
+      setWhitelistMsg(
+        failed === 0
+          ? "✅ เพิ่ม exclusion ให้ updater เรียบร้อย"
+          : `⚠️ เพิ่มได้บางส่วน (ไม่ผ่าน ${failed} รายการ)\n${report}`,
+      );
+    } catch (err) {
+      appLogger.error("[ContextMenu]", "whitelist_updater failed:", err);
+      setWhitelistOk(false);
+      setWhitelistMsg(`❌ ${String(err).slice(0, 200)}`);
+    } finally {
+      setWhitelistBusy(false);
     }
   };
 
@@ -603,6 +638,38 @@ export default function ContextMenu({
             <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               ปรับ Scale, Vertical, Horizontal
             </div>
+          </div>
+          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+        </button>
+
+        {/* 5. Allow Updater — เพิ่ม Defender exclusion ให้อัปเดตได้ไม่ติด */}
+        <button
+          className="context-menu-item context-menu-config-item"
+          disabled={whitelistBusy}
+          onClick={handleWhitelistUpdater}
+          style={whitelistBusy ? { opacity: 0.6, cursor: "wait" } : undefined}
+        >
+          <span style={{ fontSize: 24 }}>🛡️</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>อนุญาตให้อัปเดตได้</div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+              {whitelistBusy
+                ? "กำลังขอสิทธิ์ Administrator — กด Yes ที่หน้าต่าง UAC"
+                : "เพิ่ม Windows Defender exclusion (เด้ง UAC ครั้งเดียว)"}
+            </div>
+            {whitelistMsg && (
+              <div
+                style={{
+                  fontSize: 11,
+                  marginTop: 6,
+                  whiteSpace: "pre-wrap",
+                  textAlign: "left",
+                  color: whitelistOk ? "#7bd67b" : "#e58f8f",
+                }}
+              >
+                {whitelistMsg}
+              </div>
+            )}
           </div>
           <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
         </button>
