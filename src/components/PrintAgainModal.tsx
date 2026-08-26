@@ -9,7 +9,7 @@ const CTX = "[PrintAgainModal]";
 const MODAL_LIFETIME_SEC = 300; // 5 นาที
 const POLL_INTERVAL_MS = 3000;
 
-type Step = "select" | "coupon" | "qr" | "success";
+type Step = "confirm" | "select" | "coupon" | "qr" | "success";
 
 interface PaidInfo {
   transactionId: string;
@@ -41,7 +41,7 @@ export default function PrintAgainModal({
   onClose,
   onPaid,
 }: Props) {
-  const [step, setStep] = useState<Step>("select");
+  const [step, setStep] = useState<Step>("confirm");
   const [quantity, setQuantity] = useState<number>(1);
   const [timeLeft, setTimeLeft] = useState<number>(MODAL_LIFETIME_SEC);
 
@@ -299,6 +299,43 @@ export default function PrintAgainModal({
             </p>
           )}
         </div>
+
+        {/* -------- STEP: confirm (ป้องกันเข้าใจผิดว่าเป็นการถ่ายใหม่) -------- */}
+        {step === "confirm" && (
+          <>
+            <div style={{ textAlign: "center", width: "100%", padding: "8px 0" }}>
+              <p style={{ margin: 0, fontSize: "1.25rem", color: "#2c2c2c", lineHeight: 1.5 }}>
+                ระบบจะพิมพ์รูปภาพที่แสดงบนหน้าจอนี้เท่านั้น
+                <br />
+                <strong>(ไม่ใช่บริการถ่ายภาพใหม่)</strong>
+              </p>
+              <p style={{ margin: "16px 0 0", fontSize: "1rem", color: "#666", lineHeight: 1.5 }}>
+                Only the current photos on screen will be printed
+                <br />
+                <strong>(This action is not a retake).</strong>
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: 16, width: "100%", justifyContent: "center" }}>
+              <button onClick={() => onClose()} style={{ ...cancelBtnStyle, flex: 1, maxWidth: 220 }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => setStep("select")}
+                style={{
+                  ...cancelBtnStyle,
+                  flex: 1,
+                  maxWidth: 220,
+                  background: theme.primaryColor,
+                  color: theme.textButtonColor || "#fff",
+                  border: `2px solid ${theme.primaryColor}`,
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </>
+        )}
 
         {/* -------- STEP: select quantity + payment method -------- */}
         {step === "select" && (
