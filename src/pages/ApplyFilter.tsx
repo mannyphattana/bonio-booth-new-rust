@@ -44,6 +44,7 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const previewCacheRef = useRef<Record<string, string>>({});
   const resolvedPathsRef = useRef<Record<string, string>>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const autoContinuedRef = useRef(false);
 
   useEffect(() => {
     setPreviewImage(previewFullSource);
@@ -116,24 +117,6 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
     setLoading(false);
   };
 
-  const handleCountdownComplete = async () => {
-    const msg = `Countdown expired on ApplyFilter${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
-    appLogger.warn(CTX, msg);
-    logError("countdown_timeout", msg, undefined, "info");
-    if (state?.referenceId) {
-      try {
-        await invoke("update_transaction_session_note", {
-          transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
-          sessionNote: "Countdown expired on apply filter page",
-          closeReason: "timeout",
-        });
-      } catch (err) {
-        appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
-      }
-    }
-    navigate("/");
-  };
-
   const handleNext = async () => {
     setApplyingAll(true);
 
@@ -180,6 +163,53 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
     }
 
     setApplyingAll(false);
+  };
+
+  /**
+   * หมดเวลาบนหน้าตกแต่งรูป → ใช้ฟิลเตอร์ที่เลือกค้างไว้แล้วไปหน้าผลลัพธ์ต่อ
+   * (เดิมคือทิ้ง session แล้วกลับหน้า Home)
+   */
+  const handleCountdownComplete = async () => {
+    if (autoContinuedRef.current || applyingAll) return;
+    autoContinuedRef.current = true;
+
+    const msg = `Countdown expired on ApplyFilter${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
+
+    // ไม่มีรูปให้ไปต่อ → ใช้พฤติกรรมเดิมคือปิด session แล้วกลับหน้าแรก
+    if (frameCaptures.length === 0) {
+      appLogger.warn(CTX, msg);
+      logError("countdown_timeout", msg, undefined, "info");
+      if (state?.referenceId) {
+        try {
+          await invoke("update_transaction_session_note", {
+            transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+            sessionNote: "Countdown expired on apply filter page",
+            closeReason: "timeout",
+          });
+        } catch (err) {
+          appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
+        }
+      }
+      navigate("/");
+      return;
+    }
+
+    const filterName = selectedFilter?.id || "none";
+    const autoMsg = `${msg}, auto-applied filter "${filterName}" and continued`;
+    appLogger.warn(CTX, autoMsg);
+    logError("countdown_timeout", autoMsg, undefined, "info");
+
+    // ยิง note แบบไม่รอ เพื่อไม่ให้จอค้างตอนเน็ตช้า (session ยังไม่จบ จึงไม่ส่ง closeReason)
+    if (state?.referenceId) {
+      invoke("update_transaction_session_note", {
+        transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+        sessionNote: `Countdown expired on apply filter page, auto-applied filter "${filterName}" and continued`,
+      }).catch((err) => {
+        appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
+      });
+    }
+
+    await handleNext();
   };
 
   // --- ปุ่มเลื่อนซ้ายขวา ---
