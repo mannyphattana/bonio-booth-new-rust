@@ -56,6 +56,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
 
   const containerRef = useRef<HTMLDivElement>(null);
   const frameImgRef = useRef<HTMLImageElement>(null);
+  const autoContinuedRef = useRef(false);
 
   const getAssignedCount = () => selectedPhotos.length;
 
@@ -129,57 +130,45 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     [selectedFrame, selectedPhotos, photoAssignments, slots.length],
   );
 
-const handleCountdownComplete = async () => {
-    const msg = `Countdown expired on SlotSelection${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
-    appLogger.warn(CTX, msg);
-    logError("countdown_timeout", msg, undefined, "info");
-    if (state?.referenceId) {
-      try {
-        await invoke("update_transaction_session_note", {
-          transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
-          sessionNote: "Countdown expired on slot selection page",
-          closeReason: "timeout",
-        });
-      } catch (err) {
-        appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
-      }
-    }
-    navigate("/");
-  };
+  const isUsableCapture = (cap?: Capture) =>
+    !!(cap && cap.videoPath && cap.videoPath.trim() !== "");
 
-  const handleNext = () => {
-    if (getAssignedCount() < slots.length) return;
-
+  /** แปลง slot assignment เป็น index ของรูปจริง พร้อมสลับรูปที่เสียออกให้อัตโนมัติ */
+  const resolveCaptureIndexes = (assignments: { [slotIndex: number]: number }) => {
     let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
-      const captureIdx = photoAssignments[slotIdx];
+      const captureIdx = assignments[slotIdx];
       return captureIdx !== undefined ? captureIdx : 0;
     });
 
     let spareValidIndexes = captures
       .map((cap, idx) => ({ cap, idx }))
       .filter((item) => !finalSelectedCaptureIndexes.includes(item.idx))
-      .filter((item) => item.cap && item.cap.videoPath && item.cap.videoPath.trim() !== "")
+      .filter((item) => isUsableCapture(item.cap))
       .map((item) => item.idx);
 
     finalSelectedCaptureIndexes = finalSelectedCaptureIndexes.map((currentIdx) => {
-      const currentCap = captures[currentIdx];
-      const isBroken = !currentCap || !currentCap.videoPath || currentCap.videoPath.trim() === "";
+      const isBroken = !isUsableCapture(captures[currentIdx]);
 
       if (isBroken) {
         appLogger.warn(CTX, `Photo ${currentIdx + 1} broken`);
-        
+
         if (spareValidIndexes.length > 0) {
           const spareIdx = spareValidIndexes.shift()!;
           appLogger.info(CTX, `swap to ${spareIdx + 1}`);
-          return spareIdx; 
+          return spareIdx;
         } else {
-          const emergencyIdx = captures.findIndex(c => c && c.videoPath && c.videoPath.trim() !== "");
+          const emergencyIdx = captures.findIndex((c) => isUsableCapture(c));
           return emergencyIdx !== -1 ? emergencyIdx : currentIdx;
         }
       }
       return currentIdx;
     });
 
+    return finalSelectedCaptureIndexes;
+  };
+
+  const goToApplyFilter = (assignments: { [slotIndex: number]: number }) => {
+    const finalSelectedCaptureIndexes = resolveCaptureIndexes(assignments);
     const frameCaptures = finalSelectedCaptureIndexes.map((idx) => captures[idx]);
 
     navigate("/apply-filter", {
@@ -189,6 +178,93 @@ const handleCountdownComplete = async () => {
         selectedCaptureIndexes: finalSelectedCaptureIndexes,
       },
     });
+  };
+
+  /**
+   * เติมรูปลง slot ที่ผู้ใช้ยังไม่ได้เลือก ไล่ตามลำดับรูปที่ถ่ายมาและข้ามรูปที่เลือกไปแล้ว
+   * (รูปที่ยังใช้ได้มาก่อน แล้วค่อยตามด้วยรูปที่เหลือ)
+   */
+  const buildAutoAssignments = () => {
+    const assignments: { [slotIndex: number]: number } = { ...photoAssignments };
+    const used = new Set<number>(Object.values(assignments));
+
+    const spare = captures
+      .map((cap, idx) => ({ cap, idx }))
+      .filter((item) => !used.has(item.idx));
+    const queue = [
+      ...spare.filter((item) => isUsableCapture(item.cap)).map((item) => item.idx),
+      ...spare.filter((item) => !isUsableCapture(item.cap)).map((item) => item.idx),
+    ];
+
+    for (let slotIdx = 0; slotIdx < slots.length; slotIdx++) {
+      if (assignments[slotIdx] !== undefined) continue;
+
+      const nextIdx = queue.shift();
+      if (nextIdx !== undefined) {
+        assignments[slotIdx] = nextIdx;
+        used.add(nextIdx);
+        continue;
+      }
+
+      // รูปมีน้อยกว่าจำนวน slot → ใช้รูปที่ยังดีอยู่ซ้ำ
+      const fallbackIdx = captures.findIndex((c) => isUsableCapture(c));
+      assignments[slotIdx] = fallbackIdx !== -1 ? fallbackIdx : 0;
+    }
+
+    return assignments;
+  };
+
+  const handleNext = () => {
+    if (getAssignedCount() < slots.length) return;
+    goToApplyFilter(photoAssignments);
+  };
+
+  /**
+   * หมดเวลาบนหน้าเลือกรูป → เลือกรูปที่เหลือให้อัตโนมัติแล้วไปหน้าตกแต่งรูปต่อ
+   * (เดิมคือทิ้ง session แล้วกลับหน้า Home)
+   */
+  const handleCountdownComplete = async () => {
+    if (autoContinuedRef.current) return;
+    autoContinuedRef.current = true;
+
+    const missing = Math.max(slots.length - getAssignedCount(), 0);
+    const hasUsableCapture = captures.some((c) => isUsableCapture(c));
+    const msg = `Countdown expired on SlotSelection${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
+
+    // ไม่มีรูปที่ใช้ได้เลย → ไปต่อไม่ได้ ใช้พฤติกรรมเดิมคือปิด session แล้วกลับหน้าแรก
+    if (!hasUsableCapture || slots.length === 0) {
+      appLogger.warn(CTX, msg);
+      logError("countdown_timeout", msg, undefined, "info");
+      if (state?.referenceId) {
+        try {
+          await invoke("update_transaction_session_note", {
+            transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+            sessionNote: "Countdown expired on slot selection page",
+            closeReason: "timeout",
+          });
+        } catch (err) {
+          appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
+        }
+      }
+      navigate("/");
+      return;
+    }
+
+    const autoMsg = `${msg}, auto-selected ${missing} photo(s) and continued`;
+    appLogger.warn(CTX, autoMsg);
+    logError("countdown_timeout", autoMsg, undefined, "info");
+
+    // ยิง note แบบไม่รอ เพื่อไม่ให้จอค้างตอนเน็ตช้า (session ยังไม่จบ จึงไม่ส่ง closeReason)
+    if (state?.referenceId) {
+      invoke("update_transaction_session_note", {
+        transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),
+        sessionNote: `Countdown expired on slot selection page, auto-selected ${missing} photo(s) and continued`,
+      }).catch((err) => {
+        appLogger.error(CTX, `update_transaction_session_note failed: ${err}`);
+      });
+    }
+
+    goToApplyFilter(buildAutoAssignments());
   };
 
   if (!selectedFrame) return null;
