@@ -16,6 +16,17 @@ import {
   setMenuPin,
 } from "../config/appConfig";
 
+/** สถานะ UAC ของเครื่อง — ตรงกับ struct UacStatus ใน src-tauri/src/lib.rs */
+interface UacStatus {
+  /** 0 = ยกสิทธิ์เงียบ (ที่เราต้องการ), 5 = ถามแบบปกติ */
+  consentPromptBehaviorAdmin: number | null;
+  /** 1 = UAC เปิดอยู่ — เราไม่แตะค่านี้ เพราะ 0 ทำ WebView2 พัง */
+  enableLua: number | null;
+  /** ถ้าไม่ใช่ admin การตั้งค่ายกสิทธิ์เงียบจะไม่ช่วยอะไรเลย */
+  isAdminAccount: boolean;
+  silentElevation: boolean;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -37,10 +48,13 @@ export default function ContextMenu({
   >(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // ปุ่มขออนุญาต Defender ให้ตัวอัปเดตทำงานได้ (เด้ง UAC ครั้งเดียว)
+  // ปุ่มเตรียมเครื่องให้อัปเดตอัตโนมัติได้ (Defender exclusion + ยกสิทธิ์เงียบ)
+  // เด้ง UAC ครั้งเดียว แล้วหลังจากนั้นไม่เด้งอีกเลย
   const [whitelistBusy, setWhitelistBusy] = useState(false);
   const [whitelistMsg, setWhitelistMsg] = useState("");
   const [whitelistOk, setWhitelistOk] = useState<boolean | null>(null);
+  const [showUpdatePrepConfirm, setShowUpdatePrepConfirm] = useState(false);
+  const [uacStatus, setUacStatus] = useState<UacStatus | null>(null);
   
   // State สำหรับรหัสปิดแอป (ของเดิม)
   const [showPinModal, setShowPinModal] = useState(false);
@@ -92,6 +106,12 @@ export default function ContextMenu({
     // Get app version
     getVersion().then(v => setAppVersion(v)).catch((e) => appLogger.error("[ContextMenu]", `getVersion error: ${e}`));
 
+    // สถานะ UAC — อ่านอย่างเดียว ไม่ยกสิทธิ์ ใช้บอกว่าเครื่องนี้พร้อมอัปเดตเองหรือยัง
+    setShowUpdatePrepConfirm(false);
+    setWhitelistMsg("");
+    setWhitelistOk(null);
+    refreshUacStatus();
+
     // Camera status
     const cameraType = localStorage.getItem("cameraType") || "webcam";
     if (cameraType === "webcam") {
@@ -139,33 +159,47 @@ export default function ContextMenu({
     }
   };
 
+  /** อ่านสถานะ UAC ใหม่ (ไม่ยกสิทธิ์ ไม่เด้งอะไร) */
+  const refreshUacStatus = () => {
+    invoke<UacStatus>("get_uac_status")
+      .then(setUacStatus)
+      .catch((e) => {
+        appLogger.error("[ContextMenu]", `get_uac_status error: ${e}`);
+        setUacStatus(null);
+      });
+  };
+
   /**
-   * ขอสิทธิ์ Administrator เพื่อเพิ่ม Windows Defender exclusion ให้ updater
-   * ทำครั้งเดียวต่อเครื่อง — หลังจากนี้ auto update จะไม่ถูกสแกนกั้น/quarantine
+   * ขอสิทธิ์ Administrator ครั้งเดียวเพื่อเตรียมเครื่องให้อัปเดตเองได้:
+   * เพิ่ม Defender exclusion + ตั้ง ConsentPromptBehaviorAdmin = 0
+   * ทำครั้งเดียวต่อเครื่อง — หลังจากนี้ auto update จะไม่ถูกกั้นและไม่ต้องมีคนกด Yes
    */
-  const handleWhitelistUpdater = async () => {
+  const handlePrepareUpdates = async () => {
     if (whitelistBusy) return;
+    setShowUpdatePrepConfirm(false);
     setWhitelistBusy(true);
     setWhitelistMsg("");
     setWhitelistOk(null);
     try {
-      const report = await invoke<string>("whitelist_updater");
-      appLogger.info("[ContextMenu]", "whitelist_updater OK:", report);
+      const report = await invoke<string>("prepare_unattended_updates");
+      appLogger.info("[ContextMenu]", "prepare_unattended_updates OK:", report);
       const failed = report
         .split("\n")
         .filter((line) => line.startsWith("FAIL")).length;
       setWhitelistOk(failed === 0);
       setWhitelistMsg(
         failed === 0
-          ? "✅ เพิ่ม exclusion ให้ updater เรียบร้อย"
-          : `⚠️ เพิ่มได้บางส่วน (ไม่ผ่าน ${failed} รายการ)\n${report}`,
+          ? "✅ เตรียมเครื่องเรียบร้อย — จากนี้อัปเดตเองได้โดยไม่ต้องกดอะไร"
+          : `⚠️ ทำได้บางส่วน (ไม่ผ่าน ${failed} รายการ)\n${report}`,
       );
     } catch (err) {
-      appLogger.error("[ContextMenu]", "whitelist_updater failed:", err);
+      appLogger.error("[ContextMenu]", "prepare_unattended_updates failed:", err);
       setWhitelistOk(false);
       setWhitelistMsg(`❌ ${String(err).slice(0, 200)}`);
     } finally {
       setWhitelistBusy(false);
+      // อ่านค่าใหม่เสมอ ไม่ว่าจะสำเร็จหรือไม่ ให้ป้ายสถานะตรงกับความจริง
+      refreshUacStatus();
     }
   };
 
@@ -642,37 +676,90 @@ export default function ContextMenu({
           <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
         </button>
 
-        {/* 5. Allow Updater — เพิ่ม Defender exclusion ให้อัปเดตได้ไม่ติด */}
-        <button
-          className="context-menu-item context-menu-config-item"
-          disabled={whitelistBusy}
-          onClick={handleWhitelistUpdater}
-          style={whitelistBusy ? { opacity: 0.6, cursor: "wait" } : undefined}
-        >
-          <span style={{ fontSize: 24 }}>🛡️</span>
-          <div style={{ flex: 1, textAlign: "left" }}>
-            <div style={{ fontWeight: 600 }}>อนุญาตให้อัปเดตได้</div>
-            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
-              {whitelistBusy
-                ? "กำลังขอสิทธิ์ Administrator — กด Yes ที่หน้าต่าง UAC"
-                : "เพิ่ม Windows Defender exclusion (เด้ง UAC ครั้งเดียว)"}
-            </div>
-            {whitelistMsg && (
-              <div
-                style={{
-                  fontSize: 11,
-                  marginTop: 6,
-                  whiteSpace: "pre-wrap",
-                  textAlign: "left",
-                  color: whitelistOk ? "#7bd67b" : "#e58f8f",
-                }}
-              >
-                {whitelistMsg}
+        {/* 5. เตรียมเครื่องให้อัปเดตอัตโนมัติ — Defender exclusion + ยกสิทธิ์เงียบ */}
+        {!showUpdatePrepConfirm ? (
+          <button
+            className="context-menu-item context-menu-config-item"
+            disabled={whitelistBusy}
+            onClick={() => setShowUpdatePrepConfirm(true)}
+            style={whitelistBusy ? { opacity: 0.6, cursor: "wait" } : undefined}
+          >
+            <span style={{ fontSize: 24 }}>🛡️</span>
+            <div style={{ flex: 1, textAlign: "left" }}>
+              <div style={{ fontWeight: 600 }}>เตรียมเครื่องให้อัปเดตเองได้</div>
+              <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+                {whitelistBusy
+                  ? "กำลังขอสิทธิ์ Administrator — กด Yes ที่หน้าต่าง UAC"
+                  : "Defender exclusion + ไม่ต้องกด Yes ตอนอัปเดต (เด้ง UAC ครั้งเดียว)"}
               </div>
-            )}
+
+              {/* สถานะปัจจุบัน อ่านจาก registry จริง ไม่ใช่จำจากที่เคยกด */}
+              {uacStatus && !whitelistBusy && (
+                <div style={{ fontSize: 11, marginTop: 6, textAlign: "left" }}>
+                  {!uacStatus.isAdminAccount ? (
+                    <span style={{ color: "#e58f8f" }}>
+                      ⛔ account นี้เป็น standard user — ปุ่มนี้ช่วยไม่ได้
+                      <br />
+                      ต้องย้าย account เข้ากลุ่ม Administrators ก่อน
+                    </span>
+                  ) : uacStatus.silentElevation ? (
+                    <span style={{ color: "#7bd67b" }}>
+                      ✅ เครื่องนี้ตั้งค่าไว้แล้ว — อัปเดตเองได้ไม่ต้องกดอะไร
+                    </span>
+                  ) : (
+                    <span style={{ color: "#ffa502" }}>
+                      ⚠️ ยังไม่ได้ตั้งค่า — ตอนนี้อัปเดตแล้วจะค้างรอคนกด Yes
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {whitelistMsg && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    marginTop: 6,
+                    whiteSpace: "pre-wrap",
+                    textAlign: "left",
+                    color: whitelistOk ? "#7bd67b" : "#e58f8f",
+                  }}
+                >
+                  {whitelistMsg}
+                </div>
+              )}
+            </div>
+            <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
+          </button>
+        ) : (
+          <div className="context-menu-confirm-box">
+            <p style={{ fontSize: 12, marginBottom: 8, textAlign: "left", lineHeight: 1.6 }}>
+              จะแก้ 2 อย่างบนเครื่องนี้:
+              <br />
+              1. เพิ่ม Windows Defender exclusion ให้ตัวอัปเดต
+              <br />
+              2. ตั้งให้ Windows ยกสิทธิ์ admin โดยไม่ถาม
+              <br />
+              <span style={{ color: "#ffa502" }}>
+                ข้อ 2 มีผลกับโปรแกรมทุกตัวบนเครื่องนี้ ไม่ใช่แค่แอปนี้ —
+                ใช้กับเครื่องบูธเท่านั้น
+              </span>
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="context-menu-confirm-cancel"
+                onClick={() => setShowUpdatePrepConfirm(false)}
+              >
+                ยกเลิก
+              </button>
+              <button
+                className="context-menu-confirm-ok"
+                onClick={handlePrepareUpdates}
+              >
+                ยืนยัน
+              </button>
+            </div>
           </div>
-          <span style={{ opacity: 0.4, fontSize: 18 }}>›</span>
-        </button>
+        )}
 
         <div style={{ borderTop: "1px solid #333", margin: "12px 0" }} />
 
