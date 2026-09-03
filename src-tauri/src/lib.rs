@@ -162,17 +162,93 @@ fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
     Err("Filters directory not found".to_string())
 }
 
-/// เพิ่ม Windows Defender exclusion ให้ตัวอัปเดตดาวน์โหลด/ติดตั้ง/รีสตาร์ทได้
-/// โดยไม่ถูกสแกนกั้นหรือ quarantine ไฟล์ installer
-///
-/// ต้องสิทธิ์ Administrator จึงยกสิทธิ์ด้วย PowerShell `Start-Process -Verb RunAs`
-/// (เด้ง UAC ให้พนักงานกดยอมรับหนึ่งครั้ง) — คำสั่งนี้ **เพิ่ม exclusion เท่านั้น**
-/// ไม่มีการปิด real-time protection หรือแตะการตั้งค่าความปลอดภัยอื่นเลย
-///
-/// คืนข้อความสรุปว่ารายการไหนเพิ่มผ่าน/ไม่ผ่าน เพื่อให้เห็นผลจริงบนหน้าจอ
+/// สถานะ UAC ของเครื่อง — อ่านอย่างเดียว ไม่ต้องยกสิทธิ์
+/// ใช้โชว์ในเมนูแอดมินว่าเครื่องนี้พร้อมอัปเดตอัตโนมัติหรือยัง
+#[derive(serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct UacStatus {
+    /// 0 = ยกสิทธิ์เงียบ (ที่เราต้องการ), 5 = ถามแบบปกติ
+    consent_prompt_behavior_admin: Option<u32>,
+    /// 1 = UAC เปิดอยู่ — เราไม่แตะค่านี้เพราะ 0 ทำ WebView2 พัง
+    enable_lua: Option<u32>,
+    /// account ที่รันแอปอยู่เป็นสมาชิกกลุ่ม Administrators หรือไม่
+    /// ถ้าไม่ใช่ การตั้ง consent_prompt_behavior_admin จะไม่ช่วยอะไรเลย
+    is_admin_account: bool,
+    /// สรุปว่าตอนนี้ยกสิทธิ์ได้เงียบจริงหรือยัง
+    silent_elevation: bool,
+}
+
+/// อ่านสถานะ UAC โดยไม่ยกสิทธิ์ (ค่าพวกนี้ HKLM อ่านได้ด้วยสิทธิ์ปกติ)
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn whitelist_updater() -> Result<String, String> {
+async fn get_uac_status() -> Result<UacStatus, String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // whoami /groups ใช้ /nh + -Header เอง เพราะหัวตารางเปลี่ยนตามภาษา Windows
+    // (บูธหลายเครื่องเป็น Windows ภาษาไทย หัวคอลัมน์จะไม่ใช่ "SID")
+    // S-1-5-32-544 = BUILTIN\Administrators — token ยังมี SID นี้ติดมาแม้ยังไม่ยกสิทธิ์
+    let script = r#"$ErrorActionPreference = 'SilentlyContinue'
+$p = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+$consent = (Get-ItemProperty -Path $p -Name 'ConsentPromptBehaviorAdmin').ConsentPromptBehaviorAdmin
+$lua = (Get-ItemProperty -Path $p -Name 'EnableLUA').EnableLUA
+$isAdmin = $false
+try {
+  $g = @(whoami /groups /fo csv /nh | ConvertFrom-Csv -Header 'Name','Type','SID','Attributes')
+  $isAdmin = [bool]($g | Where-Object { $_.SID -eq 'S-1-5-32-544' })
+} catch { }
+[pscustomobject]@{
+  consentPromptBehaviorAdmin = $consent
+  enableLua = $lua
+  isAdminAccount = $isAdmin
+} | ConvertTo-Json -Compress"#;
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("read uac status failed: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = stdout.trim().trim_start_matches('\u{feff}');
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("parse uac status failed: {} ({})", e, json))?;
+
+    let consent = parsed["consentPromptBehaviorAdmin"].as_u64().map(|v| v as u32);
+    let enable_lua = parsed["enableLua"].as_u64().map(|v| v as u32);
+    let is_admin_account = parsed["isAdminAccount"].as_bool().unwrap_or(false);
+
+    Ok(UacStatus {
+        consent_prompt_behavior_admin: consent,
+        enable_lua,
+        is_admin_account,
+        silent_elevation: is_admin_account && consent == Some(0),
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn get_uac_status() -> Result<UacStatus, String> {
+    Ok(UacStatus::default())
+}
+
+/// เตรียมเครื่องให้อัปเดตอัตโนมัติได้โดยไม่ต้องมีคนกดอะไรเลย ทำ 2 อย่าง:
+///
+/// 1. เพิ่ม Windows Defender exclusion ให้ตัวอัปเดตดาวน์โหลด/ติดตั้ง/รีสตาร์ทได้
+///    โดยไม่ถูกสแกนกั้นหรือ quarantine ไฟล์ installer
+/// 2. ตั้ง `ConsentPromptBehaviorAdmin = 0` ให้ Windows ยกสิทธิ์ admin โดยไม่เด้ง UAC
+///    เพราะ NSIS installer ของเราใช้ `RequestExecutionLevel highest` จึงขอสิทธิ์
+///    ตั้งแต่ตอนรันไฟล์ setup.exe — ถ้าไม่ตั้งค่านี้ auto update จะค้างรอคนกด Yes
+///
+/// ต้องสิทธิ์ Administrator จึงยกสิทธิ์ด้วย PowerShell `Start-Process -Verb RunAs`
+/// (เด้ง UAC ให้พนักงานกดยอมรับ **ครั้งสุดท้าย**) — ไม่มีการปิด real-time protection
+/// และไม่แตะ `EnableLUA` เพราะ `EnableLUA=0` ทำให้ WebView2 (ตัวเรนเดอร์ UI) พัง
+///
+/// คืนข้อความสรุปว่ารายการไหนทำผ่าน/ไม่ผ่าน เพื่อให้เห็นผลจริงบนหน้าจอ
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn prepare_unattended_updates() -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -237,6 +313,20 @@ foreach ($proc in $procs) {{
     $lines += "FAIL process $proc :: $($_.Exception.Message)"
   }}
 }}
+# Silent elevation so the NSIS installer never shows a UAC prompt.
+# EnableLUA is deliberately left alone: EnableLUA=0 breaks WebView2.
+$uacPath ='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+try {{
+  New-ItemProperty -Path $uacPath -Name 'ConsentPromptBehaviorAdmin' -Value 0 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+  $after = (Get-ItemProperty -Path $uacPath -Name 'ConsentPromptBehaviorAdmin' -ErrorAction Stop).ConsentPromptBehaviorAdmin
+  if ($after -eq 0) {{
+    $lines += "OK   uac     ConsentPromptBehaviorAdmin = 0"
+  }} else {{
+    $lines += "FAIL uac     wrote 0 but reads back $after (Group Policy may override)"
+  }}
+}} catch {{
+  $lines += "FAIL uac     $($_.Exception.Message)"
+}}
 $lines | Out-File -FilePath '{result}' -Encoding utf8
 "#,
         paths = ps_list(&exclusion_paths),
@@ -277,8 +367,10 @@ $lines | Out-File -FilePath '{result}' -Encoding utf8
 
     let report = std::fs::read_to_string(&result_path)
         .map_err(|e| format!("อ่านผลลัพธ์ไม่ได้ (สคริปต์อาจไม่ได้รัน): {}", e))?;
-    let report = report.trim().to_string();
-    log::info!("[Whitelist] Defender exclusions applied:\n{}", report);
+    // Out-File -Encoding utf8 ของ PowerShell 5.1 ใส่ BOM มาด้วย ซึ่ง trim() ไม่ตัดให้
+    // ถ้าไม่ตัดทิ้ง บรรทัดแรกจะขึ้นต้นด้วย \u{feff} ทำให้ starts_with("FAIL") พลาดไปหนึ่งบรรทัด
+    let report = report.trim_start_matches('\u{feff}').trim().to_string();
+    log::info!("[Whitelist] unattended-update prep result:\n{}", report);
 
     if report.is_empty() {
         return Err("สคริปต์รันแล้วแต่ไม่มีผลลัพธ์กลับมา".to_string());
@@ -292,7 +384,7 @@ $lines | Out-File -FilePath '{result}' -Encoding utf8
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-async fn whitelist_updater() -> Result<String, String> {
+async fn prepare_unattended_updates() -> Result<String, String> {
     Err("รองรับเฉพาะ Windows".to_string())
 }
 
@@ -440,7 +532,8 @@ pub fn run() {
             get_app_dir,
             resolve_lut_path,
             debug_paths,
-            whitelist_updater,
+            prepare_unattended_updates,
+            get_uac_status,
             exit_app,
             connect_sse,
             destroy_sse,
