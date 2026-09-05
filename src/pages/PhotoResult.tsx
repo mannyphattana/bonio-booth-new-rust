@@ -273,6 +273,22 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
       localTxIdRef.current = String(txId);
 
       const composedImg = await composeFrame();
+
+      for (let i = 0; i < frameCaptures.length; i++) {
+        if (frameCaptures[i].photo) {
+          try {
+            await invoke("save_to_local_drive", {
+              imageDataBase64: frameCaptures[i].photo,
+              filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
+            });
+          } catch (err) {
+            appLogger.error(CTX, `save_to_local_drive (photo ${i + 1}) failed:`, err);
+            logError("save_local_photo_failed", `save_to_local_drive photo ${i + 1} failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+          }
+        }
+      }
+      appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
+
       if (composedImg) {
         try {
           await invoke("save_to_local_drive", {
@@ -283,21 +299,6 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
           appLogger.error(CTX, "save_to_local_drive (frame) failed:", err);
           logError("save_local_photo_failed", `save_to_local_drive frame failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
         }
-
-        for (let i = 0; i < frameCaptures.length; i++) {
-          if (frameCaptures[i].photo) {
-            try {
-              await invoke("save_to_local_drive", {
-                imageDataBase64: frameCaptures[i].photo,
-                filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
-              });
-            } catch (err) {
-              appLogger.error(CTX, `save_to_local_drive (photo ${i + 1}) failed:`, err);
-              logError("save_local_photo_failed", `save_to_local_drive photo ${i + 1} failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
-            }
-          }
-        }
-        appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
 
         printFrame(composedImg, quantity);
       }
@@ -501,6 +502,16 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             "error"
           );
         }
+        photoIdx++;
+      } else if (photoUrls.length > 0) {
+        // compose พัง → ไม่มีรูปรวมกรอบให้ยิง แต่ช่องที่ 0 ถูกจองไว้ให้รูปรวมกรอบเสมอ
+        // (presign สร้าง filesMeta ใบแรกเป็น composite) ถ้าไม่ข้ามช่องนี้ รูปดิบใบที่ 1
+        // จะไปนั่งช่อง composite แล้วรูปที่เหลือเลื่อนตามกันหมด — เจอจริงในเคส
+        // 2026-09-05 ตู้ Tha Chang (log: confirm_upload OK — files: 4/6)
+        appLogger.warn(
+          CTX,
+          "composedImage ว่าง (compose ล้มเหลว) — ข้ามช่องรูปรวมกรอบ เพื่อให้รูปดิบขึ้นตรงลำดับ"
+        );
         photoIdx++;
       }
 
