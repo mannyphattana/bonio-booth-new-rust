@@ -133,6 +133,17 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
   const isUsableCapture = (cap?: Capture) =>
     !!(cap && cap.videoPath && cap.videoPath.trim() !== "");
 
+  /**
+   * "พิมพ์ได้ไหม" ดูที่รูป ไม่ใช่วิดีโอ
+   *
+   * isUsableCapture เช็ค videoPath ซึ่งใช้จัดลำดับ/สลับรูปได้ถูกต้องอยู่แล้ว แต่เอามา
+   * ตัดสินว่าจะไปต่อได้ไหมไม่ได้ — ถ้าอัดวิดีโอพังหมดทุกใบ (ซึ่งเกิดได้จริง ดู
+   * captureVideoDiagnostics ใน PhotoResult) รูปยังดีครบและลูกค้าจ่ายเงินมาแล้ว
+   * การเด้งกลับหน้าแรกตอนนั้นเท่ากับริบงานที่จ่ายเงินไปแล้วทิ้ง
+   */
+  const isPrintableCapture = (cap?: Capture) =>
+    !!(cap && cap.photo && cap.photo.trim() !== "");
+
   /** แปลง slot assignment เป็น index ของรูปจริง พร้อมสลับรูปที่เสียออกให้อัตโนมัติ */
   const resolveCaptureIndexes = (assignments: { [slotIndex: number]: number }) => {
     let finalSelectedCaptureIndexes = slots.map((_, slotIdx) => {
@@ -207,7 +218,11 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
       }
 
       // รูปมีน้อยกว่าจำนวน slot → ใช้รูปที่ยังดีอยู่ซ้ำ
-      const fallbackIdx = captures.findIndex((c) => isUsableCapture(c));
+      // (เอารูปที่มีวิดีโอด้วยก่อน ถ้าไม่มีเลยก็ขอแค่ใบที่พิมพ์ได้)
+      let fallbackIdx = captures.findIndex((c) => isUsableCapture(c));
+      if (fallbackIdx === -1) {
+        fallbackIdx = captures.findIndex((c) => isPrintableCapture(c));
+      }
       assignments[slotIdx] = fallbackIdx !== -1 ? fallbackIdx : 0;
     }
 
@@ -228,7 +243,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
     autoContinuedRef.current = true;
 
     const missing = Math.max(slots.length - getAssignedCount(), 0);
-    const hasUsableCapture = captures.some((c) => isUsableCapture(c));
+    const hasUsableCapture = captures.some((c) => isPrintableCapture(c));
     const msg = `Countdown expired on SlotSelection${state?.referenceId ? `, txCode: ${state.referenceId}` : ''}`;
 
     // ไม่มีรูปที่ใช้ได้เลย → ไปต่อไม่ได้ ใช้พฤติกรรมเดิมคือปิด session แล้วกลับหน้าแรก

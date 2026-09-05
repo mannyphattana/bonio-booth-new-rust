@@ -473,7 +473,7 @@ pub async fn compose_frame_video(
 
     let frame_path = temp_dir.join("frame_overlay.png");
     
-    println!("[compose_frame_video] 📥 Downloading frame from: {}", frame_image_url);
+    log::info!("[compose_frame_video] 📥 Downloading frame from: {}", frame_image_url);
 
     // ใช้ตัวโหลดกลาง (retry + validate + cache) ตัวเดียวกับ compose_frame —
     // ไม่งั้น CDN สะดุดครั้งเดียวก็เสียวิดีโอทั้งเซ็ต
@@ -484,7 +484,7 @@ pub async fn compose_frame_video(
                 "❌ ลิงก์รูปกรอบเฟรมมีปัญหา: {} — กรุณาเช็คว่าลิงก์เป็น Public และไม่ใช่ไฟล์ที่ถูกลบไปแล้ว",
                 e
             );
-            println!("{}", err_msg);
+            log::error!("{}", err_msg);
             err_msg
         })?;
 
@@ -513,7 +513,7 @@ pub async fn compose_frame_video(
 
     let delivered_w = out_w * dup_w;
     let delivered_h = out_h * dup_h;
-    println!("[compose_frame_video] frame: {}x{}, base: {}x{} (duplicate: {} → final {}x{}, {} MB-units), grid: {}x{}, scale: {:.3}/{:.3}, lut: {:?}",
+    log::info!("[compose_frame_video] frame: {}x{}, base: {}x{} (duplicate: {} → final {}x{}, {} MB-units), grid: {}x{}, scale: {:.3}/{:.3}, lut: {:?}",
         orig_w, orig_h, out_w, out_h, will_duplicate, delivered_w, delivered_h,
         (delivered_w as f64 / 16.0).ceil() * (delivered_h as f64 / 16.0).ceil(),
         frame_width, frame_height, scale_x, scale_y, lut_filename);

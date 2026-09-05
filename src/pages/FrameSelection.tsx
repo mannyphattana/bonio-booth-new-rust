@@ -60,6 +60,21 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
     setSelectedFrame(frame);
   };
 
+  /// อุ่น cache รูปกรอบไว้ตั้งแต่ตอนนี้ — ห่างจากตอน compose เป็นนาที (ยังต้องถ่ายอีก 4-6 ใบ)
+  /// ถ้าเน็ตสะดุดตอน compose จะได้ไม่เสียงานที่ลูกค้าจ่ายเงินไปแล้ว
+  /// พังก็ปล่อยผ่าน ไม่บล็อก UI และไม่ขึ้น error ให้ลูกค้าเห็น
+  const prefetchedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const url = selectedFrame?.imageUrl;
+    if (!url || prefetchedRef.current.has(url)) return;
+    prefetchedRef.current.add(url);
+    invoke("prefetch_frame_image", { frameImageUrl: url })
+      .then((bytes) => appLogger.info(CTX, `Frame prefetched (${bytes} bytes)`))
+      .catch((err) =>
+        appLogger.warn(CTX, `Frame prefetch failed (ไม่กระทบ flow): ${err}`)
+      );
+  }, [selectedFrame?.imageUrl]);
+
   useEffect(() => {
     loadFrames();
   }, []);

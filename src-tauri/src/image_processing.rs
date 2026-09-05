@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Serialize, Deserialize)]
 pub struct FilterInfo {
@@ -178,12 +178,182 @@ pub async fn apply_lut_filter_preview(
 const FRAME_FETCH_ATTEMPTS: u32 = 3;
 /// จำนวนกรอบที่เก็บ cache ไว้ (ตู้หนึ่งใช้กรอบไม่กี่แบบต่อวัน)
 const FRAME_CACHE_CAPACITY: usize = 8;
+/// timeout ของ request เดียว (รวมเวลาโหลด body)
 const FRAME_FETCH_TIMEOUT_SECS: u64 = 30;
+/// เพดานเวลารวมของการโหลดกรอบ 1 ครั้ง (ทุก attempt รวมกัน)
+///
+/// สำคัญมาก: ลูกค้ายืนรออยู่หน้าตู้ ถ้าปล่อยให้ retry เต็ม 3 ครั้ง x timeout เต็ม
+/// จะกิน 90 วิต่อการเรียก 1 ครั้ง แล้ว compose_frame + compose_frame_video ก็กิน
+/// รวมกัน 3 นาที (เจอจริงในเคส 2026-09-05 ตู้ Tha Chang: 19:35:11 -> 19:38:12)
+const FRAME_FETCH_BUDGET_SECS: u64 = 60;
+/// จำ error ไว้นานเท่านี้ ก่อนยอมให้ลองโหลดใหม่
+const FRAME_FAILURE_TTL_SECS: u64 = 60;
+/// ต่อ TCP/TLS ไม่ติดภายในเวลานี้ = เน็ตตู้มีปัญหาจริง ไม่ต้องรอ
+const FRAME_CONNECT_TIMEOUT_SECS: u64 = 10;
+/// ถ้าโหลดอยู่แล้ว "นิ่งสนิท" นานขนาดนี้ถือว่าค้าง — ตัดแล้ว retry ดีกว่ารอ timeout รวม
+const FRAME_READ_STALL_TIMEOUT_SECS: u64 = 20;
+
+/// client ตัวเดียวใช้ซ้ำทุก attempt/ทุก transaction — reuse connection pool + TLS session
+/// (เดิมสร้างใหม่ทุกครั้ง เสียเวลา handshake ซ้ำบนเน็ตตู้ที่ latency สูง)
+static FRAME_HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(FRAME_FETCH_TIMEOUT_SECS))
+        .connect_timeout(Duration::from_secs(FRAME_CONNECT_TIMEOUT_SECS))
+        .read_timeout(Duration::from_secs(FRAME_READ_STALL_TIMEOUT_SECS))
+        .user_agent("BonioBooth/1.0")
+        .build()
+        .map_err(|e| format!("Frame client error: {}", e))
+});
 
 /// cache ไบต์ของกรอบที่โหลด "และ decode เป็นรูปได้จริง" แล้ว (key = URL)
 /// ตู้ใช้กรอบเดิมซ้ำทั้งวัน — โหลดสำเร็จครั้งเดียวก็ไม่ต้องพึ่งเน็ตอีกจนกว่าจะปิดแอป
 static FRAME_CACHE: LazyLock<Mutex<Vec<(String, Vec<u8>)>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// จำ URL ที่เพิ่งโหลดพังไว้สั้นๆ (url, เวลาที่พัง, error)
+///
+/// compose_frame_video ถูกเรียกต่อจาก compose_frame ทันทีด้วย URL เดียวกัน —
+/// ถ้าเพิ่งพังไปเมื่อกี้ก็ไม่มีเหตุผลให้ลูกค้ารออีกรอบเต็มๆ ตอบ error เดิมไปเลย
+static FRAME_FAILURES: LazyLock<Mutex<Vec<(String, Instant, String)>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn recent_failure(url: &str) -> Option<String> {
+    let cache = FRAME_FAILURES.lock().ok()?;
+    cache.iter().find_map(|(cached_url, at, err)| {
+        if cached_url == url && at.elapsed() < Duration::from_secs(FRAME_FAILURE_TTL_SECS) {
+            Some(err.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn remember_failure(url: &str, err: &str) {
+    if let Ok(mut cache) = FRAME_FAILURES.lock() {
+        cache.retain(|(cached_url, at, _)| {
+            cached_url != url && at.elapsed() < Duration::from_secs(FRAME_FAILURE_TTL_SECS)
+        });
+        cache.push((url.to_string(), Instant::now(), err.to_string()));
+    }
+}
+
+fn forget_failure(url: &str) {
+    if let Ok(mut cache) = FRAME_FAILURES.lock() {
+        cache.retain(|(cached_url, _, _)| cached_url != url);
+    }
+}
+
+/// ที่เก็บกรอบถาวรบนเครื่อง (ล้อตาม C:\boniobooth\Saved_Photos ที่ใช้อยู่แล้ว)
+///
+/// ทำไมต้องมีทั้งที่มี cache ใน memory แล้ว: ตู้ปิดเครื่องทุกวันตามตารางเวลา
+/// พอเปิดใหม่ memory cache ว่างเปล่า ลูกค้าคนแรกของวันจึงต้องแบกภาระโหลดเฟรม
+/// ผ่านเน็ตเสมอ — ซึ่งเป็นจังหวะที่พังมาแล้วจริง disk cache ทำให้โหลดครั้งเดียว
+/// แล้วใช้ได้ตลอดไป ไม่ต้องพึ่งเน็ตอีกเลย
+const FRAME_DISK_CACHE_DIR: &str = r"C:\boniobooth\Frames";
+/// เก็บกี่ไฟล์ก่อนเริ่มลบตัวเก่าสุดทิ้ง (กรอบ ~3 MB ต่อไฟล์)
+const FRAME_DISK_CACHE_MAX_FILES: usize = 30;
+/// ไฟล์เก่ากว่านี้ prefetch จะไปโหลดใหม่ทับ เผื่อกรอบถูกแก้โดยใช้ URL เดิม
+const FRAME_DISK_REFRESH_DAYS: u64 = 7;
+
+/// แปลง URL เป็นชื่อไฟล์ที่ปลอดภัย — ใช้ส่วนท้ายของ path (ปกติเป็น UUID.png)
+/// แล้วกรองอักขระที่ใช้เป็นชื่อไฟล์บน Windows ไม่ได้ออก กัน path traversal ด้วย
+fn frame_cache_filename(url: &str) -> String {
+    let tail = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .rsplit('/')
+        .next()
+        .unwrap_or("frame");
+    let safe: String = tail
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .take(120)
+        .collect();
+    if safe.is_empty() || safe.starts_with('.') {
+        format!("frame_{}.bin", url.len())
+    } else {
+        safe
+    }
+}
+
+fn frame_cache_path(url: &str) -> std::path::PathBuf {
+    std::path::Path::new(FRAME_DISK_CACHE_DIR).join(frame_cache_filename(url))
+}
+
+/// อ่านกรอบจากดิสก์ — decode ตรวจก่อนเสมอ ไฟล์ที่เสีย (เช่นไฟดับกลางเขียน)
+/// จะถูกลบทิ้งแล้วถือว่าไม่มี cache
+fn disk_cached_frame(url: &str) -> Option<Vec<u8>> {
+    let path = frame_cache_path(url);
+    let bytes = fs::read(&path).ok()?;
+    if bytes.is_empty() || image::load_from_memory(&bytes).is_err() {
+        log::warn!("[frame_disk] ไฟล์ cache เสีย ลบทิ้ง: {}", path.display());
+        let _ = fs::remove_file(&path);
+        return None;
+    }
+    Some(bytes)
+}
+
+/// เขียนแบบ atomic (เขียน .tmp แล้วค่อย rename) — ตู้ถูกสั่งปิดเครื่องได้ตลอดเวลา
+/// ถ้าเขียนตรงๆ แล้วดับกลางคัน จะเหลือไฟล์ครึ่งๆ ที่พังทุกครั้งที่หยิบมาใช้
+fn write_disk_cache(url: &str, bytes: &[u8]) {
+    let dir = std::path::Path::new(FRAME_DISK_CACHE_DIR);
+    if let Err(e) = fs::create_dir_all(dir) {
+        log::warn!("[frame_disk] สร้างโฟลเดอร์ไม่ได้: {}", e);
+        return;
+    }
+    let final_path = frame_cache_path(url);
+    let tmp_path = final_path.with_extension("tmp");
+    if let Err(e) = fs::write(&tmp_path, bytes) {
+        log::warn!("[frame_disk] เขียน tmp ไม่ได้: {}", e);
+        return;
+    }
+    if let Err(e) = fs::rename(&tmp_path, &final_path) {
+        log::warn!("[frame_disk] rename ไม่ได้: {}", e);
+        let _ = fs::remove_file(&tmp_path);
+        return;
+    }
+    log::info!("[frame_disk] เก็บลงเครื่องแล้ว: {} ({} bytes)", final_path.display(), bytes.len());
+    prune_disk_cache();
+}
+
+/// ลบไฟล์เก่าสุดทิ้งเมื่อเกินโควตา (กรอบเปลี่ยนตามอีเวนต์ ไม่งั้นดิสก์บวมเรื่อยๆ)
+fn prune_disk_cache() {
+    let dir = std::path::Path::new(FRAME_DISK_CACHE_DIR);
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some((e.path(), meta.modified().ok()?))
+        })
+        .collect();
+    if files.len() <= FRAME_DISK_CACHE_MAX_FILES {
+        return;
+    }
+    files.sort_by_key(|(_, modified)| *modified);
+    for (path, _) in files.iter().take(files.len() - FRAME_DISK_CACHE_MAX_FILES) {
+        log::info!("[frame_disk] ลบ cache เก่า: {}", path.display());
+        let _ = fs::remove_file(path);
+    }
+}
+
+/// ไฟล์บนดิสก์เก่าเกินกำหนดหรือยัง (ใช้ตัดสินใจว่า prefetch ควรโหลดทับไหม)
+fn disk_cache_is_stale(url: &str) -> bool {
+    let Ok(meta) = fs::metadata(frame_cache_path(url)) else {
+        return true;
+    };
+    let Ok(modified) = meta.modified() else {
+        return true;
+    };
+    modified
+        .elapsed()
+        .map(|age| age > Duration::from_secs(FRAME_DISK_REFRESH_DAYS * 24 * 60 * 60))
+        .unwrap_or(false)
+}
 
 fn cached_frame(url: &str) -> Option<Vec<u8>> {
     let cache = FRAME_CACHE.lock().ok()?;
@@ -215,6 +385,45 @@ fn cache_frame(url: &str, bytes: &[u8]) {
 /// ตอนนี้: เช็ค status, validate ว่าเป็นรูปก่อนคืนค่า, retry พร้อม backoff และ
 /// cache ไว้ให้ transaction ถัดไป
 pub async fn fetch_frame_image_bytes(frame_image_url: &str) -> Result<Vec<u8>, String> {
+    fetch_frame_image_bytes_inner(frame_image_url, true).await
+}
+
+/// อุ่น cache ล่วงหน้าตั้งแต่ลูกค้าเลือกกรอบ (ก่อนถ่ายเป็นนาที) — พอถึงตอน compose
+/// ก็หยิบจาก cache ได้เลย ไม่ต้องพึ่งเน็ต ณ วินาทีที่ลูกค้าจ่ายเงินไปแล้ว
+///
+/// เรียกแบบ fire-and-forget: พังก็แค่ไม่มี cache ไม่กระทบ flow และ **ไม่บันทึกลง
+/// negative cache** เพราะไม่งั้น prefetch ที่พังจะไปปิดโอกาสให้ compose ลองจริงทีหลัง
+#[tauri::command]
+pub async fn prefetch_frame_image(frame_image_url: String) -> Result<u64, String> {
+    if frame_image_url.is_empty() {
+        return Ok(0);
+    }
+
+    // มีบนเครื่องแล้วและยังไม่เก่า — ไม่ต้องยิงเน็ตซ้ำทุกครั้งที่ลูกค้าเลือกกรอบ
+    if !disk_cache_is_stale(&frame_image_url) {
+        if let Some(bytes) = disk_cached_frame(&frame_image_url) {
+            log::info!("[frame_prefetch] มีบนเครื่องแล้ว ({} bytes) — ไม่ต้องโหลด", bytes.len());
+            cache_frame(&frame_image_url, &bytes);
+            return Ok(bytes.len() as u64);
+        }
+    }
+
+    match fetch_frame_image_bytes_inner(&frame_image_url, false).await {
+        Ok(bytes) => {
+            log::info!("[frame_prefetch] warmed cache: {} bytes", bytes.len());
+            Ok(bytes.len() as u64)
+        }
+        Err(e) => {
+            log::warn!("[frame_prefetch] failed (ไม่กระทบ flow): {}", e);
+            Err(e)
+        }
+    }
+}
+
+async fn fetch_frame_image_bytes_inner(
+    frame_image_url: &str,
+    record_failure: bool,
+) -> Result<Vec<u8>, String> {
     if frame_image_url.starts_with("data:") {
         let clean = frame_image_url.split(',').nth(1).unwrap_or("");
         return STANDARD
@@ -223,27 +432,60 @@ pub async fn fetch_frame_image_bytes(frame_image_url: &str) -> Result<Vec<u8>, S
     }
 
     if let Some(bytes) = cached_frame(frame_image_url) {
-        println!("[frame_fetch] cache hit ({} bytes) for {}", bytes.len(), frame_image_url);
+        log::info!("[frame_fetch] memory cache hit ({} bytes) for {}", bytes.len(), frame_image_url);
         return Ok(bytes);
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(FRAME_FETCH_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("Frame client error: {}", e))?;
+    // มีอยู่บนเครื่องแล้ว = ไม่ต้องแตะเน็ตเลย (รอดแม้เน็ตตู้ตายสนิท)
+    if let Some(bytes) = disk_cached_frame(frame_image_url) {
+        log::info!("[frame_fetch] disk cache hit ({} bytes) for {}", bytes.len(), frame_image_url);
+        cache_frame(frame_image_url, &bytes);
+        return Ok(bytes);
+    }
 
+    // เพิ่งพังไปหมาดๆ (เช่น compose_frame พังแล้ว compose_frame_video ตามมาทันที)
+    // — ไม่ต้องให้ลูกค้ารอซ้ำอีกรอบ
+    if let Some(err) = recent_failure(frame_image_url) {
+        log::warn!("[frame_fetch] skipping retry — เพิ่งพังไปเมื่อกี้: {}", err);
+        return Err(format!("{} (เพิ่งลองไปเมื่อครู่ ไม่ลองซ้ำ)", err));
+    }
+
+    let client = FRAME_HTTP_CLIENT.as_ref().map_err(|e| e.clone())?;
+
+    let started = Instant::now();
+    let budget = Duration::from_secs(FRAME_FETCH_BUDGET_SECS);
     let mut last_err = String::new();
     for attempt in 1..=FRAME_FETCH_ATTEMPTS {
-        match try_fetch_frame(&client, frame_image_url).await {
+        // เหลือเวลาไม่พอจะลองอีกรอบก็หยุด ดีกว่าให้ลูกค้ายืนรอเปล่าๆ
+        let remaining = budget.saturating_sub(started.elapsed());
+        if remaining < Duration::from_secs(3) {
+            log::warn!(
+                "[frame_fetch] หมดเวลารวม {}s ที่ attempt {} — เลิกลอง",
+                FRAME_FETCH_BUDGET_SECS,
+                attempt
+            );
+            break;
+        }
+
+        let attempt_timeout = remaining.min(Duration::from_secs(FRAME_FETCH_TIMEOUT_SECS));
+        match try_fetch_frame(client, frame_image_url, attempt_timeout).await {
             Ok(bytes) => {
                 if attempt > 1 {
-                    println!("[frame_fetch] succeeded on attempt {}", attempt);
+                    log::info!("[frame_fetch] succeeded on attempt {}", attempt);
                 }
                 cache_frame(frame_image_url, &bytes);
+                write_disk_cache(frame_image_url, &bytes);
+                forget_failure(frame_image_url);
                 return Ok(bytes);
             }
             Err(e) => {
-                println!("[frame_fetch] attempt {}/{} failed: {}", attempt, FRAME_FETCH_ATTEMPTS, e);
+                log::warn!(
+                    "[frame_fetch] attempt {}/{} failed after {:.1}s: {}",
+                    attempt,
+                    FRAME_FETCH_ATTEMPTS,
+                    started.elapsed().as_secs_f64(),
+                    e
+                );
                 last_err = e;
                 if attempt < FRAME_FETCH_ATTEMPTS {
                     // backoff สั้นๆ ให้ CDN/เน็ตได้หายสะดุด แต่ลูกค้าไม่รอนาน
@@ -253,19 +495,31 @@ pub async fn fetch_frame_image_bytes(frame_image_url: &str) -> Result<Vec<u8>, S
         }
     }
 
-    Err(format!(
-        "Frame fetch failed after {} attempts: {}",
-        FRAME_FETCH_ATTEMPTS, last_err
-    ))
+    let err = format!(
+        "Frame fetch failed after {:.0}s: {}",
+        started.elapsed().as_secs_f64(),
+        last_err
+    );
+    if record_failure {
+        remember_failure(frame_image_url, &err);
+    }
+    Err(err)
 }
 
 /// ยิง 1 ครั้ง แล้วตรวจให้ครบว่าได้ "รูป" จริงๆ ไม่ใช่ error body
-async fn try_fetch_frame(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+async fn try_fetch_frame(
+    client: &reqwest::Client,
+    url: &str,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    use futures_util::StreamExt as _;
+
     let res = client
         .get(url)
+        .timeout(timeout)
         .send()
         .await
-        .map_err(|e| format!("download error: {}", e))?;
+        .map_err(|e| format!("download error: {}", error_chain(&e)))?;
 
     let status = res.status();
     let content_type = res
@@ -274,12 +528,27 @@ async fn try_fetch_frame(client: &reqwest::Client, url: &str) -> Result<Vec<u8>,
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
+    let expected_len = res.content_length();
 
-    let bytes = res
-        .bytes()
-        .await
-        .map_err(|e| format!("read body error (HTTP {}): {}", status, e))?
-        .to_vec();
+    // อ่านทีละ chunk เอง (แทน .bytes()) เพื่อให้ log บอกได้ว่าพังตอนได้กี่ไบต์แล้ว
+    // — "0 ไบต์" คือ CDN/เน็ตตัดตั้งแต่ต้น ส่วน "ได้ครึ่งทาง" คือโหลดค้างกลางคัน
+    let mut bytes: Vec<u8> = Vec::with_capacity(expected_len.unwrap_or(0).min(32 * 1024 * 1024) as usize);
+    let mut stream = res.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => bytes.extend_from_slice(&chunk),
+            Err(e) => {
+                return Err(format!(
+                    "read body error (HTTP {}, content-type: {}, got {}/{} bytes): {}",
+                    status,
+                    content_type,
+                    bytes.len(),
+                    expected_len.map(|l| l.to_string()).unwrap_or_else(|| "?".to_string()),
+                    error_chain(&e)
+                ))
+            }
+        }
+    }
 
     if !status.is_success() {
         return Err(format!(
@@ -289,6 +558,19 @@ async fn try_fetch_frame(client: &reqwest::Client, url: &str) -> Result<Vec<u8>,
             bytes.len(),
             body_snippet(&bytes)
         ));
+    }
+
+    // body สั้นกว่าที่ server บอกไว้ = ไฟล์ขาด อย่าปล่อยให้ไป decode ต่อ (จะได้ retry แทน)
+    if let Some(expected) = expected_len {
+        if bytes.len() as u64 != expected {
+            return Err(format!(
+                "truncated body (HTTP {}, content-type: {}, got {}/{} bytes)",
+                status,
+                content_type,
+                bytes.len(),
+                expected
+            ));
+        }
     }
 
     if bytes.is_empty() {
@@ -308,6 +590,21 @@ async fn try_fetch_frame(client: &reqwest::Client, url: &str) -> Result<Vec<u8>,
     }
 
     Ok(bytes)
+}
+
+/// reqwest ปริ๊นต์แค่ข้อความชั้นบนสุด ("error decoding response body") ซึ่งไม่บอกอะไรเลย
+/// สาเหตุจริง (timed out / connection closed before message completed / ...) อยู่ใน source chain
+fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut source = err.source();
+    while let Some(inner) = source {
+        let msg = inner.to_string();
+        if !parts.iter().any(|p| p == &msg) {
+            parts.push(msg);
+        }
+        source = inner.source();
+    }
+    parts.join(" <- ")
 }
 
 /// ตัด body มาโชว์ใน log พอให้รู้ว่า S3/CDN ตอบอะไรกลับมา
@@ -339,7 +636,7 @@ pub async fn compose_frame(
         .map_err(|e| format!("Frame load error: {}", e))?;
 
     let (orig_w, orig_h) = frame_img.dimensions();
-    println!("[compose_frame] frame original: {}x{}, grid target: {}x{}", orig_w, orig_h, frame_width, frame_height);
+    log::info!("[compose_frame] frame original: {}x{}, grid target: {}x{}", orig_w, orig_h, frame_width, frame_height);
 
     const MIN_OUTPUT_DIMENSION: u32 = 3600;
     let max_dim = orig_w.max(orig_h);
@@ -347,7 +644,7 @@ pub async fn compose_frame(
         let scale = MIN_OUTPUT_DIMENSION as f64 / max_dim as f64;
         let new_w = (orig_w as f64 * scale).round() as u32;
         let new_h = (orig_h as f64 * scale).round() as u32;
-        println!("[compose_frame] upscaling frame to {}x{}", new_w, new_h);
+        log::info!("[compose_frame] upscaling frame to {}x{}", new_w, new_h);
         frame_img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3)
     } else {
         frame_img
@@ -357,7 +654,7 @@ pub async fn compose_frame(
     let scale_x = orig_w as f64 / frame_width as f64;
     let scale_y = orig_h as f64 / frame_height as f64;
 
-    println!("[compose_frame] scaleX: {}, scaleY: {}", scale_x, scale_y);
+    log::info!("[compose_frame] scaleX: {}, scaleY: {}", scale_x, scale_y);
 
     let canvas_w = orig_w;
     let canvas_h = orig_h;
@@ -396,7 +693,7 @@ pub async fn compose_frame(
     let canvas = if frame_ratio < 0.5 {
         // 2x6 (สูงแคบ) -> canvas กว้าง 2 เท่า วางภาพซ้ำซ้าย-ขวา
         let (cw, ch) = canvas.dimensions();
-        println!("[compose_frame] 2x6 dup (frame ratio={:.3}): {}x{} -> {}x{}", frame_ratio, cw, ch, cw * 2, ch);
+        log::info!("[compose_frame] 2x6 dup (frame ratio={:.3}): {}x{} -> {}x{}", frame_ratio, cw, ch, cw * 2, ch);
         let mut doubled: RgbaImage = ImageBuffer::new(cw * 2, ch);
         image::imageops::overlay(&mut doubled, &canvas, 0, 0);
         image::imageops::overlay(&mut doubled, &canvas, cw as i64, 0);
@@ -404,7 +701,7 @@ pub async fn compose_frame(
     } else if frame_ratio > 2.0 {
         // 6x2 (แนวนอนแคบ) -> canvas สูง 2 เท่า วางภาพซ้ำบน-ล่าง
         let (cw, ch) = canvas.dimensions();
-        println!("[compose_frame] 6x2 dup (frame ratio={:.3}): {}x{} -> {}x{}", frame_ratio, cw, ch, cw, ch * 2);
+        log::info!("[compose_frame] 6x2 dup (frame ratio={:.3}): {}x{} -> {}x{}", frame_ratio, cw, ch, cw, ch * 2);
         let mut doubled: RgbaImage = ImageBuffer::new(cw, ch * 2);
         image::imageops::overlay(&mut doubled, &canvas, 0, 0);
         image::imageops::overlay(&mut doubled, &canvas, 0, ch as i64);
