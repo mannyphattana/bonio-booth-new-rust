@@ -583,6 +583,7 @@ pub fn run() {
             api::get_frames,
             api::create_payment,
             api::check_payment_status,
+            api::close_payment,
             api::check_coupon,
             api::use_coupon,
             api::create_photo_session,
