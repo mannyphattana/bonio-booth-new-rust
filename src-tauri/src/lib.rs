@@ -502,6 +502,16 @@ pub fn run() {
                 log::info!("[App] SetThreadExecutionState: display sleep prevented (no ES_SYSTEM_REQUIRED to avoid USB wake)");
             }
 
+            // WebView2 updates itself on every booth without us shipping anything, so the
+            // version the app is actually running on has to be in the log — otherwise a
+            // symptom that appears on every machine at once cannot be tied to a runtime
+            // change. Also confirms whether a pinned runtime (see
+            // scripts/use-fixed-webview2.ps1) really took effect.
+            match tauri::webview_version() {
+                Ok(version) => log::info!("[startup] WebView2 runtime: {}", version),
+                Err(err) => log::warn!("[startup] WebView2 runtime: unknown ({})", err),
+            }
+
             // Borderless maximize: cover the full screen without using exclusive
             // fullscreen mode. Exclusive fullscreen causes the graphics driver to
             // switch display modes, which on Duplicate-mode setups (laptop + external
