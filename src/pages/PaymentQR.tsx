@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+import { PAYMENT_OPTION_COPY, type PaymentOption } from "../config/paymentOptions";
 
 const CTX = "[PaymentQR]";
 
@@ -17,6 +18,16 @@ interface Props {
 
 const POLL_INTERVAL = 3000; // 3 seconds
 
+/**
+ * How long the screen waits, in seconds.
+ *
+ * 30s longer than the QR's own 5-minute expiry (PAYMENT_EXPIRE_MINUTES on the backend)
+ * so a customer who pays in the last moment still gets one or two polls before the booth
+ * gives up. The screen must never outlast the QR by much in the other direction: a code
+ * that stays payable after the booth resets takes money for a session that is gone.
+ */
+const PAYMENT_WINDOW_SECONDS = 330; // 5:30
+
 export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -25,13 +36,21 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
   const [status, setStatus] = useState<string>("CREATING");
   const [referenceId, setReferenceId] = useState<string>("");
   const [paymentTransactionId, setPaymentTransactionId] = useState<string>("");
-  const [timeLeft, setTimeLeft] = useState(300);
+  const [timeLeft, setTimeLeft] = useState(PAYMENT_WINDOW_SECONDS);
   const [error, setError] = useState("");
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isChangingMethod, setIsChangingMethod] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isCheckingRef = useRef(false); // Guard against concurrent status checks
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
+
+  // Which rail this QR settles. Coupon flow doesn't set one — the backend then defaults
+  // to PromptPay, which is what the coupon flow has always used.
+  const paymentOption: PaymentOption = state.paymentOption === "qr_credit_card"
+    ? "qr_credit_card"
+    : "promptpay";
+  const isCreditCard = paymentOption === "qr_credit_card";
 
   const createPayment = useCallback(async () => {
     // If payment was already created (e.g. from coupon flow), reuse it
@@ -49,6 +68,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
         amount: state.totalPrice || 0,
         numberPhoto: state.quantity || 1,
         couponCodeId: state.couponCodeId || null,
+        paymentOption,
       });
 
       if (result.success && result.data) {
@@ -170,6 +190,47 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     setIsCancelModalOpen(true);
   };
 
+  /**
+   * Give up on this QR and go pick a different Payment Option.
+   *
+   * Confirm the customer has not just paid before leaving — they may press this at the
+   * exact moment the payment lands, and sending them back to pay again would charge them
+   * twice. Then close the order so the abandoned QR cannot be paid afterwards.
+   */
+  const handleChangeMethodClick = useCallback(async () => {
+    if (isChangingMethod) return;
+    setIsChangingMethod(true);
+
+    try {
+      const result: any = await invoke("check_payment_status", { mchOrderNo: referenceId });
+      const paymentStatus = result?.data?.status || result?.data?.trade_state;
+
+      if (paymentStatus === "SUCCESS" || paymentStatus === "success") {
+        appLogger.info(CTX, "Payment landed while changing method — continuing, not going back");
+        setIsChangingMethod(false);
+        checkStatus();
+        return;
+      }
+    } catch (err) {
+      // A failed check tells us nothing either way. Close the order below anyway: an
+      // unpaid order that gets closed is the safe outcome, and a paid one cannot close.
+      appLogger.error(CTX, "Status check before changing method failed:", err);
+    }
+
+    try {
+      await invoke("close_payment", { mchOrderNo: referenceId });
+    } catch (err) {
+      // Best effort — the QR expires on its own within the payment window regardless.
+      appLogger.error(CTX, "close_payment failed:", err);
+    }
+
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    const { paymentOption: _discarded, ...stateWithoutOption } = state;
+    navigate("/payment-selection", { state: stateWithoutOption });
+  }, [isChangingMethod, referenceId, checkStatus, navigate, state]);
+
   const handleConfirmCancel = () => {
     setIsCancelModalOpen(false);
     if (pollRef.current) clearInterval(pollRef.current);
@@ -203,7 +264,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
               margin: "0 0 8px 0",
             }}
           >
-            สแกนจ่ายได้เลย!
+            {isCreditCard ? "สแกนด้วยแอปธนาคาร" : "สแกนจ่ายได้เลย!"}
           </h1>
           <p
             style={{
@@ -216,8 +277,24 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
               opacity: 0.8,
             }}
           >
-            SCAN TO PAY!
+            {isCreditCard ? "SCAN WITH YOUR BANKING APP" : "SCAN TO PAY!"}
           </p>
+          {/* Only some bank apps read a QR Credit Card, so name them where the customer
+              is standing with their phone out, not just back on the selection screen. */}
+          {isCreditCard && (
+            <p
+              style={{
+                color: theme.fontColor,
+                fontSize: "1.05rem",
+                fontWeight: 500,
+                margin: "10px 0 0 0",
+                opacity: 0.75,
+                lineHeight: 1.4,
+              }}
+            >
+              {PAYMENT_OPTION_COPY.qr_credit_card.hint}
+            </p>
+          )}
         </div>
 
         {/* QR Code Display */}
@@ -463,6 +540,30 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
           </div>
         )}
 
+        {/* Escape hatch — a customer whose bank app cannot read a QR Credit Card gets no
+            error from the app, it simply fails to scan. Without a way back they wait out
+            the whole timer and leave without paying. */}
+        {isCreditCard && status === "PENDING" && (
+          <button
+            onClick={handleChangeMethodClick}
+            disabled={isChangingMethod}
+            style={{
+              color: theme.primaryColor,
+              backgroundColor: "white",
+              border: `2px solid ${theme.primaryColor}`,
+              fontSize: "1.35rem",
+              marginTop: 24,
+              padding: "12px 32px",
+              borderRadius: 8,
+              cursor: isChangingMethod ? "default" : "pointer",
+              opacity: isChangingMethod ? 0.6 : 1,
+              boxShadow: "none",
+            }}
+          >
+            {isChangingMethod ? "กำลังตรวจสอบ..." : "สแกนไม่ได้? เปลี่ยนวิธีจ่าย"}
+          </button>
+        )}
+
         {/* Cancel button */}
         {status !== "SUCCESS" && (
           <button
@@ -472,7 +573,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
               backgroundColor: "white",
               border: "2px solid red",
               fontSize: "1.5rem",
-              marginTop: 24,
+              marginTop: isCreditCard && status === "PENDING" ? 12 : 24,
               padding: "12px 40px",
               borderRadius: 8,
               cursor: "pointer",

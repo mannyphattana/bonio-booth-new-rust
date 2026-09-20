@@ -233,6 +233,7 @@ pub async fn create_payment(
     coupon_code_id: Option<String>,
     is_reprint: Option<bool>,
     reprint_from_transaction_id: Option<String>,
+    payment_option: Option<String>,
 ) -> Result<ApiResponse, String> {
     let machine_id = state.machine_id.lock().unwrap().clone();
     let machine_port = state.machine_port.lock().unwrap().clone();
@@ -242,6 +243,11 @@ pub async fn create_payment(
     let mut payload = serde_json::json!({ "amount": amount });
     if let Some(n) = number_photo {
         payload["numberPhoto"] = serde_json::json!(n);
+    }
+    // Which Payment Option the customer picked. Omitted for the coupon flow, where the
+    // backend defaults to PromptPay.
+    if let Some(ref option) = payment_option {
+        payload["paymentOption"] = serde_json::json!(option);
     }
     if let Some(ref cid) = coupon_code_id {
         payload["couponCodeId"] = serde_json::json!(cid);
@@ -258,6 +264,38 @@ pub async fn create_payment(
         .header("X-Machine-Port", &machine_port)
         .query(&[("machineId", &machine_id)])
         .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Request error: {}", e))?;
+
+    let (status, body) = parse_response_body(res).await;
+
+    Ok(ApiResponse {
+        success: status.is_success(),
+        data: Some(body),
+        error: if !status.is_success() { Some(format!("Status: {}", status)) } else { None },
+    })
+}
+
+/// Close an unpaid order so an abandoned QR cannot be paid afterwards.
+///
+/// Called when the customer gives up on a QR to pick another Payment Option. Best effort:
+/// Ksher refuses to close an already-paid order, which is the outcome we want.
+#[tauri::command]
+pub async fn close_payment(
+    state: tauri::State<'_, AppState>,
+    mch_order_no: String,
+) -> Result<ApiResponse, String> {
+    let machine_id = state.machine_id.lock().unwrap().clone();
+    let machine_port = state.machine_port.lock().unwrap().clone();
+    let client = &state.http_client;
+    let url = format!("{}/api/machines-public/payment/close/{}", API_BASE_URL, mch_order_no);
+
+    let res = client
+        .post(&url)
+        .header("X-Machine-Id", &machine_id)
+        .header("X-Machine-Port", &machine_port)
+        .query(&[("machineId", &machine_id)])
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;

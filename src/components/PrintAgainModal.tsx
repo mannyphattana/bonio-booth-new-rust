@@ -2,6 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "../utils/appLogger";
 import type { ThemeData, MachineData } from "../App";
+import PaymentOptionIcon from "./PaymentOptionIcon";
+import {
+  PAYMENT_OPTION_COPY,
+  getEnabledPaymentOptions,
+  type PaymentOption,
+} from "../config/paymentOptions";
 
 const CTX = "[PrintAgainModal]";
 
@@ -56,6 +62,8 @@ export default function PrintAgainModal({
   const [couponLoading, setCouponLoading] = useState(false);
 
   const [busy, setBusy] = useState(false);
+  // Which option is mid-creation, so only that button shows "กำลังสร้าง..."
+  const [activeOption, setActiveOption] = useState<PaymentOption | null>(null);
   const [error, setError] = useState<string>("");
 
   const isCheckingRef = useRef(false);
@@ -77,7 +85,15 @@ export default function PrintAgainModal({
   const actualMaxQuantity = Math.max(1, Math.min(maxPriceQuantity, availablePaper));
   const currentPrice =
     machineData.prices.find((p) => p.quantity === quantity)?.price || 0;
-  const hasKsher = !!machineData.isKsherEnabled;
+  // Same Payment Options as the main payment screen — a customer who paid by card on the
+  // first order should not lose that choice when printing extras.
+  const enabledOptions = getEnabledPaymentOptions(machineData);
+  const payOptions = enabledOptions.filter((option) => option !== "coupon");
+  const hasCoupon = enabledOptions.includes("coupon");
+  // The modal is shorter than the payment screen, so it starts one step denser.
+  const density = payOptions.length <= 2 ? "compact" : "dense";
+  const iconSize = density === "compact" ? 40 : 32;
+  const buttonTextColor = theme.textButtonColor || "#fff";
 
   const handleDecrease = () => setQuantity((q) => (q > 1 ? q - 1 : q));
   const handleIncrease = () =>
@@ -113,10 +129,11 @@ export default function PrintAgainModal({
   );
 
   // ---- สร้าง payment (ใช้ทั้ง QR และคูปองที่ยังต้องจ่าย) ----
-  const startQrPayment = useCallback(async () => {
+  const startQrPayment = useCallback(async (option: PaymentOption) => {
     if (busy) return;
     setBusy(true);
     setError("");
+    setActiveOption(option);
     try {
       const result: any = await invoke("create_payment", {
         amount: currentPrice,
@@ -124,6 +141,7 @@ export default function PrintAgainModal({
         couponCodeId: null,
         isReprint: true,
         reprintFromTransactionId: originalTransactionId || null,
+        paymentOption: option,
       });
       const data = result?.data || {};
       if (!result?.success || !data.qr_code) {
@@ -373,39 +391,58 @@ export default function PrintAgainModal({
               </span>
             </div>
 
-            <div style={{ display: "flex", gap: 16, width: "100%", justifyContent: "center", flexWrap: "wrap" }}>
+            {/*
+             * Same cards as the payment screen, at the density that fits the modal — a
+             * customer who chose a wallet on the first order should not have to relearn
+             * the screen to buy an extra print with it.
+             */}
+            <div className={`payment-method-list payment-method-list-${density}`}>
+              {payOptions.map((option) => {
+                const copy = PAYMENT_OPTION_COPY[option];
+                const disabled = busy || currentPrice <= 0;
+                const creating = busy && activeOption === option;
+
+                return (
+                  <button
+                    key={option}
+                    onClick={() => startQrPayment(option)}
+                    disabled={disabled}
+                    className={`payment-method-card payment-method-card-${density}`}
+                    style={{
+                      background: theme.primaryColor,
+                      border: `2px solid ${theme.primaryColor}`,
+                      color: buttonTextColor,
+                      opacity: disabled ? 0.6 : 1,
+                    }}
+                  >
+                    <span className="payment-method-card-icon">
+                      <PaymentOptionIcon option={option} color={buttonTextColor} size={iconSize} />
+                    </span>
+                    <span className="payment-method-card-copy">
+                      <span className="payment-method-card-name">
+                        {creating ? "กำลังสร้าง..." : copy.nameThai}
+                      </span>
+                      <span className="payment-method-card-sub">{copy.name}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {hasCoupon && (
               <button
                 onClick={() => {
                   setError("");
                   setCouponCode("");
                   setStep("coupon");
                 }}
-                className="option-button"
+                className="payment-method-coupon"
                 style={{ border: `2px solid ${theme.primaryColor}`, color: theme.primaryColor }}
               >
-                <span className="option-button-text">ใช้</span>
-                <span className="option-button-subtext">Discount Coupon</span>
+                <PaymentOptionIcon option="coupon" color={theme.primaryColor} size={24} />
+                <span>{PAYMENT_OPTION_COPY.coupon.nameThai} · Discount Coupon</span>
               </button>
-
-              {hasKsher && (
-                <button
-                  onClick={startQrPayment}
-                  disabled={busy || currentPrice <= 0}
-                  className="option-button"
-                  style={{
-                    border: `2px solid ${theme.primaryColor}`,
-                    background: theme.primaryColor,
-                    color: theme.textButtonColor || "#fff",
-                    opacity: busy || currentPrice <= 0 ? 0.6 : 1,
-                  }}
-                >
-                  <span className="option-button-text">
-                    {busy ? "กำลังสร้าง..." : "ชำระเงินผ่าน"}
-                  </span>
-                  <span className="option-button-subtext">QR Payment</span>
-                </button>
-              )}
-            </div>
+            )}
 
             {error && <p style={{ color: "#e94560", fontSize: 14, margin: 0 }}>{error}</p>}
 

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Home from "./pages/Home";
 import PaymentSelection from "./pages/PaymentSelection";
+import PaymentMethod from "./pages/PaymentMethod";
 import CouponEntry from "./pages/CouponEntry";
 import PaymentQR from "./pages/PaymentQR";
 import FrameSelection from "./pages/FrameSelection";
@@ -50,6 +51,11 @@ export interface MachineData {
   paperLevel: number;
   isMaintenanceMode: boolean;
   isKsherEnabled?: boolean;
+  /**
+   * Payment Options this booth offers, from the backend init response. Absent when the
+   * backend predates Payment Options — see config/paymentOptions.ts for the fallback.
+   */
+  enabledPaymentOptions?: string[];
   [key: string]: any;
 }
 
@@ -556,6 +562,17 @@ function App() {
           path="/payment-selection"
           element={
             <PaymentSelection
+              theme={themeData!}
+              machineData={machineData!}
+              onFormatReset={handleFormatReset}
+              onBeforeClose={destroySSE}
+            />
+          }
+        />
+        <Route
+          path="/payment-method"
+          element={
+            <PaymentMethod
               theme={themeData!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
