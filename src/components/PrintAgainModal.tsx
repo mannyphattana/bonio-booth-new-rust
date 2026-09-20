@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "../utils/appLogger";
 import type { ThemeData, MachineData } from "../App";
+import PaymentOptionIcon from "./PaymentOptionIcon";
 import {
   PAYMENT_OPTION_COPY,
   getEnabledPaymentOptions,
@@ -87,6 +88,12 @@ export default function PrintAgainModal({
   // Same Payment Options as the main payment screen — a customer who paid by card on the
   // first order should not lose that choice when printing extras.
   const enabledOptions = getEnabledPaymentOptions(machineData);
+  const payOptions = enabledOptions.filter((option) => option !== "coupon");
+  const hasCoupon = enabledOptions.includes("coupon");
+  // The modal is shorter than the payment screen, so it starts one step denser.
+  const density = payOptions.length <= 2 ? "compact" : "dense";
+  const iconSize = density === "compact" ? 40 : 32;
+  const buttonTextColor = theme.textButtonColor || "#fff";
 
   const handleDecrease = () => setQuantity((q) => (q > 1 ? q - 1 : q));
   const handleIncrease = () =>
@@ -384,31 +391,14 @@ export default function PrintAgainModal({
               </span>
             </div>
 
-            {/* Same Payment Options as the main payment screen, from the same config */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
-              {enabledOptions.map((option) => {
+            {/*
+             * Same cards as the payment screen, at the density that fits the modal — a
+             * customer who chose a wallet on the first order should not have to relearn
+             * the screen to buy an extra print with it.
+             */}
+            <div className={`payment-method-list payment-method-list-${density}`}>
+              {payOptions.map((option) => {
                 const copy = PAYMENT_OPTION_COPY[option];
-
-                if (option === "coupon") {
-                  return (
-                    <button
-                      key={option}
-                      onClick={() => {
-                        setError("");
-                        setCouponCode("");
-                        setStep("coupon");
-                      }}
-                      className="option-button option-button-wide"
-                      style={{ border: `2px solid ${theme.primaryColor}`, color: theme.primaryColor }}
-                    >
-                      <div className="option-button-copy">
-                        <span className="option-button-text">{copy.action}</span>
-                        <span className="option-button-subtext">{copy.name}</span>
-                      </div>
-                    </button>
-                  );
-                }
-
                 const disabled = busy || currentPrice <= 0;
                 const creating = busy && activeOption === option;
 
@@ -417,25 +407,42 @@ export default function PrintAgainModal({
                     key={option}
                     onClick={() => startQrPayment(option)}
                     disabled={disabled}
-                    className="option-button option-button-wide"
+                    className={`payment-method-card payment-method-card-${density}`}
                     style={{
-                      border: `2px solid ${theme.primaryColor}`,
                       background: theme.primaryColor,
-                      color: theme.textButtonColor || "#fff",
+                      border: `2px solid ${theme.primaryColor}`,
+                      color: buttonTextColor,
                       opacity: disabled ? 0.6 : 1,
                     }}
                   >
-                    <div className="option-button-copy">
-                      <span className="option-button-text">
-                        {creating ? "กำลังสร้าง..." : copy.action}
+                    <span className="payment-method-card-icon">
+                      <PaymentOptionIcon option={option} color={buttonTextColor} size={iconSize} />
+                    </span>
+                    <span className="payment-method-card-copy">
+                      <span className="payment-method-card-name">
+                        {creating ? "กำลังสร้าง..." : copy.nameThai}
                       </span>
-                      <span className="option-button-subtext">{copy.name}</span>
-                      {copy.hint && <span className="option-button-hint">{copy.hint}</span>}
-                    </div>
+                      <span className="payment-method-card-sub">{copy.name}</span>
+                    </span>
                   </button>
                 );
               })}
             </div>
+
+            {hasCoupon && (
+              <button
+                onClick={() => {
+                  setError("");
+                  setCouponCode("");
+                  setStep("coupon");
+                }}
+                className="payment-method-coupon"
+                style={{ border: `2px solid ${theme.primaryColor}`, color: theme.primaryColor }}
+              >
+                <PaymentOptionIcon option="coupon" color={theme.primaryColor} size={24} />
+                <span>{PAYMENT_OPTION_COPY.coupon.nameThai} · Discount Coupon</span>
+              </button>
+            )}
 
             {error && <p style={{ color: "#e94560", fontSize: 14, margin: 0 }}>{error}</p>}
 
