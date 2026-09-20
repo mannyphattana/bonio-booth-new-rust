@@ -4,6 +4,7 @@ mod canon;
 mod edsdk_sys;
 mod image_processing;
 mod lut;
+mod print_status;
 mod printer;
 mod shutdown;
 mod sse;
@@ -640,6 +641,7 @@ pub fn run() {
             printer::list_dslr_cameras,
             printer::reduce_paper_level,
             printer::get_printer_paper_sizes,
+            print_status::get_printer_status_detail,
             // Video
             video::check_ffmpeg_available,
             video::ensure_ffmpeg,

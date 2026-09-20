@@ -133,7 +133,16 @@ fn win32_printer_exists(printer_name: &str) -> bool {
 /// No PowerShell, no popup windows, full control over paper size and orientation.
 /// Auto-switches to "{printer_name} (CUT)" driver for cut frames if available.
 #[cfg(target_os = "windows")]
-fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Result<(), String> {
+/// พิมพ์ภาพผ่าน Win32 GDI
+///
+/// คืน `(job_id, ชื่อคิวที่ใช้จริง)` — job id มาจาก StartDoc และเป็นกุญแจที่ทำให้
+/// ตามสถานะงานต่อได้ (L2) ส่วนชื่อคิวต้องคืนด้วยเพราะอาจถูก auto-switch ไป
+/// driver ตัว CUT ซึ่งเป็นคนละคิวกับชื่อที่ frontend ส่งมา
+fn win32_gdi_print(
+    printer_name: &str,
+    image_path: &str,
+    frame_type: &str,
+) -> Result<(u32, String), String> {
     use windows::Win32::Graphics::Gdi::*;
     use windows::Win32::Graphics::Printing::{
         OpenPrinterW, ClosePrinter, DocumentPropertiesW,
@@ -307,8 +316,13 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
         log::info!("[Printer] Page: {}x{} device units", page_w, page_h);
 
         // 7. Load image and convert to BGRA bottom-up (Windows bitmap format)
-        let img = image::open(image_path)
-            .map_err(|e| format!("Failed to open image for printing: {}", e))?;
+        let img = match image::open(image_path) {
+            Ok(i) => i,
+            Err(e) => {
+                let _ = DeleteDC(HDC(hdc.0));
+                return Err(format!("Failed to open image for printing: {}", e));
+            }
+        };
         let rgba = img.to_rgba8();
         let (img_w, img_h) = (rgba.width(), rgba.height());
         let raw = rgba.as_raw();
@@ -341,12 +355,17 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
         // CreatedHDC -> HDC -> isize (all repr(transparent))
         let raw_hdc: isize = std::mem::transmute_copy(&hdc);
 
-        if print_ffi::StartDocW(raw_hdc, &doc_info) <= 0 {
+        // StartDoc คืน "job id" ของ spooler มาให้เลยเมื่อสำเร็จ (>0)
+        // นี่คือตัวที่ทำให้เราตามต่อได้ว่างานใบนี้ออกจริงหรือค้าง
+        let job_id = print_ffi::StartDocW(raw_hdc, &doc_info);
+        if job_id <= 0 {
+            let _ = DeleteDC(HDC(hdc.0));
             return Err("StartDoc failed".into());
         }
 
         if print_ffi::StartPage(raw_hdc) <= 0 {
             print_ffi::EndDoc(raw_hdc);
+            let _ = DeleteDC(HDC(hdc.0));
             return Err("StartPage failed".into());
         }
 
@@ -398,9 +417,15 @@ fn win32_gdi_print(printer_name: &str, image_path: &str, frame_type: &str) -> Re
 
         print_ffi::EndPage(raw_hdc);
         print_ffi::EndDoc(raw_hdc);
+        // GDI handle ต้องคืนเอง ไม่งั้นรั่วสะสมทุกใบที่ปริ้น
+        let _ = DeleteDC(HDC(hdc.0));
 
-        log::info!("[Printer] Print job sent successfully via Win32 GDI");
-        Ok(())
+        log::info!(
+            "[Printer] Job spooled: job_id={} queue='{}'",
+            job_id,
+            actual_printer
+        );
+        Ok((job_id as u32, actual_printer))
     }
 }
 
@@ -415,8 +440,68 @@ fn hidden_command(program: &str) -> Command {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PrinterInfo {
     pub name: String,
+    /// ชื่อ flag ที่ติดอยู่ เช่น "PAPER_OUT|DOOR_OPEN" (เดิมเป็น "Normal"/"Unknown(N)")
     pub status: String,
+    /// พิมพ์ได้จริงไหม = ต่ออยู่ + ไม่ offline + ไม่มี error ค้าง
     pub is_online: bool,
+    /// เครื่องยังเสียบ/มองเห็นอยู่ไหม (แยกจาก is_online เพื่อบอกต่างระหว่าง
+    /// "สายหลุด" กับ "อยู่ครบแต่ริบบิ้นหมด")
+    pub is_present: bool,
+    pub has_error: bool,
+    /// ข้อความไทยพร้อมโชว์ เช่น "ฝาเครื่องพิมพ์เปิดอยู่"
+    pub status_message: String,
+    pub status_flags: Vec<String>,
+    pub status_raw: u32,
+    pub jobs_in_queue: u32,
+}
+
+/// รวมข้อมูลสองทางให้เป็นคำตอบเดียว:
+///   - WMI/PnP  -> "เครื่องยังเสียบอยู่ไหม" (จับ USB หลุดได้ไวกว่า spooler)
+///   - Win32 spooler bitmask -> "ถ้าไม่พิมพ์ เป็นเพราะอะไร" (ดู print_status.rs)
+fn build_printer_info(
+    name: String,
+    work_offline: bool,
+    pnp_connected: bool,
+    is_usb: bool,
+    wmi_state: u64,
+) -> PrinterInfo {
+    let is_present = !work_offline && (!is_usb || pnp_connected);
+
+    let detail = crate::print_status::query_printer_status(&name).unwrap_or_else(|e| {
+        log::warn!(
+            "[Printer] อ่าน status bitmask ของ '{}' ไม่ได้ ({}) — fallback ไปใช้ค่าจาก WMI",
+            name,
+            e
+        );
+        // fallback หยาบ ๆ: แปลง Win32_Printer.PrinterState เป็นบิตที่ใกล้เคียงที่สุด
+        let raw = match wmi_state {
+            1 => 0x0000_0001, // Paused
+            2 => 0x0000_0002, // Error
+            4 => 0x0000_0008, // PaperJam
+            5 => 0x0000_0010, // PaperOut
+            8 => 0x0000_0080, // Offline
+            _ => 0,
+        };
+        crate::print_status::decode_printer_status(raw, 0)
+    });
+
+    let status = if detail.flags.is_empty() {
+        "Ready".to_string()
+    } else {
+        detail.flags.join("|")
+    };
+
+    PrinterInfo {
+        name,
+        status,
+        is_online: is_present && !detail.is_offline && !detail.is_error,
+        is_present,
+        has_error: detail.is_error,
+        status_message: detail.message,
+        status_flags: detail.flags,
+        status_raw: detail.raw,
+        jobs_in_queue: detail.jobs_in_queue,
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -573,34 +658,10 @@ pub async fn get_printers() -> Result<Vec<PrinterInfo>, String> {
                 .and_then(|w| w.as_bool())
                 .unwrap_or(false);
 
-            let status = match status_num {
-                0 => "Normal".to_string(),
-                1 => "Paused".to_string(),
-                2 => "Error".to_string(),
-                3 => "Deleting".to_string(),
-                4 => "PaperJam".to_string(),
-                5 => "PaperOut".to_string(),
-                _ => format!("Unknown({})", status_num),
-            };
-
-            // Printer is online only if:
-            // 1. Not marked as WorkOffline
-            // 2. Status is Normal (0), Printing (1024), Processing (128), or Busy (10)
-            //    (Win32_Printer.PrinterState values: 0=Idle, 1=Paused, 2=Error, 3=Deleting, 4=PaperJam, 5=PaperOut)
-            //    Common active states: 1024 (Printing), 128 (Processing)
-            // 3. For USB printers: PnP device must be physically present
-            //
-            // We treat 0 (Normal) and specific active states as "Online".
-            // We treat Error(2), PaperJam(4), PaperOut(5) as "Offline/Error".
-            let is_online = !work_offline
-                && (status_num == 0 || status_num == 1024 || status_num == 128 || status_num == 10)
-                && (!is_usb || pnp_connected);
-
-            PrinterInfo {
-                name,
-                is_online,
-                status,
-            }
+            // สถานะจริงอ่านจาก Win32 spooler bitmask ไม่ใช่ enum ของ WMI อีกแล้ว
+            // (ของเดิมเทียบ status_num == 128 ว่า "Processing" ทั้งที่ 0x80 คือ OFFLINE
+            //  และ 1040 = PRINTING+PAPER_OUT ก็ตกเป็น Unknown ไปเฉย ๆ)
+            build_printer_info(name, work_offline, pnp_connected, is_usb, status_num)
         })
         .collect();
 
@@ -671,22 +732,167 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
         .and_then(|w| w.as_bool())
         .unwrap_or(false);
 
-    let status = match status_num {
-        0 => "Normal".to_string(),
-        1 => "Paused".to_string(),
-        2 => "Error".to_string(),
-        _ => format!("Unknown({})", status_num),
-    };
-
-    Ok(PrinterInfo {
+    Ok(build_printer_info(
         name,
-        is_online: !work_offline && status_num == 0 && (!is_usb || pnp_connected),
-        status,
-    })
+        work_offline,
+        pnp_connected,
+        is_usb,
+        status_num,
+    ))
+}
+
+/// จำนวนครั้งสูงสุดที่ยอมส่งงานใบเดียวกันเข้าเครื่อง (1 = ไม่ส่งซ้ำเลย)
+#[cfg(target_os = "windows")]
+const MAX_PRINT_ATTEMPTS: u32 = 2;
+
+/// รอให้คนไปแก้ที่เครื่อง (ปิดฝา/ใส่ริบบิ้น/ใส่กระดาษ) นานสุดเท่านี้ก่อนยอมแพ้
+#[cfg(target_os = "windows")]
+const RETRY_READY_WAIT_MS: u64 = 300_000;
+
+/// เฝ้างานพิมพ์ใบหนึ่งจนจบ และส่งซ้ำให้ถ้าพิสูจน์ได้ว่ากระดาษไม่ได้ออก
+///
+/// เงื่อนไขการส่งซ้ำเข้มไว้ก่อน เพราะ "ปริ้นซ้ำ" แพงกว่า "ไม่ปริ้น" สำหรับตู้:
+/// ลูกค้าได้รูปเกิน เปลืองริบบิ้น และ paper level ที่หลังบ้านจะเพี้ยน
+///   1. ต้อง pages_printed == 0 เท่านั้น — ถ้ากระดาษออกไปแล้วแม้แผ่นเดียว ไม่ส่งซ้ำ
+///   2. ต้องลบงานเดิมออกจากคิวให้สำเร็จก่อน — ไม่งั้นพอเครื่องหายติดปัญหา
+///      งานเก่ากับงานใหม่จะพิมพ์ออกมาทั้งคู่
+///   3. ต้องรอจนเครื่องพร้อมจริงก่อนส่ง — ยิงเข้าเครื่องที่ฝายังเปิดอยู่ก็ค้างซ้ำที่เดิม
+///   4. ส่งซ้ำได้ไม่เกิน MAX_PRINT_ATTEMPTS ครั้ง
+#[cfg(target_os = "windows")]
+fn spawn_print_supervisor(
+    app: tauri::AppHandle,
+    requested_printer: String,
+    frame_type: String,
+    temp_path: String,
+    queue_name: String,
+    job_id: u32,
+) {
+    use crate::print_status::{self, JobOutcome, RetryDecision};
+
+    std::thread::spawn(move || {
+        let mut queue = queue_name;
+        let mut job = job_id;
+        let mut attempt: u32 = 1;
+
+        loop {
+            let (reason, pages_printed) = match print_status::monitor_job(&app, &queue, job, attempt)
+            {
+                JobOutcome::Printed => break,
+                JobOutcome::Failed {
+                    reason,
+                    pages_printed,
+                } => (reason, pages_printed),
+            };
+
+            match print_status::decide_retry(attempt, pages_printed, MAX_PRINT_ATTEMPTS) {
+                RetryDecision::Retry => {}
+                RetryDecision::GiveUpAlreadyPrinted => {
+                    print_status::emit_state(
+                        &app,
+                        &queue,
+                        job,
+                        attempt,
+                        "give_up",
+                        format!(
+                            "{} — พิมพ์ออกไปแล้ว {} หน้า จึงไม่ส่งซ้ำอัตโนมัติ (กันได้รูปซ้ำ)",
+                            reason, pages_printed
+                        ),
+                    );
+                    break;
+                }
+                RetryDecision::GiveUpMaxAttempts => {
+                    print_status::emit_state(
+                        &app,
+                        &queue,
+                        job,
+                        attempt,
+                        "give_up",
+                        format!("{} — ส่งไปแล้ว {} ครั้งยังไม่สำเร็จ หยุดส่งซ้ำ", reason, attempt),
+                    );
+                    break;
+                }
+            }
+
+            // (2) ลบงานเดิมให้สำเร็จก่อน ถ้าลบไม่ได้ก็ไม่กล้าส่งซ้ำ
+            if let Err(e) = print_status::cancel_job(&queue, job) {
+                log::warn!(
+                    "[PrintJob] ยกเลิกงาน {} ไม่สำเร็จ: {} — ไม่ส่งซ้ำเพื่อกันปริ้นซ้ำ",
+                    job,
+                    e
+                );
+                print_status::emit_state(
+                    &app,
+                    &queue,
+                    job,
+                    attempt,
+                    "give_up",
+                    format!("{} — ยกเลิกงานเดิมไม่สำเร็จ จึงไม่ส่งซ้ำ", reason),
+                );
+                break;
+            }
+
+            // (3) รอจนเครื่องพร้อมจริงค่อยส่ง
+            print_status::emit_state(
+                &app,
+                &queue,
+                job,
+                attempt,
+                "retrying",
+                format!("{} — ยกเลิกงานเดิมแล้ว รอเครื่องพร้อมเพื่อส่งพิมพ์ใหม่", reason),
+            );
+
+            if !print_status::wait_until_ready(&queue, RETRY_READY_WAIT_MS) {
+                print_status::emit_state(
+                    &app,
+                    &queue,
+                    job,
+                    attempt,
+                    "give_up",
+                    format!(
+                        "{} — รอ {} นาทีแล้วเครื่องยังไม่พร้อม",
+                        reason,
+                        RETRY_READY_WAIT_MS / 60_000
+                    ),
+                );
+                break;
+            }
+
+            attempt += 1;
+            match win32_gdi_print(&requested_printer, &temp_path, &frame_type) {
+                Ok((new_job, new_queue)) => {
+                    log::info!(
+                        "[PrintJob] ส่งซ้ำครั้งที่ {}: job={} queue='{}'",
+                        attempt,
+                        new_job,
+                        new_queue
+                    );
+                    job = new_job;
+                    queue = new_queue;
+                }
+                Err(e) => {
+                    print_status::emit_state(
+                        &app,
+                        &queue,
+                        job,
+                        attempt,
+                        "give_up",
+                        format!("ส่งพิมพ์ซ้ำไม่สำเร็จ: {}", e),
+                    );
+                    break;
+                }
+            }
+        }
+
+        // ไฟล์ชั่วคราวของใบนี้ไม่ต้องใช้แล้ว
+        if let Err(e) = std::fs::remove_file(&temp_path) {
+            log::debug!("[PrintJob] ลบไฟล์ชั่วคราว '{}' ไม่ได้: {}", temp_path, e);
+        }
+    });
 }
 
 #[tauri::command]
 pub async fn print_photo(
+    app: tauri::AppHandle,
     image_path: String,
     printer_name: String,
     frame_type: String,
@@ -821,7 +1027,9 @@ pub async fn print_photo(
     let temp_dir = std::env::temp_dir().join("bonio-booth");
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
-    let temp_path = temp_dir.join("print-processed.png");
+    // ชื่อไฟล์ต้องไม่ซ้ำ: ใบถัดไปในลูป และการส่งซ้ำที่อาจเกิดขึ้นอีกหลายนาทีให้หลัง
+    // ต้องไม่ไปทับไฟล์ของใบที่ยังรอพิมพ์อยู่ (supervisor เป็นคนลบให้ตอนจบงาน)
+    let temp_path = temp_dir.join(format!("print-{}.png", uuid::Uuid::new_v4()));
     final_image
         .save(&temp_path)
         .map_err(|e| format!("Failed to save processed image: {}", e))?;
@@ -831,12 +1039,29 @@ pub async fn print_photo(
     // Print using native Win32 GDI API - no PowerShell, no popup windows
     #[cfg(target_os = "windows")]
     {
-        win32_gdi_print(&printer_name, &temp_path_str, &frame_type)
-            .map(|_| true)
+        let (job_id, queue_name) = win32_gdi_print(&printer_name, &temp_path_str, &frame_type)?;
+
+        // L2 — ตามงานใบนี้ต่อใน background thread: ยิง event `print-job-update`
+        // ขึ้น frontend และส่งซ้ำให้ถ้าพิสูจน์ได้ว่ากระดาษไม่ได้ออก
+        // ไม่ block ตรงนี้ เพื่อให้ UX เดิม (กดปริ้นแล้วไปหน้าถัดไป) คงเดิม
+        //
+        // ค่า true ที่คืนกลับไปยังแปลว่า "ส่งเข้าคิวสำเร็จ" เหมือนเดิม —
+        // คำตอบว่า "ออกจากเครื่องจริงไหม" จะมาทีหลังทาง event
+        spawn_print_supervisor(
+            app,
+            printer_name,
+            frame_type,
+            temp_path_str,
+            queue_name,
+            job_id,
+        );
+
+        Ok(true)
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = app;
         let output = hidden_command("lpr")
             .args(&["-P", &printer_name, &temp_path_str])
             .output()
@@ -925,6 +1150,7 @@ pub async fn print_test_photo(
     let is_landscape = frame_type == "6x4" || frame_type == "6x2";
 
     print_photo(
+        app,
         test_image_path,
         printer_name,
         frame_type,
