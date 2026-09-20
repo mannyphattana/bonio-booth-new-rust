@@ -426,13 +426,19 @@ fn duplication_factors(frame_ratio: f64) -> (u32, u32) {
 ///   2. ความคมไม่ผูกกับความละเอียดจริงของไฟล์เฟรม ตัวอักษร/โลโก้เลยแตกไม่เท่ากัน
 ///      ในแต่ละ layout และสู้ภาพนิ่งไม่ได้
 ///
-/// ตอนนี้เล็งที่ด้านยาว 3600px ของขนาด "หลัง duplicate" ให้เท่ากับ
-/// MIN_OUTPUT_DIMENSION ของภาพนิ่งใน compose_frame แล้วบีบลงถ้าชนเพดาน iOS
-/// (H.264 Level 5.1 = 36864 macroblocks, ไม่มีด้านไหนเกิน 4096px)
+/// ตอนนี้เล็งที่ด้านยาว 2160px ของขนาด "หลัง duplicate" แล้วบีบลงถ้าชนเพดาน iOS
+///
+/// เคยเล็ง 3600px ให้เท่าภาพนิ่ง (v2.5.7) แต่ได้ 2544x3600@30fps = 1.07M macroblock/วินาที
+/// เกินเพดาน throughput ของ Level 5.1 (983,040/วินาที) มือถือถอดรหัสไม่ทัน วิดีโอกระตุก
+/// ทุกตู้ และภาพจากกล้องละเอียดไม่ถึง 3600px อยู่แล้ว ขยายไปก็ไม่คมขึ้น
+/// 2160px (1440x2160 สำหรับ 4x6) คือขนาดที่เล่นลื่นก่อน v2.5.7
+///
+/// เพดาน: ไม่มีด้านไหนเกิน 4096px และ macroblock ต่อเฟรม × 30fps ต้องไม่เกิน Level 5.1
 fn compose_output_size(orig_w: u32, orig_h: u32, dup_w: u32, dup_h: u32) -> (u32, u32) {
-    const TARGET_LONG_EDGE: f64 = 3600.0;
+    const TARGET_LONG_EDGE: f64 = 2160.0;
     const MAX_DIMENSION: f64 = 4096.0;
-    const MAX_MACROBLOCKS: f64 = 36864.0;
+    // Level 5.1 MaxMBPS 983040 / 30fps — เข้มกว่า MaxFS 36864 ต่อเฟรม
+    const MAX_MACROBLOCKS: f64 = 983040.0 / 30.0;
 
     // ขนาดสุดท้ายที่ผู้ใช้จะได้ (หลัง duplicate) คือตัวที่ต้องอยู่ในเพดาน
     let final_w = (orig_w * dup_w) as f64;
@@ -454,6 +460,71 @@ fn compose_output_size(orig_w: u32, orig_h: u32, dup_w: u32, dup_h: u32) -> (u32
     if out_w % 2 != 0 { out_w += 1; }
     if out_h % 2 != 0 { out_h += 1; }
     (out_w, out_h)
+}
+
+/// ความยาวและจำนวนเฟรมของคลิป — ffprobe ไม่ได้ bundle มา จึงใช้ ffmpeg `-c copy -f null`
+/// แล้วอ่าน `Duration:` กับค่า `frame=` ตัวสุดท้ายจาก stderr
+fn probe_clip(path: &str) -> Option<(u64, f64)> {
+    let output = hidden_command(&get_ffmpeg_path())
+        .args(&["-i", path, "-map", "0:v:0", "-c", "copy", "-f", "null", "-"])
+        .output()
+        .ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let frames: u64 = stderr
+        .rsplit("frame=")
+        .next()
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|n| n.parse().ok())?;
+
+    let duration = stderr
+        .split("Duration:")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .and_then(parse_hhmmss)?;
+
+    Some((frames, duration))
+}
+
+/// "00:00:02.92" → 2.92 วินาที
+fn parse_hhmmss(value: &str) -> Option<f64> {
+    let mut seconds = 0.0;
+    for part in value.trim().split(':') {
+        seconds = seconds * 60.0 + part.parse::<f64>().ok()?;
+    }
+    Some(seconds)
+}
+
+/// ช่วงต้นคลิปที่ต้องตัดทิ้ง (วินาที)
+///
+/// จอของตู้คือแหล่งแสงหลักในห้องมืด ตอนเริ่มอัด จอเพิ่งเปลี่ยนจากหน้า preview ของช็อตก่อน
+/// มาเป็นหน้า countdown และ live view ของกล้องตามหลังจออยู่ราว 0.2 วินาที เฟรมต้นคลิปจึง
+/// เป็นภาพตอนห้องยังสว่างอยู่ — วัดจากไฟล์ดิบของลูกค้า: 3 เฟรมแรกสว่าง Y≈100 ส่วนที่เหลือ
+/// Y≈17.5 คลิปถูกวนหลายรอบในวิดีโอ 9 วินาที ลูกค้าจึงเห็นแว้บขาวทุกครั้งที่คลิปเริ่มรอบใหม่
+const CLIP_HEAD_TRIM_SECONDS: f64 = 0.35;
+
+/// filter ที่ตัดหัวคลิปทิ้งทุกรอบที่ `-stream_loop` วนกลับ แล้วปิดช่องว่างที่เกิดจากการตัด
+///
+/// ตัดด้วย `select` ตามเลขเฟรมของคลิป (หารลงตัวเป๊ะทุกรอบ ไม่เพี้ยนสะสมเหมือนคิดจากเวลา)
+/// แล้ว `setpts` เรียงเวลาใหม่ให้ต่อเนื่อง ถ้าไม่เรียงใหม่ overlay จะค้างเฟรมเดิมค้างไว้
+/// ตรงรอยต่อแทนที่จะเล่นต่อทันที และ `fps=30` ทำให้เฟรมห่างเท่ากัน แก้อาการกระตุกจาก
+/// คลิปต้นทางที่เฟรมไม่สม่ำเสมอไปด้วย
+fn loop_clip_without_head(frames: u64, duration: f64) -> String {
+    if frames < 2 || duration <= 0.0 {
+        return "fps=30,".to_string();
+    }
+
+    let frame_step = duration / frames as f64;
+    let skip = (CLIP_HEAD_TRIM_SECONDS / frame_step).ceil() as u64;
+    // เหลือไว้อย่างน้อยครึ่งคลิป — คลิปสั้นผิดปกติจะได้ไม่ถูกตัดจนไม่เหลืออะไร
+    if skip == 0 || skip > frames / 2 {
+        return "fps=30,".to_string();
+    }
+
+    format!(
+        r"select='gte(mod(n\,{})\,{})',setpts=N*{:.6}/TB,fps=30,",
+        frames, skip, frame_step
+    )
 }
 
 /// Compose multiple videos into a single framed video using a SINGLE FFmpeg call.
@@ -551,9 +622,12 @@ pub async fn compose_frame_video(
         if sh % 2 != 0 { sh += 1; }
 
         let hflip_prefix = if hflip_video.unwrap_or(false) { "hflip," } else { "" };
+        let loop_prefix = probe_clip(&video_paths[i])
+            .map(|(frames, duration)| loop_clip_without_head(frames, duration))
+            .unwrap_or_else(|| "fps=30,".to_string());
         let mut chain = format!(
-            "[{}:v]trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
-            i, hflip_prefix, sw+2, sh+2, sw, sh
+            "[{}:v]{}trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
+            i, loop_prefix, hflip_prefix, sw+2, sh+2, sw, sh
         );
         if let Some(ref lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));
@@ -775,11 +849,11 @@ mod tests {
         (w * dw, h * dh)
     }
 
-    /// เพดานที่ iOS hardware decoder รับได้: H.264 Level 5.1
+    /// เพดานที่ iOS hardware decoder รับได้: H.264 Level 5.1 ที่ 30fps
     fn assert_ios_safe(w: u32, h: u32) {
         assert!(w <= 4096 && h <= 4096, "เกิน 4096px: {}x{}", w, h);
         let mb = w.div_ceil(16) * h.div_ceil(16);
-        assert!(mb <= 36864, "เกิน Level 5.1: {}x{} = {} macroblocks", w, h, mb);
+        assert!(mb * 30 <= 983040, "เกิน Level 5.1 ที่ 30fps: {}x{} = {} macroblocks/เฟรม", w, h, mb);
         assert!(w % 2 == 0 && h % 2 == 0, "ไม่ใช่เลขคู่ (yuv420p): {}x{}", w, h);
     }
 
@@ -788,14 +862,14 @@ mod tests {
         // เคสที่พังจริง: เฟรม 2x6 → hstack เป็น 4x6
         let (w, h) = delivered(1200, 3600, 2.0 / 6.0);
         assert_ios_safe(w, h);
-        assert_eq!((w, h), (2400, 3600));
+        assert_eq!((w, h), (1440, 2160));
     }
 
     #[test]
     fn frame_6x2_duplicated_fits_ios_decoder() {
         let (w, h) = delivered(3600, 1200, 6.0 / 2.0);
         assert_ios_safe(w, h);
-        assert_eq!((w, h), (3600, 2400));
+        assert_eq!((w, h), (2160, 1440));
     }
 
     #[test]
@@ -804,14 +878,14 @@ mod tests {
         assert_eq!((dw, dh), (1, 1));
         let (w, h) = delivered(1800, 2700, 4.0 / 6.0);
         assert_ios_safe(w, h);
-        assert_eq!((w, h), (2400, 3600));
+        assert_eq!((w, h), (1440, 2160));
     }
 
     #[test]
     fn small_frame_asset_is_upscaled_to_target() {
         // ไฟล์เฟรมเล็ก ต้องถูกดันขึ้นไปที่เป้าหมาย ไม่ปล่อยให้ตัวอักษรแตก
         let (w, h) = delivered(600, 1800, 2.0 / 6.0);
-        assert_eq!((w, h), (2400, 3600));
+        assert_eq!((w, h), (1440, 2160));
     }
 
     #[test]
@@ -819,15 +893,39 @@ mod tests {
         // ไฟล์เฟรมความละเอียดสูงมาก ต้องถูกบีบลงให้อยู่ในเพดาน
         let (w, h) = delivered(6000, 18000, 2.0 / 6.0);
         assert_ios_safe(w, h);
-        assert_eq!((w, h), (2400, 3600));
+        assert_eq!((w, h), (1440, 2160));
     }
 
     #[test]
-    fn square_frame_hits_macroblock_cap_not_dimension_cap() {
-        // จัตุรัสคือทรงที่กิน macroblock เยอะสุดต่อด้านยาว — เคสที่ cap ต้องทำงาน
+    fn square_frame_stays_within_30fps_throughput() {
+        // จัตุรัสคือทรงที่กิน macroblock เยอะสุดต่อด้านยาว
         let (w, h) = delivered(3600, 3600, 1.0);
         assert_ios_safe(w, h);
-        assert!(w < 3600 && h < 3600, "ควรถูกบีบลง แต่ได้ {}x{}", w, h);
+        assert_eq!((w, h), (2160, 2160));
+    }
+
+    #[test]
+    fn loop_filter_trims_clip_head() {
+        // ไฟล์ดิบจริงจากตู้ Canon: 55 เฟรมใน 2.92 วินาที → เฟรมละ ~0.0531 วินาที
+        // 0.35 วินาทีแรก = 7 เฟรม ครอบคลุม 3 เฟรมสว่างที่วัดได้
+        let filter = loop_clip_without_head(55, 2.92);
+        assert!(filter.starts_with(r"select='gte(mod(n\,55)\,7)'"), "{}", filter);
+        assert!(filter.ends_with("fps=30,"), "{}", filter);
+    }
+
+    #[test]
+    fn loop_filter_keeps_short_clips_whole() {
+        // คลิปสั้นผิดปกติ: ตัดหัวแล้วแทบไม่เหลือ → ไม่ตัด แค่ปรับเฟรมให้สม่ำเสมอ
+        assert_eq!(loop_clip_without_head(10, 0.5), "fps=30,");
+        assert_eq!(loop_clip_without_head(1, 3.0), "fps=30,");
+        assert_eq!(loop_clip_without_head(50, 0.0), "fps=30,");
+    }
+
+    #[test]
+    fn parses_ffmpeg_duration() {
+        assert_eq!(parse_hhmmss("00:00:02.92"), Some(2.92));
+        assert_eq!(parse_hhmmss(" 00:01:01.50"), Some(61.5));
+        assert_eq!(parse_hhmmss("N/A"), None);
     }
 
     #[test]

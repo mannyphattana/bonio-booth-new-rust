@@ -36,3 +36,6 @@ build.md
 AGENTS.md
 CLAUDE.md
 
+
+# WebView2 fixed-version runtime (661 MB, extracted from the .cab by scripts/setup-fixed-webview2.ps1)
+src-tauri/webview2-fixed/

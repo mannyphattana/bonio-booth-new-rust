@@ -39,6 +39,7 @@ export function useCanon() {
 
   const liveViewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const latestFrameRef = useRef<string>("");
+  const liveViewFetchInFlightRef = useRef(false);
   const isCleanedUpRef = useRef(false);
 
   // Capture guards
@@ -73,6 +74,10 @@ export function useCanon() {
 
     liveViewIntervalRef.current = setInterval(async () => {
       if (isCleanedUpRef.current || isCapturingRef.current) return;
+      // A fetch slower than the 33ms tick must not stack another one behind it: queued
+      // fetches come back in bursts, which the recorded video shows as stutter.
+      if (liveViewFetchInFlightRef.current) return;
+      liveViewFetchInFlightRef.current = true;
       try {
         const result = await invoke<{ data: string } | null>(
           "canon_get_live_view_frame"
@@ -96,6 +101,8 @@ export function useCanon() {
           recordedFramesRef.current.push(latestFrameRef.current);
           recordedTimestampsRef.current.push(Date.now());
         }
+      } finally {
+        liveViewFetchInFlightRef.current = false;
       }
     }, 33); // ~30fps
   }, []);

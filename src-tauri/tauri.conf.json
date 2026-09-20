@@ -44,6 +44,10 @@
       "../check_printable_area.ps1": "check_printable_area.ps1"
     },
     "windows": {
+      "webviewInstallMode": {
+        "type": "fixedRuntime",
+        "path": "webview2-fixed/Microsoft.WebView2.FixedVersionRuntime.151.0.4129.107.x64/"
+      },
       "nsis": {
         "installMode": "both",
         "displayLanguageSelector": false
