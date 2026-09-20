@@ -741,6 +741,155 @@ pub async fn check_printer_status(printer_name: String) -> Result<PrinterInfo, S
     ))
 }
 
+/// จำนวนครั้งสูงสุดที่ยอมส่งงานใบเดียวกันเข้าเครื่อง (1 = ไม่ส่งซ้ำเลย)
+#[cfg(target_os = "windows")]
+const MAX_PRINT_ATTEMPTS: u32 = 2;
+
+/// รอให้คนไปแก้ที่เครื่อง (ปิดฝา/ใส่ริบบิ้น/ใส่กระดาษ) นานสุดเท่านี้ก่อนยอมแพ้
+#[cfg(target_os = "windows")]
+const RETRY_READY_WAIT_MS: u64 = 300_000;
+
+/// เฝ้างานพิมพ์ใบหนึ่งจนจบ และส่งซ้ำให้ถ้าพิสูจน์ได้ว่ากระดาษไม่ได้ออก
+///
+/// เงื่อนไขการส่งซ้ำเข้มไว้ก่อน เพราะ "ปริ้นซ้ำ" แพงกว่า "ไม่ปริ้น" สำหรับตู้:
+/// ลูกค้าได้รูปเกิน เปลืองริบบิ้น และ paper level ที่หลังบ้านจะเพี้ยน
+///   1. ต้อง pages_printed == 0 เท่านั้น — ถ้ากระดาษออกไปแล้วแม้แผ่นเดียว ไม่ส่งซ้ำ
+///   2. ต้องลบงานเดิมออกจากคิวให้สำเร็จก่อน — ไม่งั้นพอเครื่องหายติดปัญหา
+///      งานเก่ากับงานใหม่จะพิมพ์ออกมาทั้งคู่
+///   3. ต้องรอจนเครื่องพร้อมจริงก่อนส่ง — ยิงเข้าเครื่องที่ฝายังเปิดอยู่ก็ค้างซ้ำที่เดิม
+///   4. ส่งซ้ำได้ไม่เกิน MAX_PRINT_ATTEMPTS ครั้ง
+#[cfg(target_os = "windows")]
+fn spawn_print_supervisor(
+    app: tauri::AppHandle,
+    requested_printer: String,
+    frame_type: String,
+    temp_path: String,
+    queue_name: String,
+    job_id: u32,
+) {
+    use crate::print_status::{self, JobOutcome, RetryDecision};
+
+    std::thread::spawn(move || {
+        let mut queue = queue_name;
+        let mut job = job_id;
+        let mut attempt: u32 = 1;
+
+        loop {
+            let (reason, pages_printed) = match print_status::monitor_job(&app, &queue, job, attempt)
+            {
+                JobOutcome::Printed => break,
+                JobOutcome::Failed {
+                    reason,
+                    pages_printed,
+                } => (reason, pages_printed),
+            };
+
+            match print_status::decide_retry(attempt, pages_printed, MAX_PRINT_ATTEMPTS) {
+                RetryDecision::Retry => {}
+                RetryDecision::GiveUpAlreadyPrinted => {
+                    print_status::emit_state(
+                        &app,
+                        &queue,
+                        job,
+                        attempt,
+                        "give_up",
+                        format!(
+                            "{} — พิมพ์ออกไปแล้ว {} หน้า จึงไม่ส่งซ้ำอัตโนมัติ (กันได้รูปซ้ำ)",
+                            reason, pages_printed
+                        ),
+                    );
+                    break;
+                }
+                RetryDecision::GiveUpMaxAttempts => {
+                    print_status::emit_state(
+                        &app,
+                        &queue,
+                        job,
+                        attempt,
+                        "give_up",
+                        format!("{} — ส่งไปแล้ว {} ครั้งยังไม่สำเร็จ หยุดส่งซ้ำ", reason, attempt),
+                    );
+                    break;
+                }
+            }
+
+            // (2) ลบงานเดิมให้สำเร็จก่อน ถ้าลบไม่ได้ก็ไม่กล้าส่งซ้ำ
+            if let Err(e) = print_status::cancel_job(&queue, job) {
+                log::warn!(
+                    "[PrintJob] ยกเลิกงาน {} ไม่สำเร็จ: {} — ไม่ส่งซ้ำเพื่อกันปริ้นซ้ำ",
+                    job,
+                    e
+                );
+                print_status::emit_state(
+                    &app,
+                    &queue,
+                    job,
+                    attempt,
+                    "give_up",
+                    format!("{} — ยกเลิกงานเดิมไม่สำเร็จ จึงไม่ส่งซ้ำ", reason),
+                );
+                break;
+            }
+
+            // (3) รอจนเครื่องพร้อมจริงค่อยส่ง
+            print_status::emit_state(
+                &app,
+                &queue,
+                job,
+                attempt,
+                "retrying",
+                format!("{} — ยกเลิกงานเดิมแล้ว รอเครื่องพร้อมเพื่อส่งพิมพ์ใหม่", reason),
+            );
+
+            if !print_status::wait_until_ready(&queue, RETRY_READY_WAIT_MS) {
+                print_status::emit_state(
+                    &app,
+                    &queue,
+                    job,
+                    attempt,
+                    "give_up",
+                    format!(
+                        "{} — รอ {} นาทีแล้วเครื่องยังไม่พร้อม",
+                        reason,
+                        RETRY_READY_WAIT_MS / 60_000
+                    ),
+                );
+                break;
+            }
+
+            attempt += 1;
+            match win32_gdi_print(&requested_printer, &temp_path, &frame_type) {
+                Ok((new_job, new_queue)) => {
+                    log::info!(
+                        "[PrintJob] ส่งซ้ำครั้งที่ {}: job={} queue='{}'",
+                        attempt,
+                        new_job,
+                        new_queue
+                    );
+                    job = new_job;
+                    queue = new_queue;
+                }
+                Err(e) => {
+                    print_status::emit_state(
+                        &app,
+                        &queue,
+                        job,
+                        attempt,
+                        "give_up",
+                        format!("ส่งพิมพ์ซ้ำไม่สำเร็จ: {}", e),
+                    );
+                    break;
+                }
+            }
+        }
+
+        // ไฟล์ชั่วคราวของใบนี้ไม่ต้องใช้แล้ว
+        if let Err(e) = std::fs::remove_file(&temp_path) {
+            log::debug!("[PrintJob] ลบไฟล์ชั่วคราว '{}' ไม่ได้: {}", temp_path, e);
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn print_photo(
     app: tauri::AppHandle,
@@ -878,7 +1027,9 @@ pub async fn print_photo(
     let temp_dir = std::env::temp_dir().join("bonio-booth");
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
-    let temp_path = temp_dir.join("print-processed.png");
+    // ชื่อไฟล์ต้องไม่ซ้ำ: ใบถัดไปในลูป และการส่งซ้ำที่อาจเกิดขึ้นอีกหลายนาทีให้หลัง
+    // ต้องไม่ไปทับไฟล์ของใบที่ยังรอพิมพ์อยู่ (supervisor เป็นคนลบให้ตอนจบงาน)
+    let temp_path = temp_dir.join(format!("print-{}.png", uuid::Uuid::new_v4()));
     final_image
         .save(&temp_path)
         .map_err(|e| format!("Failed to save processed image: {}", e))?;
@@ -890,12 +1041,20 @@ pub async fn print_photo(
     {
         let (job_id, queue_name) = win32_gdi_print(&printer_name, &temp_path_str, &frame_type)?;
 
-        // L2 — ตามงานใบนี้ต่อใน background thread แล้วยิง event `print-job-update`
-        // ขึ้น frontend ไม่ block ตรงนี้ เพื่อให้ UX เดิม (กดปริ้นแล้วไปหน้าถัดไป) คงเดิม
+        // L2 — ตามงานใบนี้ต่อใน background thread: ยิง event `print-job-update`
+        // ขึ้น frontend และส่งซ้ำให้ถ้าพิสูจน์ได้ว่ากระดาษไม่ได้ออก
+        // ไม่ block ตรงนี้ เพื่อให้ UX เดิม (กดปริ้นแล้วไปหน้าถัดไป) คงเดิม
         //
         // ค่า true ที่คืนกลับไปยังแปลว่า "ส่งเข้าคิวสำเร็จ" เหมือนเดิม —
         // คำตอบว่า "ออกจากเครื่องจริงไหม" จะมาทีหลังทาง event
-        crate::print_status::spawn_job_monitor(app, queue_name, job_id);
+        spawn_print_supervisor(
+            app,
+            printer_name,
+            frame_type,
+            temp_path_str,
+            queue_name,
+            job_id,
+        );
 
         Ok(true)
     }

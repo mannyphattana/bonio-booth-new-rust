@@ -23,13 +23,20 @@ export type PrintJobState =
   | "queued"
   | "blocked"
   | "printed"
+  /** ครั้งนี้ไม่ออก — อาจมีการส่งซ้ำตามมา ยังไม่ใช่คำตอบสุดท้าย */
   | "error"
-  | "timeout";
+  | "timeout"
+  /** ยกเลิกงานเดิมแล้ว กำลังรอเครื่องพร้อมเพื่อส่งใหม่ */
+  | "retrying"
+  /** คำตอบสุดท้าย: ไม่ได้รูปแน่นอน และจะไม่ส่งซ้ำอีกแล้ว */
+  | "give_up";
 
 /** payload ของ event `print-job-update` ที่ Rust ยิงขึ้นมา */
 export interface PrintJobUpdate {
   job_id: number;
   printer: string;
+  /** ครั้งที่เท่าไหร่ของคำสั่งพิมพ์ใบนี้ (1 = ครั้งแรก) */
+  attempt: number;
   state: PrintJobState;
   detail: string;
   job_flags: string[];
@@ -45,10 +52,12 @@ export interface PrintJobUpdate {
 
 interface Options {
   enabled?: boolean;
-  /** งานพิมพ์จบแบบไม่ออกกระดาษ — error หรือค้างจน timeout */
+  /** ยอมแพ้แล้ว: ไม่ได้รูปแน่นอนและจะไม่ส่งซ้ำอีก */
   onPrintFailed?: (update: PrintJobUpdate) => void;
   /** งานค้างอยู่เพราะเครื่องติดปัญหา (ฝาเปิด/ริบบิ้นหมด) แต่ยังแก้ทันได้ */
   onPrintBlocked?: (update: PrintJobUpdate) => void;
+  /** กำลังจะส่งพิมพ์ซ้ำ — งานเดิมถูกยกเลิกไปแล้ว */
+  onPrintRetrying?: (update: PrintJobUpdate) => void;
 }
 
 /**
@@ -63,12 +72,15 @@ export function usePrintJobMonitor({
   enabled = true,
   onPrintFailed,
   onPrintBlocked,
+  onPrintRetrying,
 }: Options = {}) {
   // เก็บ callback ไว้ใน ref เพื่อไม่ต้อง re-subscribe ทุกครั้งที่ parent re-render
   const onPrintFailedRef = useRef(onPrintFailed);
   const onPrintBlockedRef = useRef(onPrintBlocked);
+  const onPrintRetryingRef = useRef(onPrintRetrying);
   onPrintFailedRef.current = onPrintFailed;
   onPrintBlockedRef.current = onPrintBlocked;
+  onPrintRetryingRef.current = onPrintRetrying;
 
   // กัน alert ซ้ำ: งานหนึ่งใบรายงานปัญหาได้ครั้งเดียว
   const alertedJobsRef = useRef<Set<number>>(new Set());
@@ -81,12 +93,29 @@ export function usePrintJobMonitor({
 
     const handle = async (update: PrintJobUpdate) => {
       const { job_id, printer, state, detail, printer_status } = update;
-      const where = `job=${job_id} printer="${printer}"`;
+      const where = `job=${job_id} attempt=${update.attempt} printer="${printer}"`;
 
+      // error/timeout = ครั้งนี้ไม่ออก แต่ยังอาจมีการส่งซ้ำตามมา
+      // จึง log ไว้เฉย ๆ ยังไม่ปลุกใคร — คำตอบสุดท้ายคือ give_up
       if (state === "error" || state === "timeout") {
         appLogger.error(
           CTX,
-          `${CTX} งานพิมพ์ล้มเหลว: ${where} state=${state} — ${detail}`,
+          `${CTX} งานพิมพ์ครั้งนี้ไม่ออก: ${where} state=${state} — ${detail}`,
+          update
+        );
+        return;
+      }
+
+      if (state === "retrying") {
+        appLogger.warn(CTX, `${CTX} กำลังส่งพิมพ์ซ้ำ: ${where} — ${detail}`, update);
+        onPrintRetryingRef.current?.(update);
+        return;
+      }
+
+      if (state === "give_up") {
+        appLogger.error(
+          CTX,
+          `${CTX} งานพิมพ์ล้มเหลวถาวร: ${where} — ${detail}`,
           update
         );
 
@@ -95,7 +124,7 @@ export function usePrintJobMonitor({
 
           logError(
             "print_job_failed",
-            `Print job ${job_id} ${state} on "${printer}": ${detail} ` +
+            `Print job ${job_id} gave up after ${update.attempt} attempt(s) on "${printer}": ${detail} ` +
               `[printer: ${printer_status.message}; flags: ${printer_status.flags.join(",") || "none"}; ` +
               `queue: ${printer_status.jobs_in_queue}]`,
             undefined,
@@ -108,7 +137,7 @@ export function usePrintJobMonitor({
             deviceType: "printer",
             deviceName: printer,
             availableDevices: [],
-            deviceStatus: `${state}: ${detail}`,
+            deviceStatus: `give_up (attempt ${update.attempt}): ${detail}`,
           }).catch(() => {
             /* fire-and-forget — Rust log ไว้ให้แล้ว */
           });

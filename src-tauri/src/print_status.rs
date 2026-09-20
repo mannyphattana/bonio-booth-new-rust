@@ -187,7 +187,10 @@ fn decode_job_flags(raw: u32) -> (Vec<String>, String) {
 pub struct PrintJobUpdate {
     pub job_id: u32,
     pub printer: String,
+    /// ครั้งที่เท่าไหร่ของคำสั่งพิมพ์ใบนี้ (1 = ครั้งแรก)
+    pub attempt: u32,
     /// spooling | printing | queued | blocked | printed | error | timeout
+    /// | retrying | give_up
     pub state: String,
     pub detail: String,
     pub job_flags: Vec<String>,
@@ -213,7 +216,8 @@ mod win {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Graphics::Printing::{
-        ClosePrinter, GetJobW, GetPrinterW, OpenPrinterW, JOB_INFO_1W, PRINTER_INFO_2W,
+        ClosePrinter, GetJobW, GetPrinterW, OpenPrinterW, SetJobW, JOB_CONTROL_DELETE, JOB_INFO_1W,
+        PRINTER_INFO_2W,
     };
 
     fn to_wide(s: &str) -> Vec<u16> {
@@ -288,10 +292,25 @@ mod win {
             Ok(Some((info.Status, info.PagesPrinted, info.TotalPages)))
         }
     }
+
+    /// สั่งลบงานพิมพ์ออกจากคิว
+    ///
+    /// ต้องเรียกก่อนส่งใบใหม่ทุกครั้ง — ไม่งั้นพอพนักงานไปปิดฝา/ใส่ริบบิ้น
+    /// งานเก่าที่ค้างอยู่จะเด้งออกมาพร้อมใบใหม่ = ลูกค้าได้รูปซ้ำและเปลืองกระดาษ
+    pub fn cancel_job(printer_name: &str, job_id: u32) -> Result<(), String> {
+        let handle = PrinterHandle::open(printer_name)?;
+        unsafe {
+            if SetJobW(handle.0, job_id, 0, None, JOB_CONTROL_DELETE).as_bool() {
+                Ok(())
+            } else {
+                Err(format!("SetJob(DELETE) งาน {} ไม่สำเร็จ", job_id))
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{query_job, query_printer_status};
+pub use win::{cancel_job, query_job, query_printer_status};
 
 #[cfg(not(target_os = "windows"))]
 pub fn query_printer_status(_printer_name: &str) -> Result<PrinterStatusDetail, String> {
@@ -303,6 +322,11 @@ pub fn query_job(_printer_name: &str, _job_id: u32) -> Result<Option<(u32, u32, 
     Err("job status รองรับเฉพาะ Windows".to_string())
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn cancel_job(_printer_name: &str, _job_id: u32) -> Result<(), String> {
+    Err("cancel job รองรับเฉพาะ Windows".to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Job monitor
 // ---------------------------------------------------------------------------
@@ -311,15 +335,40 @@ pub fn query_job(_printer_name: &str, _job_id: u32) -> Result<Option<(u32, u32, 
 const POLL_INTERVAL_MS: u64 = 1_000;
 /// เพดานเวลารองานหนึ่งใบ — dye-sub 4x6 ใช้ ~15-25 วิ เผื่อคิวซ้อนไว้ถึง 3 นาที
 const JOB_TIMEOUT_MS: u64 = 180_000;
+/// ระยะห่างตอนรอให้เครื่องหายติดปัญหาก่อนส่งซ้ำ
+const READY_POLL_MS: u64 = 2_000;
 
-/// ติดตามงานพิมพ์ใน background thread แล้วยิง event `print-job-update` ขึ้น frontend
+/// ผลของการตัดสินใจว่าจะส่งพิมพ์ซ้ำหรือไม่
+#[derive(Debug, PartialEq, Eq)]
+pub enum RetryDecision {
+    /// ส่งซ้ำได้ — พิสูจน์แล้วว่ากระดาษยังไม่ออก
+    Retry,
+    /// กระดาษออกไปแล้วบางส่วน ส่งซ้ำ = ลูกค้าได้รูปเกิน
+    GiveUpAlreadyPrinted,
+    /// ส่งไปหลายครั้งแล้วยังไม่สำเร็จ
+    GiveUpMaxAttempts,
+}
+
+/// กติกาการส่งซ้ำ แยกเป็น pure function เพื่อเทสต์ได้โดยไม่ต้องมีเครื่องพิมพ์
 ///
-/// ไม่ block `print_photo` — UX เดิม (กดปริ้นแล้วไปหน้าถัดไปเลย) ไม่เปลี่ยน
-/// แต่ตอนนี้แอพจะ "รู้" ว่าใบนั้นออกจริงไหม และถ้าไม่ออกเป็นเพราะอะไร
-pub fn spawn_job_monitor(app: tauri::AppHandle, printer: String, job_id: u32) {
-    std::thread::spawn(move || {
-        monitor_loop(app, printer, job_id);
-    });
+/// ยึดหลักว่า "ปริ้นซ้ำ" แพงกว่า "ไม่ปริ้น" สำหรับตู้ (ลูกค้าได้รูปเกิน + เปลือง
+/// ริบบิ้น + paper level หลังบ้านเพี้ยน) จึงส่งซ้ำเฉพาะตอนที่มั่นใจเท่านั้น
+pub fn decide_retry(attempt: u32, pages_printed: u32, max_attempts: u32) -> RetryDecision {
+    if pages_printed > 0 {
+        return RetryDecision::GiveUpAlreadyPrinted;
+    }
+    if attempt >= max_attempts {
+        return RetryDecision::GiveUpMaxAttempts;
+    }
+    RetryDecision::Retry
+}
+
+/// ผลลัพธ์สุดท้ายของงานพิมพ์หนึ่งครั้ง
+pub enum JobOutcome {
+    /// ออกจากเครื่องแล้ว หรือมีหลักฐานพอว่าออกแล้ว
+    Printed,
+    /// ไม่ออก — แนบ pages_printed มาด้วยเพราะเป็นตัวตัดสินว่าส่งซ้ำได้หรือไม่
+    Failed { reason: String, pages_printed: u32 },
 }
 
 fn emit_update(app: &tauri::AppHandle, update: PrintJobUpdate) {
@@ -327,8 +376,9 @@ fn emit_update(app: &tauri::AppHandle, update: PrintJobUpdate) {
 
     if update.is_final || update.state == "blocked" {
         log::warn!(
-            "[PrintJob] job={} printer='{}' state={} detail='{}' printer_status='{}' flags={:?}",
+            "[PrintJob] job={} attempt={} printer='{}' state={} detail='{}' printer_status='{}' flags={:?}",
             update.job_id,
+            update.attempt,
             update.printer,
             update.state,
             update.detail,
@@ -337,8 +387,9 @@ fn emit_update(app: &tauri::AppHandle, update: PrintJobUpdate) {
         );
     } else {
         log::info!(
-            "[PrintJob] job={} state={} ({}/{} หน้า)",
+            "[PrintJob] job={} attempt={} state={} ({}/{} หน้า)",
             update.job_id,
+            update.attempt,
             update.state,
             update.pages_printed,
             update.total_pages
@@ -350,7 +401,57 @@ fn emit_update(app: &tauri::AppHandle, update: PrintJobUpdate) {
     }
 }
 
-fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
+/// ยิง event สถานะที่ไม่ได้มาจาก loop ตรวจงาน (เช่น retrying / give_up)
+pub fn emit_state(
+    app: &tauri::AppHandle,
+    printer: &str,
+    job_id: u32,
+    attempt: u32,
+    state: &str,
+    detail: String,
+) {
+    let printer_status = query_printer_status(printer).unwrap_or_default();
+    emit_update(
+        app,
+        PrintJobUpdate {
+            job_id,
+            printer: printer.to_string(),
+            attempt,
+            state: state.to_string(),
+            detail,
+            job_flags: Vec::new(),
+            job_status_raw: 0,
+            pages_printed: 0,
+            total_pages: 0,
+            printer_status,
+            elapsed_ms: 0,
+            verified: false,
+            is_final: state == "give_up",
+        },
+    );
+}
+
+/// รอจนเครื่องพิมพ์หายติดปัญหา — คืน true ถ้าพร้อมแล้ว, false ถ้ารอจนหมดเวลา
+pub fn wait_until_ready(printer: &str, timeout_ms: u64) -> bool {
+    let started = std::time::Instant::now();
+    loop {
+        match query_printer_status(printer) {
+            Ok(st) if !st.is_error && !st.is_offline => return true,
+            Ok(_) => {}
+            Err(e) => log::warn!("[PrintJob] เช็คสถานะ '{}' ไม่ได้ระหว่างรอ: {}", printer, e),
+        }
+        if started.elapsed().as_millis() as u64 >= timeout_ms {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(READY_POLL_MS));
+    }
+}
+
+/// เฝ้างานพิมพ์ 1 ใบจนจบ (blocking) พร้อมยิง event ความคืบหน้าระหว่างทาง
+///
+/// ตั้งใจให้ block — คนเรียกคือ supervisor thread ใน printer.rs ที่ต้องรู้ผล
+/// ก่อนจะตัดสินใจว่าจะส่งซ้ำหรือยอมแพ้
+pub fn monitor_job(app: &tauri::AppHandle, printer: &str, job_id: u32, attempt: u32) -> JobOutcome {
     let started = std::time::Instant::now();
     let mut last_emitted: Option<(String, String)> = None;
     let mut ever_seen = false;
@@ -359,9 +460,9 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
 
     loop {
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        let printer_status = query_printer_status(&printer).unwrap_or_default();
+        let printer_status = query_printer_status(printer).unwrap_or_default();
 
-        match query_job(&printer, job_id) {
+        match query_job(printer, job_id) {
             Ok(Some((status, pages_printed, total_pages))) => {
                 ever_seen = true;
                 last_status = status;
@@ -372,10 +473,11 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                 // พิมพ์เสร็จจริง — ยืนยันได้
                 if status & (JOB_PRINTED | JOB_COMPLETE) != 0 {
                     emit_update(
-                        &app,
+                        app,
                         PrintJobUpdate {
                             job_id,
-                            printer: printer.clone(),
+                            printer: printer.to_string(),
+                            attempt,
                             state: "printed".into(),
                             detail: "พิมพ์เสร็จเรียบร้อย".into(),
                             job_flags,
@@ -388,18 +490,20 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                             is_final: true,
                         },
                     );
-                    return;
+                    return JobOutcome::Printed;
                 }
 
                 // ถูกยกเลิก/ลบ — จบเลย ไม่ต้องรอ timeout
                 if status & (JOB_DELETED | JOB_DELETING) != 0 {
+                    let reason = "งานพิมพ์ถูกยกเลิก/ลบออกจากคิว".to_string();
                     emit_update(
-                        &app,
+                        app,
                         PrintJobUpdate {
                             job_id,
-                            printer: printer.clone(),
+                            printer: printer.to_string(),
+                            attempt,
                             state: "error".into(),
-                            detail: "งานพิมพ์ถูกยกเลิก/ลบออกจากคิว".into(),
+                            detail: reason.clone(),
                             job_flags,
                             job_status_raw: status,
                             pages_printed,
@@ -410,7 +514,10 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                             is_final: true,
                         },
                     );
-                    return;
+                    return JobOutcome::Failed {
+                        reason,
+                        pages_printed,
+                    };
                 }
 
                 // ยังไม่จบ — รายงานความคืบหน้า/สาเหตุที่ค้าง
@@ -448,10 +555,11 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                 if last_emitted.as_ref() != Some(&key) {
                     last_emitted = Some(key);
                     emit_update(
-                        &app,
+                        app,
                         PrintJobUpdate {
                             job_id,
-                            printer: printer.clone(),
+                            printer: printer.to_string(),
+                            attempt,
                             state: state.into(),
                             detail,
                             job_flags,
@@ -473,7 +581,8 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                 let had_trouble = last_status & JOB_BLOCKED_MASK != 0;
 
                 // เคยเห็นปัญหาค้างอยู่ก่อนงานหาย = โดนลบทิ้งทั้งที่ยังไม่ได้พิมพ์
-                let (state, detail, verified) = if ever_seen && had_trouble {
+                let failed = ever_seen && had_trouble;
+                let (state, detail, verified) = if failed {
                     (
                         "error",
                         format!(
@@ -500,12 +609,13 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                 };
 
                 emit_update(
-                    &app,
+                    app,
                     PrintJobUpdate {
                         job_id,
-                        printer: printer.clone(),
+                        printer: printer.to_string(),
+                        attempt,
                         state: state.into(),
-                        detail,
+                        detail: detail.clone(),
                         job_flags,
                         job_status_raw: last_status,
                         pages_printed: last_pages.0,
@@ -516,7 +626,15 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                         is_final: true,
                     },
                 );
-                return;
+
+                return if failed {
+                    JobOutcome::Failed {
+                        reason: detail,
+                        pages_printed: last_pages.0,
+                    }
+                } else {
+                    JobOutcome::Printed
+                };
             }
 
             Err(e) => {
@@ -526,24 +644,26 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
 
         if started.elapsed().as_millis() as u64 >= JOB_TIMEOUT_MS {
             let (job_flags, blocked_msg) = decode_job_flags(last_status);
-            let printer_status = query_printer_status(&printer).unwrap_or_default();
-            let reason = if blocked_msg.is_empty() {
+            let printer_status = query_printer_status(printer).unwrap_or_default();
+            let cause = if blocked_msg.is_empty() {
                 printer_status.message.clone()
             } else {
                 blocked_msg
             };
+            let reason = format!(
+                "งานค้างในคิวเกิน {} วินาทีโดยไม่พิมพ์ออกมา ({})",
+                JOB_TIMEOUT_MS / 1000,
+                cause
+            );
 
             emit_update(
-                &app,
+                app,
                 PrintJobUpdate {
                     job_id,
-                    printer: printer.clone(),
+                    printer: printer.to_string(),
+                    attempt,
                     state: "timeout".into(),
-                    detail: format!(
-                        "งานค้างในคิวเกิน {} วินาทีโดยไม่พิมพ์ออกมา ({})",
-                        JOB_TIMEOUT_MS / 1000,
-                        reason
-                    ),
+                    detail: reason.clone(),
                     job_flags,
                     job_status_raw: last_status,
                     pages_printed: last_pages.0,
@@ -554,7 +674,11 @@ fn monitor_loop(app: tauri::AppHandle, printer: String, job_id: u32) {
                     is_final: true,
                 },
             );
-            return;
+
+            return JobOutcome::Failed {
+                reason,
+                pages_printed: last_pages.0,
+            };
         }
 
         std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
@@ -617,6 +741,27 @@ mod tests {
         let d = decode_printer_status(128, 0);
         assert!(d.is_offline);
         assert!(!d.is_busy);
+    }
+
+    #[test]
+    fn never_retries_once_paper_has_come_out() {
+        // กระดาษออกไปแล้วแม้แผ่นเดียว ห้ามส่งซ้ำ แม้จะยังเหลือโควตา attempt
+        assert_eq!(
+            decide_retry(1, 1, 2),
+            RetryDecision::GiveUpAlreadyPrinted
+        );
+    }
+
+    #[test]
+    fn retries_when_nothing_printed_and_quota_left() {
+        assert_eq!(decide_retry(1, 0, 2), RetryDecision::Retry);
+    }
+
+    #[test]
+    fn stops_after_max_attempts() {
+        assert_eq!(decide_retry(2, 0, 2), RetryDecision::GiveUpMaxAttempts);
+        // max = 1 คือปิดการส่งซ้ำทั้งหมด
+        assert_eq!(decide_retry(1, 0, 1), RetryDecision::GiveUpMaxAttempts);
     }
 
     #[test]
