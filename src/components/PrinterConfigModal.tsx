@@ -5,6 +5,12 @@ interface PrinterInfo {
   name: string;
   status: string;
   is_online: boolean;
+  /** เครื่องยังเสียบอยู่ไหม — แยกจาก is_online เพื่อบอกต่างระหว่างสายหลุดกับเครื่องติดปัญหา */
+  is_present?: boolean;
+  has_error?: boolean;
+  /** ข้อความไทยจาก Win32 status bitmask เช่น "ฝาเครื่องพิมพ์เปิดอยู่" */
+  status_message?: string;
+  jobs_in_queue?: number;
 }
 
 interface Props {
@@ -99,11 +105,19 @@ export default function PrinterConfigModal({ open, onClose }: Props) {
                   <div style={{ flex: 1, textAlign: "left" }}>
                     <span className="config-device-name">{printer.name}</span>
                     <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
-                      สถานะ: {printer.status} •{" "}
+                      สถานะ: {printer.status_message || printer.status} •{" "}
                       {printer.is_online ? (
-                        <span style={{ color: "#51cf66" }}>ออนไลน์</span>
+                        <span style={{ color: "#51cf66" }}>พร้อมพิมพ์</span>
+                      ) : printer.has_error && printer.is_present ? (
+                        // ต่ออยู่ครบแต่เครื่องติดปัญหา — คนละเรื่องกับสายหลุด
+                        <span style={{ color: "#ffa94d" }}>ต้องแก้ที่เครื่อง</span>
                       ) : (
                         <span style={{ color: "#ff6b6b" }}>ออฟไลน์</span>
+                      )}
+                      {!!printer.jobs_in_queue && (
+                        <span style={{ marginLeft: 6 }}>
+                          • คิวค้าง {printer.jobs_in_queue} งาน
+                        </span>
                       )}
                     </div>
                   </div>

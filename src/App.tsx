@@ -24,6 +24,7 @@ import ShutdownOverlay from "./components/ShutdownOverlay";
 import { useSSE } from "./hooks/useSSE";
 import { useShutdown } from "./hooks/useShutdown";
 import { useDeviceCheck } from "./hooks/useDeviceCheck";
+import { usePrintJobMonitor } from "./hooks/usePrintJobMonitor";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
@@ -325,6 +326,10 @@ function App() {
     sendStartupReport: true,
     onMaintenanceNeeded: handleMaintenanceNeeded,
   });
+
+  // ติดตามว่างานพิมพ์แต่ละใบออกจากเครื่องจริงไหม (ดู src-tauri/src/print_status.rs)
+  // ตอนนี้แค่ log + แจ้งหลังบ้าน ยังไม่ไปแตะ maintenance overlay
+  usePrintJobMonitor({ enabled: isVerified });
 
   useAutoUpdate({ enabled: true, isOnHomePage });
 
