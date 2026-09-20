@@ -403,17 +403,13 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   };
 
   const getRecordingProfile = useCallback(() => {
-    const preferredMimeTypes = cameraTypeRef.current === "canon"
-      ? [
-          "video/webm;codecs=vp9",
-          "video/webm;codecs=vp8",
-          "video/webm",
-        ]
-      : [
-          "video/webm;codecs=vp8",
-          "video/webm;codecs=vp9",
-          "video/webm",
-        ];
+    // VP8 for both cameras. Canon used to prefer VP9, whose software encoder is far heavier
+    // and dropped frames on booth CPUs — Canon videos stuttered noticeably more than webcam.
+    const preferredMimeTypes = [
+      "video/webm;codecs=vp8",
+      "video/webm;codecs=vp9",
+      "video/webm",
+    ];
 
     const mimeType = preferredMimeTypes.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
     const videoBitsPerSecond = cameraTypeRef.current === "canon"
