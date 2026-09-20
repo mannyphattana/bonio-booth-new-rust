@@ -36,30 +36,36 @@ const ALL_OPTIONS: PaymentOption[] = [
 
 export const PAYMENT_OPTION_COPY: Record<
   PaymentOption,
-  { action: string; name: string; hint?: string }
+  { action: string; nameThai: string; name: string; hint?: string }
 > = {
-  coupon: { action: "ใช้", name: "Discount Coupon" },
-  promptpay: { action: "ชำระเงินผ่าน", name: "QR Payment" },
+  coupon: { action: "ใช้", nameThai: "ใช้คูปองส่วนลด", name: "Discount Coupon" },
+  promptpay: {
+    action: "ชำระเงินผ่าน",
+    nameThai: "พร้อมเพย์",
+    name: "PromptPay",
+    hint: "สแกนด้วยแอปธนาคารได้ทุกธนาคาร",
+  },
   qr_credit_card: {
     action: "สแกนจ่ายด้วยบัตรเครดิต",
-    name: "QR Credit Card",
-    // A QR Credit Card is only readable by some bank apps, unlike PromptPay which every
-    // app can scan. Saying so on the button is what stops a customer picking it, failing
-    // to scan, and waiting out the timeout.
-    hint: "SCB EASY · K PLUS · KTC Mobile · U CHOOSE · Bangkok Bank",
+    nameThai: "บัตรเครดิต",
+    name: "Credit Card",
+    // Which apps can read the code belongs on the QR screen, where a customer who cannot
+    // scan it is standing. Here it would crowd out the other ways to pay.
+    hint: "สแกน QR แล้วตัดบัตรในแอปธนาคาร",
   },
-  // Wallets for foreign visitors. The label stays in the wallet's own language: someone
-  // who can pay with it reads that name, and a Thai customer needs no translation to know
-  // it is not for them.
-  alipay: { action: "สแกนจ่ายด้วย", name: "Alipay 支付宝" },
-  wechat_pay: { action: "สแกนจ่ายด้วย", name: "WeChat Pay 微信支付" },
+  // Wallets for foreign visitors. The Latin line keeps each wallet's own name, including
+  // the Chinese one: someone who can pay with it reads that name, and a Thai customer
+  // needs no translation to see it is not for them.
+  alipay: { action: "สแกนจ่ายด้วย", nameThai: "อาลีเพย์", name: "Alipay 支付宝" },
+  wechat_pay: { action: "สแกนจ่ายด้วย", nameThai: "วีแชทเพย์", name: "WeChat Pay 微信支付" },
   alipay_plus: {
     action: "สแกนจ่ายด้วย",
+    nameThai: "อาลีเพย์ พลัส",
     name: "Alipay+",
     hint: "Alipay · GCash · Kakao Pay · TrueMoney · Touch 'n Go",
   },
-  shopeepay: { action: "สแกนจ่ายด้วย", name: "ShopeePay" },
-  truemoney: { action: "สแกนจ่ายด้วย", name: "TrueMoney Wallet" },
+  shopeepay: { action: "สแกนจ่ายด้วย", nameThai: "ช้อปปี้เพย์", name: "ShopeePay" },
+  truemoney: { action: "สแกนจ่ายด้วย", nameThai: "ทรูมันนี่", name: "TrueMoney Wallet" },
 };
 
 /**
