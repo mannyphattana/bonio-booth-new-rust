@@ -828,6 +828,57 @@ button:active {
   margin-top: 20px;
 }
 
+/*
+ * Payment options stack vertically: with three of them, full-width rows stay easy to hit
+ * on a 720px-wide portrait touchscreen, where three side-by-side buttons would be ~210px
+ * each. Adding a fourth option later needs no layout change.
+ */
+.action-buttons-stacked {
+  flex-direction: column;
+  gap: 16px;
+}
+
+.option-button-wide {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+  gap: 20px;
+  min-height: 104px;
+  padding: 16px 24px;
+}
+
+.option-button-wide .option-button-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.option-button-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.option-button-wide .option-button-text {
+  font-size: 1.25rem;
+}
+
+.option-button-wide .option-button-subtext {
+  font-size: 1.4rem;
+}
+
+/* Names the bank apps that can read a QR Credit Card — see PaymentSelection. */
+.option-button-hint {
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.3;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
 .option-button {
   flex: 1;
   padding: 20px 16px;

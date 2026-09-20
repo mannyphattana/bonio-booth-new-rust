@@ -50,6 +50,11 @@ export interface MachineData {
   paperLevel: number;
   isMaintenanceMode: boolean;
   isKsherEnabled?: boolean;
+  /**
+   * Payment Options this booth offers, from the backend init response. Absent when the
+   * backend predates Payment Options — see config/paymentOptions.ts for the fallback.
+   */
+  enabledPaymentOptions?: string[];
   [key: string]: any;
 }
 
