@@ -7,13 +7,32 @@ import type { MachineData } from "../App";
  * them in the init response. This file only knows how to read that list and what to
  * print on the buttons.
  */
-export type PaymentOption = "coupon" | "promptpay" | "qr_credit_card";
+export type PaymentOption =
+  | "coupon"
+  | "promptpay"
+  | "qr_credit_card"
+  | "alipay"
+  | "wechat_pay"
+  | "alipay_plus"
+  | "shopeepay"
+  | "truemoney";
 
 /** What a booth offered before Payment Options existed — used for older backends. */
 const LEGACY_OPTIONS_WITH_KSHER: PaymentOption[] = ["coupon", "promptpay"];
 const LEGACY_OPTIONS_WITHOUT_KSHER: PaymentOption[] = ["coupon"];
 
-const ALL_OPTIONS: PaymentOption[] = ["coupon", "promptpay", "qr_credit_card"];
+// Order here is the order the buttons appear in. Thai rails first: they are what almost
+// every customer uses, and a booth in a tourist spot can turn the others on per workspace.
+const ALL_OPTIONS: PaymentOption[] = [
+  "coupon",
+  "promptpay",
+  "qr_credit_card",
+  "alipay",
+  "alipay_plus",
+  "wechat_pay",
+  "shopeepay",
+  "truemoney",
+];
 
 export const PAYMENT_OPTION_COPY: Record<
   PaymentOption,
@@ -29,6 +48,18 @@ export const PAYMENT_OPTION_COPY: Record<
     // to scan, and waiting out the timeout.
     hint: "SCB EASY · K PLUS · KTC Mobile · U CHOOSE · Bangkok Bank",
   },
+  // Wallets for foreign visitors. The label stays in the wallet's own language: someone
+  // who can pay with it reads that name, and a Thai customer needs no translation to know
+  // it is not for them.
+  alipay: { action: "สแกนจ่ายด้วย", name: "Alipay 支付宝" },
+  wechat_pay: { action: "สแกนจ่ายด้วย", name: "WeChat Pay 微信支付" },
+  alipay_plus: {
+    action: "สแกนจ่ายด้วย",
+    name: "Alipay+",
+    hint: "Alipay · GCash · Kakao Pay · TrueMoney · Touch 'n Go",
+  },
+  shopeepay: { action: "สแกนจ่ายด้วย", name: "ShopeePay" },
+  truemoney: { action: "สแกนจ่ายด้วย", name: "TrueMoney Wallet" },
 };
 
 /**
