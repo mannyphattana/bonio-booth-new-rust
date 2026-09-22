@@ -55,6 +55,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isCheckingRef = useRef(false); // Guard against concurrent status checks
+  const closedRef = useRef(false); // An order is closed once, whichever exit gets there first
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   // Which rail this QR settles. Coupon flow doesn't set one — the backend then defaults
@@ -198,6 +199,38 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     }
   }, [status, navigate]);
 
+  /**
+   * Close the order this screen is showing, so the code cannot be paid after the customer
+   * has walked away.
+   *
+   * This is the only thing standing between an abandoned QR and a payment for a session
+   * that no longer exists: Ksher's own `expire_time` cannot be used, because a PromptPay
+   * code created with it is read by bank apps and then refused at the payment step. Best
+   * effort by design — Ksher refuses to close an order that is already paid, which is the
+   * outcome we want.
+   */
+  const abandonOrder = useCallback(
+    async (reason: string) => {
+      if (!referenceId || closedRef.current) return;
+      closedRef.current = true;
+      try {
+        await invoke("close_payment", { mchOrderNo: referenceId });
+        appLogger.info(CTX, `Closed unpaid order ${referenceId} (${reason})`);
+      } catch (err) {
+        appLogger.error(CTX, `close_payment failed (${reason}):`, err);
+      }
+    },
+    [referenceId],
+  );
+
+  // Timing out is the commonest way a QR is abandoned: the customer walks off and the
+  // screen returns home by itself.
+  useEffect(() => {
+    if (status === "TIMEOUT") {
+      void abandonOrder("timeout");
+    }
+  }, [status, abandonOrder]);
+
   const handleCancelClick = () => {
     setIsCancelModalOpen(true);
   };
@@ -229,12 +262,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
       appLogger.error(CTX, "Status check before changing method failed:", err);
     }
 
-    try {
-      await invoke("close_payment", { mchOrderNo: referenceId });
-    } catch (err) {
-      // Best effort — the QR expires on its own within the payment window regardless.
-      appLogger.error(CTX, "close_payment failed:", err);
-    }
+    await abandonOrder("changed method");
 
     if (pollRef.current) clearInterval(pollRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -247,6 +275,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     setIsCancelModalOpen(false);
     if (pollRef.current) clearInterval(pollRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    void abandonOrder("cancelled");
     navigate("/payment-selection", { state });
   };
 
