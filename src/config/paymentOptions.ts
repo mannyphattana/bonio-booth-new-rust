@@ -14,8 +14,7 @@ export type PaymentOption =
   | "alipay"
   | "wechat_pay"
   | "alipay_plus"
-  | "shopeepay"
-  | "truemoney";
+  | "shopeepay";
 
 /** What a booth offered before Payment Options existed — used for older backends. */
 const LEGACY_OPTIONS_WITH_KSHER: PaymentOption[] = ["coupon", "promptpay"];
@@ -31,7 +30,6 @@ const ALL_OPTIONS: PaymentOption[] = [
   "alipay_plus",
   "wechat_pay",
   "shopeepay",
-  "truemoney",
 ];
 
 export const PAYMENT_OPTION_COPY: Record<
@@ -47,11 +45,12 @@ export const PAYMENT_OPTION_COPY: Record<
   },
   qr_credit_card: {
     action: "สแกนจ่ายด้วยบัตรเครดิต",
-    nameThai: "บัตรเครดิต",
-    name: "Credit Card",
+    // Leads with the verb, in English, because UAT found customers did not read this
+    // button as something to scan at all — they were looking for a slot to insert a card.
+    nameThai: "SCAN TO PAY BY CARD",
+    name: "QR Credit Card · Visa / Mastercard",
     // Which apps can read the code belongs on the QR screen, where a customer who cannot
     // scan it is standing. Here it would crowd out the other ways to pay.
-    hint: "สแกน QR แล้วตัดบัตรในแอปธนาคาร",
   },
   // Wallets for foreign visitors. The Latin line keeps each wallet's own name, including
   // the Chinese one: someone who can pay with it reads that name, and a Thai customer
@@ -65,7 +64,6 @@ export const PAYMENT_OPTION_COPY: Record<
     hint: "Alipay · GCash · Kakao Pay · TrueMoney · Touch 'n Go",
   },
   shopeepay: { action: "สแกนจ่ายด้วย", nameThai: "ช้อปปี้เพย์", name: "ShopeePay" },
-  truemoney: { action: "สแกนจ่ายด้วย", nameThai: "ทรูมันนี่", name: "TrueMoney Wallet" },
 };
 
 /**
@@ -74,6 +72,13 @@ export const PAYMENT_OPTION_COPY: Record<
  * Falls back to the pre-Payment-Options behaviour when the backend does not send a list,
  * so a booth pointed at an older backend keeps taking money exactly as it did.
  */
+/** Narrows whatever arrived on navigation state to a Payment Option we know. */
+export function toPaymentOption(value: unknown): PaymentOption | null {
+  return typeof value === "string" && value in PAYMENT_OPTION_COPY
+    ? (value as PaymentOption)
+    : null;
+}
+
 export function getEnabledPaymentOptions(machineData: MachineData): PaymentOption[] {
   const fromBackend = machineData.enabledPaymentOptions;
 

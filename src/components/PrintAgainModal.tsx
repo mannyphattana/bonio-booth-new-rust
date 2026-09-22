@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "../utils/appLogger";
 import type { ThemeData, MachineData } from "../App";
 import PaymentOptionIcon from "./PaymentOptionIcon";
+import PaymentQrImage from "./PaymentQrImage";
 import {
   PAYMENT_OPTION_COPY,
   getEnabledPaymentOptions,
@@ -520,9 +521,9 @@ export default function PrintAgainModal({
             <p style={{ margin: 0, fontSize: "1.3rem", color: "#2c2c2c" }}>สแกนจ่ายได้เลย!</p>
             <div style={{ padding: 16, background: "#fff", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
               {qrCodeUrl ? (
-                <img src={qrCodeUrl} alt="QR Code" style={{ width: 220, height: 220, display: "block" }} />
+                <PaymentQrImage src={qrCodeUrl} option={activeOption ?? undefined} size={380} />
               ) : (
-                <div style={{ width: 220, height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
+                <div style={{ width: 380, height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
                   กำลังโหลด...
                 </div>
               )}

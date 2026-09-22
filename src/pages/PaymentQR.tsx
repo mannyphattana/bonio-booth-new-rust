@@ -5,9 +5,21 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
-import { PAYMENT_OPTION_COPY, type PaymentOption } from "../config/paymentOptions";
+import {
+  PAYMENT_OPTION_COPY,
+  toPaymentOption,
+  type PaymentOption,
+} from "../config/paymentOptions";
+import PaymentQrImage from "../components/PaymentQrImage";
 
 const CTX = "[PaymentQR]";
+
+/**
+ * Bigger than any image Ksher sends (300–357px), so the code is upscaled rather than
+ * resampled down — see components/PaymentQrImage. 420px still leaves room for the price
+ * and the countdown on a 720x1280 screen.
+ */
+const QR_DISPLAY_SIZE = 420;
 
 interface Props {
   theme: ThemeData;
@@ -47,9 +59,9 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
 
   // Which rail this QR settles. Coupon flow doesn't set one — the backend then defaults
   // to PromptPay, which is what the coupon flow has always used.
-  const paymentOption: PaymentOption = state.paymentOption === "qr_credit_card"
-    ? "qr_credit_card"
-    : "promptpay";
+  // Anything the payment screen offers can land here. Collapsing the value to one of two
+  // rails, as this did, quietly charged an Alipay customer through PromptPay instead.
+  const paymentOption: PaymentOption = toPaymentOption(state.paymentOption) ?? "promptpay";
   const isCreditCard = paymentOption === "qr_credit_card";
 
   const createPayment = useCallback(async () => {
@@ -441,16 +453,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                   transition: "filter 0.5s ease-in-out",
                 }}
               >
-                <img
-                  src={qrCodeUrl}
-                  alt="QR Code"
-                  style={{
-                    width: 240,
-                    height: 240,
-                    display: "block",
-                    borderRadius: 4,
-                  }}
-                />
+                <PaymentQrImage src={qrCodeUrl} option={paymentOption} size={QR_DISPLAY_SIZE} />
               </div>
             )}
         </div>
