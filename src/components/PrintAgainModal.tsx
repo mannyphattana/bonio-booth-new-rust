@@ -186,12 +186,17 @@ export default function PrintAgainModal({
         return;
       }
 
+      // A coupon that does not cover the whole price leaves a balance, and PromptPay is
+      // what settles it — the backend assumes that too when no option is sent. Say it
+      // rather than leaning on the default, so the QR screen knows which mark to draw.
+      setActiveOption("promptpay");
       const payResult: any = await invoke("create_payment", {
         amount: currentPrice,
         numberPhoto: quantity,
         couponCodeId,
         isReprint: true,
         reprintFromTransactionId: originalTransactionId || null,
+        paymentOption: "promptpay",
       });
       const data = payResult?.data || {};
       if (!payResult?.success) {
@@ -521,7 +526,7 @@ export default function PrintAgainModal({
             <p style={{ margin: 0, fontSize: "1.3rem", color: "#2c2c2c" }}>สแกนจ่ายได้เลย!</p>
             <div style={{ padding: 16, background: "#fff", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
               {qrCodeUrl ? (
-                <PaymentQrImage src={qrCodeUrl} option={activeOption ?? undefined} size={380} />
+                <PaymentQrImage src={qrCodeUrl} size={380} />
               ) : (
                 <div style={{ width: 380, height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
                   กำลังโหลด...

@@ -453,7 +453,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                   transition: "filter 0.5s ease-in-out",
                 }}
               >
-                <PaymentQrImage src={qrCodeUrl} option={paymentOption} size={QR_DISPLAY_SIZE} />
+                <PaymentQrImage src={qrCodeUrl} size={QR_DISPLAY_SIZE} />
               </div>
             )}
         </div>
