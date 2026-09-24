@@ -60,6 +60,30 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      # WebView2 Fixed Version Runtime ที่ tauri.conf.json ฝังเข้าตัวติดตั้ง (bundle.windows.webviewInstallMode)
+      # ไม่ได้อยู่ใน git เพราะแตกแล้วใหญ่ราว 661 MB — ไฟล์ .cab เก็บไว้ที่ release "webview2-runtime-<เวอร์ชัน>"
+      # ของ repo นี้ (ตั้งเป็น prerelease ไว้ ไม่ให้กลายเป็น latest ที่ตู้ใช้เช็คอัปเดต)
+      # เวอร์ชันอ่านจาก path ใน tauri.conf.json ถ้าเปลี่ยน runtime ให้อัปโหลด .cab ตัวใหม่ขึ้น release ชื่อตามรูปแบบเดียวกัน
+      - name: Prepare WebView2 fixed runtime
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $folder = Split-Path $conf.bundle.windows.webviewInstallMode.path.TrimEnd('/') -Leaf
+          if ($folder -notmatch 'FixedVersionRuntime\.([\d\.]+)\.x64$') {
+            throw "อ่านเวอร์ชัน WebView2 จาก tauri.conf.json ไม่ได้: $folder"
+          }
+          $tag = "webview2-runtime-$($Matches[1])"
+          gh release download $tag --pattern "$folder.cab" --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw "ดาวน์โหลด $folder.cab จาก release $tag ไม่สำเร็จ" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-fixed-webview2.ps1 -CabPath "$env:RUNNER_TEMP\$folder.cab"
+          if ($LASTEXITCODE -ne 0) { throw "แตกไฟล์ WebView2 runtime ไม่สำเร็จ" }
+          if (-not (Test-Path "src-tauri/webview2-fixed/$folder/msedgewebview2.exe")) {
+            throw "ไม่เจอ src-tauri/webview2-fixed/$folder/msedgewebview2.exe หลังแตกไฟล์"
+          }
+          Write-Host "✅ WebView2 runtime พร้อม: src-tauri/webview2-fixed/$folder"
+
       # tauri-action จะรัน beforeBuildCommand (npm run build) และ tauri build ให้เองอัตโนมัติ
       # TAURI_SIGNING_PRIVATE_KEY ต้องตั้งใน GitHub Secrets สำหรับ sign updater artifacts
       - name: Build and publish release
