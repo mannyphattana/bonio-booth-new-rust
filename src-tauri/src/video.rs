@@ -122,7 +122,15 @@ pub async fn check_ffmpeg_available() -> Result<bool, String> {
     }
 }
 
-/// Save a video blob (base64-encoded) to a temp file, then trim to exactly 3 seconds
+/// ความยาวสูงสุดของคลิปแต่ละช็อต (วินาที) — ต้องตรงกับ RECORD_LEAD_MS ใน MainShooting.tsx
+///
+/// วิดีโอ 9 วินาทีคือคลิปวนซ้ำ และทุกรอบตัดหัวทิ้ง CLIP_HEAD_TRIM_SECONDS คลิปที่อัด 3 วินาที
+/// (ของจริงจาก Canon ได้ ~2.92) เหลือรอบละ ~2.57 วินาที จึงวนได้ 3 รอบครึ่ง ลูกค้าเห็นรอบที่ 4
+/// เริ่มตอน 7.7 วินาที ที่ 3.6 วินาทีเหลือรอบละ ~3.1 ขึ้นไปแม้คลิปจะสั้นกว่าที่สั่ง
+/// 3 รอบจึงครอบ 9 วินาที รอบสุดท้ายถูกตัดท้ายแทนที่จะมีรอบใหม่โผล่ขึ้นมา
+const CLIP_SECONDS: &str = "3.6";
+
+/// Save a video blob (base64-encoded) to a temp file, then cap it at CLIP_SECONDS
 /// to ensure all slots have identical video duration for clean looping.
 #[tauri::command]
 pub async fn save_temp_video(
@@ -147,13 +155,13 @@ pub async fn save_temp_video(
 
     fs::write(&raw_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
 
-    // Trim to exactly 3 seconds using FFmpeg to guarantee consistent duration
+    // Cap at CLIP_SECONDS using FFmpeg to guarantee consistent duration
     let ffmpeg = get_ffmpeg_path();
     let trim_status = hidden_command(&ffmpeg)
         .args(&[
             "-y",
             "-i", &raw_path.to_string_lossy(),
-            "-t", "3",
+            "-t", CLIP_SECONDS,
             "-c", "copy",
             &file_path.to_string_lossy(),
         ])
@@ -163,7 +171,7 @@ pub async fn save_temp_video(
         Ok(output) if output.status.success() => {
             // Trimmed successfully — remove raw file
             let _ = fs::remove_file(&raw_path);
-            println!("[save_temp_video] trimmed to 3s: {}", file_path.display());
+            println!("[save_temp_video] capped at {}s: {}", CLIP_SECONDS, file_path.display());
         }
         _ => {
             // FFmpeg trim failed — fall back to raw file
