@@ -14,6 +14,18 @@ const CANON_VIDEO_BITRATE = 14_000_000;
 const WEBCAM_VIDEO_BITRATE = 8_000_000;
 const CANON_MIN_COUNTDOWN_SECONDS = 3;
 
+/**
+ * How long before the shutter each clip starts recording, in ms.
+ *
+ * The delivered video is 9s of each clip looped, and every loop drops the clip's first
+ * 0.35s (CLIP_HEAD_TRIM_SECONDS in video.rs). Recording 3s left ~2.57s per loop once the
+ * Canon feed came in short (~2.92s) and the head was trimmed — three full loops plus a
+ * fourth starting at 7.7s. 3.6s leaves ~3.1s per loop even when the feed comes in short, so
+ * three loops cover the 9s and the last is cut short instead of a new one starting.
+ * Must match CLIP_SECONDS in video.rs save_temp_video, which caps the clip at this length.
+ */
+const RECORD_LEAD_MS = 3600;
+
 function CropOverlay({
   slotWidth,
   slotHeight,
@@ -687,33 +699,44 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
 
       isRecordingRef.current = false;
       setIsRecording(false);
+
+      const effectiveCountdown =
+        cameraTypeRef.current === "canon"
+          ? Math.max(cameraCountdown, CANON_MIN_COUNTDOWN_SECONDS)
+          : cameraCountdown;
+      const countdownMs = effectiveCountdown * 1000;
+
+      setCountdown(effectiveCountdown);
       setPhase("countdown");
 
+      // A countdown shorter than the lead would give a short clip, so start recording now
+      // and hold the first number a little longer before counting down.
+      const preRollMs = RECORD_LEAD_MS - countdownMs;
+      if (preRollMs > 0) {
+        startRecording();
+        await new Promise((r) => setTimeout(r, preRollMs));
+      }
+
       await new Promise<void>((resolve) => {
-        const effectiveCountdown =
-          cameraTypeRef.current === "canon"
-            ? Math.max(cameraCountdown, CANON_MIN_COUNTDOWN_SECONDS)
-            : cameraCountdown;
-
         let currentCount = effectiveCountdown;
-        setCountdown(currentCount);
 
-        const startRecordAt = Math.min(currentCount, 3); // เริ่มอัดเมื่อเหลือ 3 วิ
-
-        if (currentCount <= startRecordAt && !isRecordingRef.current) {
-          startRecording();
-        }
+        // Start recording RECORD_LEAD_MS before the shutter, which fires on the last tick.
+        const recordTimer =
+          preRollMs > 0 ? null : setTimeout(() => startRecording(), countdownMs - RECORD_LEAD_MS);
 
         const timer = setInterval(() => {
           currentCount--;
           setCountdown(currentCount);
 
-          if (currentCount <= startRecordAt && !isRecordingRef.current) {
+          // Fallback: if the timer above has not fired by the last three seconds, record now
+          // rather than lose the clip — the same point recording used to start at.
+          if (currentCount <= 3 && !isRecordingRef.current) {
             startRecording();
           }
 
           if (currentCount <= 0) {
             clearInterval(timer);
+            if (recordTimer) clearTimeout(recordTimer);
             resolve();
           }
         }, 1000);
