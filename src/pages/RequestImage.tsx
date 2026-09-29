@@ -234,7 +234,8 @@ export default function RequestImage({ theme, onFormatReset, onBeforeClose }: Pr
       {/* Header */}
       <div
         style={{
-          padding: "60px 30px 10px 30px",
+          // Line the title up with the BackButton row (top: 8rem) instead of under it
+          padding: "8rem 30px 10px 30px",
           textAlign: "center",
         }}
       >
