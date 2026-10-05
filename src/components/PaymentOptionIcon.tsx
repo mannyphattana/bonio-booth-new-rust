@@ -51,33 +51,16 @@ export default function PaymentOptionIcon({ option, color, size = 48 }: Props) {
   }
 
   if (option === "qr_credit_card") {
-    // Scan brackets around a card, with the networks underneath. UAT found a card drawing
-    // alone read as a slot to insert one into; the brackets say "point your phone here"
-    // and the marks answer "will mine work?".
-    const markSize = size * 0.34;
+    // The card networks side by side, big enough to read at arm's length: they answer
+    // "will my card work?" before the customer taps. "Scan QR" on the card's own text
+    // does the job the old scan brackets did, so the glyph no longer has to.
+    // Two marks make this glyph about twice as wide as the others — the icon slot on
+    // the card is sized for that (see .payment-method-card-icon).
+    const markSize = size * 0.9;
     return (
-      <span
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: size * 0.08,
-        }}
-      >
-        <svg width={size * 0.78} height={size * 0.78} viewBox="0 0 24 24" fill="none">
-          <path
-            d="M3 8V4.8A1.8 1.8 0 0 1 4.8 3H8M16 3h3.2A1.8 1.8 0 0 1 21 4.8V8M21 16v3.2a1.8 1.8 0 0 1-1.8 1.8H16M8 21H4.8A1.8 1.8 0 0 1 3 19.2V16"
-            stroke={color}
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <rect x="6.5" y="9" width="11" height="6.5" rx="1.2" stroke={color} strokeWidth="1.6" />
-          <path d="M6.5 11.2h11" stroke={color} strokeWidth="1.6" />
-        </svg>
-        <span style={{ display: "flex", gap: size * 0.06 }}>
-          <BrandMark brand="visa" color={color} size={markSize} />
-          <BrandMark brand="mastercard" color={color} size={markSize} />
-        </span>
+      <span style={{ display: "flex", alignItems: "center", gap: size * 0.06 }}>
+        <BrandMark brand="visa" color={color} size={markSize} />
+        <BrandMark brand="mastercard" color={color} size={markSize} />
       </span>
     );
   }

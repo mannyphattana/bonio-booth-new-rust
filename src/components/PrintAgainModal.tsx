@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "../utils/appLogger";
 import type { ThemeData, MachineData } from "../App";
 import PaymentOptionIcon from "./PaymentOptionIcon";
+import PaymentMethodCard from "./PaymentMethodCard";
 import PaymentQrImage from "./PaymentQrImage";
 import {
   PAYMENT_OPTION_COPY,
@@ -403,36 +404,19 @@ export default function PrintAgainModal({
              * the screen to buy an extra print with it.
              */}
             <div className={`payment-method-list payment-method-list-${density}`}>
-              {payOptions.map((option) => {
-                const copy = PAYMENT_OPTION_COPY[option];
-                const disabled = busy || currentPrice <= 0;
-                const creating = busy && activeOption === option;
-
-                return (
-                  <button
-                    key={option}
-                    onClick={() => startQrPayment(option)}
-                    disabled={disabled}
-                    className={`payment-method-card payment-method-card-${density}`}
-                    style={{
-                      background: theme.primaryColor,
-                      border: `2px solid ${theme.primaryColor}`,
-                      color: buttonTextColor,
-                      opacity: disabled ? 0.6 : 1,
-                    }}
-                  >
-                    <span className="payment-method-card-icon">
-                      <PaymentOptionIcon option={option} color={buttonTextColor} size={iconSize} />
-                    </span>
-                    <span className="payment-method-card-copy">
-                      <span className="payment-method-card-name">
-                        {creating ? "กำลังสร้าง..." : copy.nameThai}
-                      </span>
-                      <span className="payment-method-card-sub">{copy.name}</span>
-                    </span>
-                  </button>
-                );
-              })}
+              {payOptions.map((option) => (
+                <PaymentMethodCard
+                  key={option}
+                  option={option}
+                  density={density}
+                  iconSize={iconSize}
+                  background={theme.primaryColor}
+                  color={buttonTextColor}
+                  onClick={() => startQrPayment(option)}
+                  disabled={busy || currentPrice <= 0}
+                  busyLabel={busy && activeOption === option ? "กำลังสร้าง..." : undefined}
+                />
+              ))}
             </div>
 
             {hasCoupon && (
@@ -446,7 +430,9 @@ export default function PrintAgainModal({
                 style={{ border: `2px solid ${theme.primaryColor}`, color: theme.primaryColor }}
               >
                 <PaymentOptionIcon option="coupon" color={theme.primaryColor} size={24} />
-                <span>{PAYMENT_OPTION_COPY.coupon.nameThai} · Discount Coupon</span>
+                <span>
+                  {PAYMENT_OPTION_COPY.coupon.name} · {PAYMENT_OPTION_COPY.coupon.thai}
+                </span>
               </button>
             )}
 

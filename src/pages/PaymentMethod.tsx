@@ -13,26 +13,21 @@ import {
   type PaymentOption,
 } from "../config/paymentOptions";
 import PaymentOptionIcon from "../components/PaymentOptionIcon";
+import PaymentMethodCard, { type PaymentCardDensity } from "../components/PaymentMethodCard";
 
 const CTX = "[PaymentMethod]";
 
 /**
- * How much room each card gets, chosen from how many there are to show.
- *
- * The screen is 720x1280 and nothing may scroll — a customer mid-purchase must see every
- * way to pay without discovering that the list moves. Cards therefore shrink instead:
- * three of them can afford the full treatment, seven cannot, and the hint line is the
- * first thing to go since it only matters for the codes not every app can read.
+ * Three cards can afford the full treatment, seven cannot — at that point each card drops
+ * its English instruction line and keeps the name and the Thai line.
  */
-type Density = "comfortable" | "compact" | "dense";
-
-function densityFor(count: number): Density {
+function densityFor(count: number): PaymentCardDensity {
   if (count <= 3) return "comfortable";
   if (count <= 5) return "compact";
   return "dense";
 }
 
-const ICON_SIZE_BY_DENSITY: Record<Density, number> = {
+const ICON_SIZE_BY_DENSITY: Record<PaymentCardDensity, number> = {
   comfortable: 56,
   compact: 44,
   dense: 36,
@@ -139,52 +134,41 @@ export default function PaymentMethod({
         visible={COUNTDOWN.SELECT_PRINT.VISIBLE}
       />
 
-      <div className="page-content" style={{ gap: 28, padding: "0 40px" }}>
+      {/* The top padding keeps the English title clear of the back button and countdown:
+          it is wider than the Thai one it replaced and, with seven cards, the list pushes
+          it up into that row. */}
+      <div className="page-content" style={{ gap: 28, padding: "210px 40px 40px" }}>
         <div style={{ textAlign: "center" }}>
-          <h1 className="title-thai" style={{ color: theme.fontColor }}>
-            เลือกวิธีชำระ
+          <h1 className="payment-page-title" style={{ color: theme.fontColor }}>
+            Select Payment Method
           </h1>
-          <p className="title-english" style={{ color: theme.fontColor }}>
-            SELECT PAYMENT METHOD
+          <p className="payment-page-subtitle" style={{ color: theme.fontColor }}>
+            เลือกวิธีชำระ
           </p>
         </div>
 
         {/* What they are paying for, so nobody has to go back to check */}
         <div className="payment-method-summary" style={{ color: theme.fontColor }}>
-          <span>{quantity} รูป</span>
+          <span>
+            {quantity} {quantity === 1 ? "print" : "prints"}
+          </span>
           <span className="payment-method-summary-dot">·</span>
           <span className="payment-method-summary-price">{totalPrice}</span>
           <span className="payment-method-summary-unit">THB</span>
         </div>
 
         <div className={`payment-method-list payment-method-list-${density}`}>
-          {payOptions.map((option) => {
-            const copy = PAYMENT_OPTION_COPY[option];
-
-            return (
-              <button
-                key={option}
-                onClick={() => goToPayment(option)}
-                className={`payment-method-card payment-method-card-${density}`}
-                style={{
-                  background: theme.primaryColor,
-                  border: `2px solid ${theme.primaryColor}`,
-                  color: buttonTextColor,
-                }}
-              >
-                <span className="payment-method-card-icon">
-                  <PaymentOptionIcon option={option} color={buttonTextColor} size={iconSize} />
-                </span>
-                <span className="payment-method-card-copy">
-                  <span className="payment-method-card-name">{copy.nameThai}</span>
-                  <span className="payment-method-card-sub">{copy.name}</span>
-                  {density !== "dense" && copy.hint && (
-                    <span className="payment-method-card-hint">{copy.hint}</span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
+          {payOptions.map((option) => (
+            <PaymentMethodCard
+              key={option}
+              option={option}
+              density={density}
+              iconSize={iconSize}
+              background={theme.primaryColor}
+              color={buttonTextColor}
+              onClick={() => goToPayment(option)}
+            />
+          ))}
         </div>
 
         {/*
@@ -202,7 +186,9 @@ export default function PaymentMethod({
             }}
           >
             <PaymentOptionIcon option="coupon" color={theme.primaryColor} size={28} />
-            <span>{PAYMENT_OPTION_COPY.coupon.nameThai} · Discount Coupon</span>
+            <span>
+              {PAYMENT_OPTION_COPY.coupon.name} · {PAYMENT_OPTION_COPY.coupon.thai}
+            </span>
           </button>
         )}
       </div>
