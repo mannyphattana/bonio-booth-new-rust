@@ -5,9 +5,22 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
-import { PAYMENT_OPTION_COPY, type PaymentOption } from "../config/paymentOptions";
+import {
+  PAYMENT_OPTION_COPY,
+  toPaymentOption,
+  type PaymentOption,
+} from "../config/paymentOptions";
+import PaymentQrImage from "../components/PaymentQrImage";
 
 const CTX = "[PaymentQR]";
+
+/**
+ * Bigger than any image Ksher sends (300–357px), so the code is upscaled rather than
+ * resampled down — see components/PaymentQrImage. Do not go below that to make room:
+ * 380px is what leaves space for the reference, the accepted cards and both buttons on a
+ * 720x1280 screen while keeping the code scannable.
+ */
+const QR_DISPLAY_SIZE = 380;
 
 interface Props {
   theme: ThemeData;
@@ -43,14 +56,16 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isCheckingRef = useRef(false); // Guard against concurrent status checks
+  const closedRef = useRef(false); // An order is closed once, whichever exit gets there first
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
 
   // Which rail this QR settles. Coupon flow doesn't set one — the backend then defaults
   // to PromptPay, which is what the coupon flow has always used.
-  const paymentOption: PaymentOption = state.paymentOption === "qr_credit_card"
-    ? "qr_credit_card"
-    : "promptpay";
+  // Anything the payment screen offers can land here. Collapsing the value to one of two
+  // rails, as this did, quietly charged an Alipay customer through PromptPay instead.
+  const paymentOption: PaymentOption = toPaymentOption(state.paymentOption) ?? "promptpay";
   const isCreditCard = paymentOption === "qr_credit_card";
+  const copy = PAYMENT_OPTION_COPY[paymentOption];
 
   const createPayment = useCallback(async () => {
     // If payment was already created (e.g. from coupon flow), reuse it
@@ -186,6 +201,38 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     }
   }, [status, navigate]);
 
+  /**
+   * Close the order this screen is showing, so the code cannot be paid after the customer
+   * has walked away.
+   *
+   * This is the only thing standing between an abandoned QR and a payment for a session
+   * that no longer exists: Ksher's own `expire_time` cannot be used, because a PromptPay
+   * code created with it is read by bank apps and then refused at the payment step. Best
+   * effort by design — Ksher refuses to close an order that is already paid, which is the
+   * outcome we want.
+   */
+  const abandonOrder = useCallback(
+    async (reason: string) => {
+      if (!referenceId || closedRef.current) return;
+      closedRef.current = true;
+      try {
+        await invoke("close_payment", { mchOrderNo: referenceId });
+        appLogger.info(CTX, `Closed unpaid order ${referenceId} (${reason})`);
+      } catch (err) {
+        appLogger.error(CTX, `close_payment failed (${reason}):`, err);
+      }
+    },
+    [referenceId],
+  );
+
+  // Timing out is the commonest way a QR is abandoned: the customer walks off and the
+  // screen returns home by itself.
+  useEffect(() => {
+    if (status === "TIMEOUT") {
+      void abandonOrder("timeout");
+    }
+  }, [status, abandonOrder]);
+
   const handleCancelClick = () => {
     setIsCancelModalOpen(true);
   };
@@ -217,12 +264,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
       appLogger.error(CTX, "Status check before changing method failed:", err);
     }
 
-    try {
-      await invoke("close_payment", { mchOrderNo: referenceId });
-    } catch (err) {
-      // Best effort — the QR expires on its own within the payment window regardless.
-      appLogger.error(CTX, "close_payment failed:", err);
-    }
+    await abandonOrder("changed method");
 
     if (pollRef.current) clearInterval(pollRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -235,6 +277,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
     setIsCancelModalOpen(false);
     if (pollRef.current) clearInterval(pollRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    void abandonOrder("cancelled");
     navigate("/payment-selection", { state });
   };
 
@@ -253,52 +296,18 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
     >
-      <div className="page-content" style={{ gap: 24, padding: "0 40px" }}>
-        {/* Title */}
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <h1
-            style={{
-              color: theme.fontColor,
-              fontSize: "3rem",
-              fontWeight: 600,
-              margin: "0 0 8px 0",
-            }}
-          >
-            {isCreditCard ? "สแกนด้วยแอปธนาคาร" : "สแกนจ่ายได้เลย!"}
+      <div className="page-content payment-qr-content" style={{ color: theme.fontColor }}>
+        {/* Title — the rail's name, then what to do with it in English and in Thai */}
+        <div style={{ textAlign: "center" }}>
+          <h1 className="payment-page-title" style={{ color: theme.fontColor }}>
+            {copy.name}
           </h1>
-          <p
-            style={{
-              color: theme.fontColor,
-              fontSize: "1.2rem",
-              fontWeight: 500,
-              margin: 0,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-              opacity: 0.8,
-            }}
-          >
-            {isCreditCard ? "SCAN WITH YOUR BANKING APP" : "SCAN TO PAY!"}
-          </p>
-          {/* Only some bank apps read a QR Credit Card, so name them where the customer
-              is standing with their phone out, not just back on the selection screen. */}
-          {isCreditCard && (
-            <p
-              style={{
-                color: theme.fontColor,
-                fontSize: "1.05rem",
-                fontWeight: 500,
-                margin: "10px 0 0 0",
-                opacity: 0.75,
-                lineHeight: 1.4,
-              }}
-            >
-              {PAYMENT_OPTION_COPY.qr_credit_card.hint}
-            </p>
-          )}
+          <p className="payment-page-instruction">{copy.scan}</p>
+          <p className="payment-page-instruction-thai">{copy.scanThai}</p>
         </div>
 
         {/* QR Code Display */}
-        <div style={{ marginBottom: 20 }}>
+        <div>
           {status === "CREATING" && (
             <div
               style={{
@@ -433,53 +442,41 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
             qrCodeUrl && (
               <div
                 style={{
-                  padding: 20,
+                  padding: 16,
                   background: "white",
-                  borderRadius: 8,
+                  borderRadius: 12,
                   boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                   filter: status === "TIMEOUT" ? "blur(8px)" : "none",
                   transition: "filter 0.5s ease-in-out",
                 }}
               >
-                <img
-                  src={qrCodeUrl}
-                  alt="QR Code"
-                  style={{
-                    width: 240,
-                    height: 240,
-                    display: "block",
-                    borderRadius: 4,
-                  }}
-                />
+                <PaymentQrImage src={qrCodeUrl} size={QR_DISPLAY_SIZE} />
               </div>
             )}
         </div>
 
-        {/* Price Display */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 24px",
-            borderRadius: 12,
-          }}
-        >
-          <span
-            style={{
-              fontSize: "3rem",
-              fontWeight: 600,
-              color: theme.fontColor,
-            }}
-          >
-            {state.totalPrice || 0}
-          </span>
-          <span
-            style={{ fontSize: "3rem", marginLeft: 10, color: theme.fontColor }}
-          >
-            THB
-          </span>
+        {/* Price, and the order's reference — what a customer quotes if the payment
+            goes through but the booth does not move on */}
+        <div style={{ textAlign: "center" }}>
+          <div className="payment-qr-price">
+            <span className="payment-qr-price-value">{state.totalPrice || 0}</span>
+            <span className="payment-qr-price-unit">THB</span>
+          </div>
+          {referenceId && (
+            <p className="payment-qr-ref">
+              Ref. No. <span className="payment-qr-ref-value">{referenceId}</span>
+            </p>
+          )}
         </div>
+
+        {/* Only some cards and apps read these codes, so name them where the customer is
+            standing with their phone out, not just back on the selection screen. */}
+        {copy.accepts && status !== "SUCCESS" && (
+          <div style={{ textAlign: "center" }}>
+            <p className="payment-qr-accepts">{copy.accepts.en}</p>
+            <p className="payment-qr-accepts-thai">{copy.accepts.th}</p>
+          </div>
+        )}
 
         {/* Timer circle */}
         {status !== "SUCCESS" && (
@@ -488,7 +485,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              marginTop: 16,
+              gap: 12,
             }}
           >
             <div
@@ -501,7 +498,6 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                 alignItems: "center",
                 justifyContent: "center",
                 background: "white",
-                marginBottom: 16,
               }}
             >
               <span
@@ -514,78 +510,62 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
                 {status === "TIMEOUT" ? "Timeout" : formatTime(timeLeft)}
               </span>
             </div>
-            <p
-              style={{
-                fontSize: "1.5rem",
-                fontWeight: 500,
-                color: theme.fontColor,
-                margin: 0,
-                textAlign: "center",
-              }}
-            >
-              กรุณาชำระเงินภายในเวลาที่กำหนด
-            </p>
-            <p
-              style={{
-                fontSize: "1.2rem",
-                fontWeight: 500,
-                color: theme.fontColor,
-                margin: 0,
-                opacity: 0.8,
-                textAlign: "center",
-              }}
-            >
-              Please complete your payment within the time limit.
-            </p>
+            <div style={{ textAlign: "center" }}>
+              <p className="payment-page-subtitle" style={{ fontWeight: 600 }}>
+                Please complete your payment within the time limit
+              </p>
+              <p className="payment-page-instruction-thai" style={{ marginTop: 2 }}>
+                กรุณาชำระเงินภายในเวลาที่กำหนด
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Escape hatch — a customer whose bank app cannot read a QR Credit Card gets no
-            error from the app, it simply fails to scan. Without a way back they wait out
-            the whole timer and leave without paying. */}
-        {isCreditCard && status === "PENDING" && (
-          <button
-            onClick={handleChangeMethodClick}
-            disabled={isChangingMethod}
-            style={{
-              color: theme.primaryColor,
-              backgroundColor: "white",
-              border: `2px solid ${theme.primaryColor}`,
-              fontSize: "1.35rem",
-              marginTop: 24,
-              padding: "12px 32px",
-              borderRadius: 8,
-              cursor: isChangingMethod ? "default" : "pointer",
-              opacity: isChangingMethod ? 0.6 : 1,
-              boxShadow: "none",
-            }}
-          >
-            {isChangingMethod ? "กำลังตรวจสอบ..." : "สแกนไม่ได้? เปลี่ยนวิธีจ่าย"}
-          </button>
-        )}
+        <div className="payment-qr-actions">
+          {/* Escape hatch — a customer whose bank app cannot read a QR Credit Card gets no
+              error from the app, it simply fails to scan. Without a way back they wait out
+              the whole timer and leave without paying. */}
+          {isCreditCard && status === "PENDING" && (
+            <button
+              onClick={handleChangeMethodClick}
+              disabled={isChangingMethod}
+              className="payment-qr-action"
+              style={{
+                color: theme.primaryColor,
+                border: `2px solid ${theme.primaryColor}`,
+                cursor: isChangingMethod ? "default" : "pointer",
+                opacity: isChangingMethod ? 0.6 : 1,
+              }}
+            >
+              {isChangingMethod ? (
+                <span className="payment-qr-action-label">Checking... · กำลังตรวจสอบ...</span>
+              ) : (
+                <>
+                  <span className="payment-qr-action-label">Can't scan? Change payment method</span>
+                  <span className="payment-qr-action-thai">สแกนไม่ได้? เปลี่ยนวิธีจ่าย</span>
+                </>
+              )}
+            </button>
+          )}
 
-        {/* Cancel button */}
-        {status !== "SUCCESS" && (
-          <button
-            onClick={handleCancelClick}
-            style={{
-              color: "red",
-              backgroundColor: "white",
-              border: "2px solid red",
-              fontSize: "1.5rem",
-              marginTop: isCreditCard && status === "PENDING" ? 12 : 24,
-              padding: "12px 40px",
-              borderRadius: 8,
-              cursor: "pointer",
-              boxShadow: "none",
-            }}
-          >
-            Cancel Payment
-          </button>
-        )}
+          {/* Cancel button */}
+          {status !== "SUCCESS" && (
+            <button
+              onClick={handleCancelClick}
+              className="payment-qr-action"
+              style={{
+                color: theme.primaryColor,
+                border: `2px solid ${theme.primaryColor}`,
+              }}
+            >
+              <span className="payment-qr-action-label">Cancel Payment</span>
+              <span className="payment-qr-action-thai">ยกเลิกการชำระเงิน</span>
+            </button>
+          )}
+        </div>
 
         {status === "TIMEOUT" && (
-          <div style={{ textAlign: "center", marginTop: 16 }}>
+          <div style={{ textAlign: "center" }}>
             <p style={{ color: "#e94560", fontSize: 18, marginBottom: 12 }}>
               หมดเวลาการชำระเงิน
             </p>

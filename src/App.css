@@ -1028,7 +1028,126 @@ button:active {
 }
 /* ===== Payment method screen (see pages/PaymentMethod.tsx) ===== */
 
-/* "1 รูป · 150 THB" — what they are about to pay for */
+/*
+ * Titles on the payment screens lead in English and follow in Thai. Separate from
+ * .title-thai/.title-english, which uppercase the second line and are sized for Thai first.
+ */
+.payment-page-title {
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 8px 0;
+}
+
+.payment-page-subtitle {
+  font-size: 1.4rem;
+  font-weight: 500;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.payment-page-instruction {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.payment-page-instruction-thai {
+  font-size: 1.1rem;
+  font-weight: 500;
+  line-height: 1.4;
+  margin: 6px 0 0 0;
+  opacity: 0.85;
+}
+
+/* ===== QR screen (see pages/PaymentQR.tsx) ===== */
+
+.payment-qr-content {
+  gap: 18px;
+  padding: 0 40px;
+}
+
+.payment-qr-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 14px;
+  font-size: 3rem;
+  line-height: 1.1;
+}
+
+.payment-qr-price-value { font-weight: 700; }
+.payment-qr-price-unit { font-weight: 500; }
+
+.payment-qr-ref {
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 6px 0 0 0;
+  opacity: 0.85;
+}
+
+.payment-qr-ref-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-left: 6px;
+  opacity: 1;
+}
+
+.payment-qr-accepts {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+  opacity: 0.85;
+}
+
+.payment-qr-accepts-thai {
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin: 2px 0 0 0;
+  opacity: 0.8;
+}
+
+.payment-qr-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 480px;
+}
+
+/* Outlined, in the theme colour — secondary to the QR, which is what the customer should be doing */
+.payment-qr-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 24px;
+  border-radius: 10px;
+  background: white;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.payment-qr-action:active { transform: scale(0.98); }
+
+.payment-qr-action-label {
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.payment-qr-action-thai {
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* "1 print · 150 THB" — what they are about to pay for */
 .payment-method-summary {
   display: flex;
   align-items: baseline;
@@ -1121,11 +1240,11 @@ button:active {
 
 .payment-method-card-dense .payment-method-card-sub { font-size: 1rem; }
 
-.payment-method-card-hint {
+.payment-method-card-thai {
   font-size: 0.9rem;
   font-weight: 500;
   line-height: 1.3;
-  opacity: 0.85;
+  opacity: 0.9;
   margin-top: 2px;
 }
 

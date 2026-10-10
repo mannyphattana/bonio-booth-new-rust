@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "../utils/appLogger";
 import type { ThemeData, MachineData } from "../App";
 import PaymentOptionIcon from "./PaymentOptionIcon";
+import PaymentMethodCard from "./PaymentMethodCard";
+import PaymentQrImage from "./PaymentQrImage";
 import {
   PAYMENT_OPTION_COPY,
   getEnabledPaymentOptions,
@@ -185,12 +187,17 @@ export default function PrintAgainModal({
         return;
       }
 
+      // A coupon that does not cover the whole price leaves a balance, and PromptPay is
+      // what settles it — the backend assumes that too when no option is sent. Say it
+      // rather than leaning on the default, so the QR screen knows which mark to draw.
+      setActiveOption("promptpay");
       const payResult: any = await invoke("create_payment", {
         amount: currentPrice,
         numberPhoto: quantity,
         couponCodeId,
         isReprint: true,
         reprintFromTransactionId: originalTransactionId || null,
+        paymentOption: "promptpay",
       });
       const data = payResult?.data || {};
       if (!payResult?.success) {
@@ -397,36 +404,19 @@ export default function PrintAgainModal({
              * the screen to buy an extra print with it.
              */}
             <div className={`payment-method-list payment-method-list-${density}`}>
-              {payOptions.map((option) => {
-                const copy = PAYMENT_OPTION_COPY[option];
-                const disabled = busy || currentPrice <= 0;
-                const creating = busy && activeOption === option;
-
-                return (
-                  <button
-                    key={option}
-                    onClick={() => startQrPayment(option)}
-                    disabled={disabled}
-                    className={`payment-method-card payment-method-card-${density}`}
-                    style={{
-                      background: theme.primaryColor,
-                      border: `2px solid ${theme.primaryColor}`,
-                      color: buttonTextColor,
-                      opacity: disabled ? 0.6 : 1,
-                    }}
-                  >
-                    <span className="payment-method-card-icon">
-                      <PaymentOptionIcon option={option} color={buttonTextColor} size={iconSize} />
-                    </span>
-                    <span className="payment-method-card-copy">
-                      <span className="payment-method-card-name">
-                        {creating ? "กำลังสร้าง..." : copy.nameThai}
-                      </span>
-                      <span className="payment-method-card-sub">{copy.name}</span>
-                    </span>
-                  </button>
-                );
-              })}
+              {payOptions.map((option) => (
+                <PaymentMethodCard
+                  key={option}
+                  option={option}
+                  density={density}
+                  iconSize={iconSize}
+                  background={theme.primaryColor}
+                  color={buttonTextColor}
+                  onClick={() => startQrPayment(option)}
+                  disabled={busy || currentPrice <= 0}
+                  busyLabel={busy && activeOption === option ? "กำลังสร้าง..." : undefined}
+                />
+              ))}
             </div>
 
             {hasCoupon && (
@@ -440,7 +430,9 @@ export default function PrintAgainModal({
                 style={{ border: `2px solid ${theme.primaryColor}`, color: theme.primaryColor }}
               >
                 <PaymentOptionIcon option="coupon" color={theme.primaryColor} size={24} />
-                <span>{PAYMENT_OPTION_COPY.coupon.nameThai} · Discount Coupon</span>
+                <span>
+                  {PAYMENT_OPTION_COPY.coupon.name} · {PAYMENT_OPTION_COPY.coupon.thai}
+                </span>
               </button>
             )}
 
@@ -520,9 +512,9 @@ export default function PrintAgainModal({
             <p style={{ margin: 0, fontSize: "1.3rem", color: "#2c2c2c" }}>สแกนจ่ายได้เลย!</p>
             <div style={{ padding: 16, background: "#fff", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
               {qrCodeUrl ? (
-                <img src={qrCodeUrl} alt="QR Code" style={{ width: 220, height: 220, display: "block" }} />
+                <PaymentQrImage src={qrCodeUrl} size={380} />
               ) : (
-                <div style={{ width: 220, height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
+                <div style={{ width: 380, height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
                   กำลังโหลด...
                 </div>
               )}

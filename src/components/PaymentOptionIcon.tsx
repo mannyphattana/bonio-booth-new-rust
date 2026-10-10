@@ -51,10 +51,12 @@ export default function PaymentOptionIcon({ option, color, size = 48 }: Props) {
   }
 
   if (option === "qr_credit_card") {
-    // The two networks the customer's card will carry, rather than a drawing of a card:
-    // it answers "will mine work?" at a glance. They sit on one line so the pair reads as
-    // a single icon in the same box every other option gets.
-    const markSize = size * 0.82;
+    // The card networks side by side, big enough to read at arm's length: they answer
+    // "will my card work?" before the customer taps. "Scan QR" on the card's own text
+    // does the job the old scan brackets did, so the glyph no longer has to.
+    // Two marks make this glyph about twice as wide as the others — the icon slot on
+    // the card is sized for that (see .payment-method-card-icon).
+    const markSize = size * 0.9;
     return (
       <span style={{ display: "flex", alignItems: "center", gap: size * 0.06 }}>
         <BrandMark brand="visa" color={color} size={markSize} />
@@ -63,7 +65,7 @@ export default function PaymentOptionIcon({ option, color, size = 48 }: Props) {
     );
   }
 
-  // PromptPay, TrueMoney, Alipay+ — no mark on hand, and a QR is what they all are.
+  // PromptPay and Alipay+ — no mark on hand, and a QR is what they both are.
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
       <rect x="3" y="3" width="7" height="7" rx="1.4" stroke={color} strokeWidth="1.8" />
