@@ -549,6 +549,7 @@ pub async fn compose_frame_video(
 ) -> Result<String, String> {
     let temp_dir = std::env::temp_dir().join("bonio-booth").join("videos");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create dir error: {}", e))?;
+    prune_stale_upload_files(&temp_dir, "framed-video-");
 
     let frame_path = temp_dir.join("frame_overlay.png");
     
@@ -779,6 +780,32 @@ pub async fn compose_frame_video(
     Ok(output_path.to_string_lossy().to_string())
 }
 
+/// ไฟล์ที่ตั้งชื่อตาม transaction (เช่น `framed-video-<txId>.mp4`) อายุเกินนี้ลบได้ —
+/// อัปโหลดเสร็จนานแล้ว (presigned URL หมดอายุใน 30 นาที) และ retry / re-upload ใช้ไฟล์ใน Saved_Photos
+const STALE_UPLOAD_FILE_AGE: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
+
+/// ลบไฟล์ชั่วคราวของ transaction เก่าที่ชื่อขึ้นต้นด้วย `prefix` ใน `dir`
+///
+/// แต่ละ transaction มีไฟล์ชั่วคราวชื่อของตัวเอง (ไม่ใช้ชื่อเดียวกันทับกันแล้ว) เลยต้องเก็บกวาด
+/// เองไม่ให้ temp เต็ม — ไม่แตะไฟล์ใหม่ เพราะรายการก่อนหน้าอาจยังอัปโหลดค้างอยู่ตอนเน็ตช้า
+pub(crate) fn prune_stale_upload_files(dir: &Path, prefix: &str) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(prefix) {
+            continue;
+        }
+        let is_stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > STALE_UPLOAD_FILE_AGE);
+        if is_stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Clean up temp directory
 #[tauri::command]
 pub async fn cleanup_temp() -> Result<(), String> {
@@ -919,6 +946,30 @@ mod tests {
         let filter = loop_clip_without_head(55, 2.92);
         assert!(filter.starts_with(r"select='gte(mod(n\,55)\,7)'"), "{}", filter);
         assert!(filter.ends_with("fps=30,"), "{}", filter);
+    }
+
+    #[test]
+    fn prunes_only_stale_upload_files_with_the_prefix() {
+        let dir = std::env::temp_dir().join(format!("bonio-prune-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let age = |name: &str, hours: u64| {
+            let path = dir.join(name);
+            fs::write(&path, b"x").unwrap();
+            let when = std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600);
+            fs::File::options().write(true).open(&path).unwrap().set_modified(when).unwrap();
+            path
+        };
+        let old_video = age("framed-video-OLD.mp4", 3);
+        // รายการก่อนหน้าที่อาจยังอัปโหลดค้างตอนเน็ตช้า — ห้ามลบ
+        let recent_video = age("framed-video-RECENT.mp4", 0);
+        let old_other = age("frame_overlay.png", 3);
+
+        prune_stale_upload_files(&dir, "framed-video-");
+
+        assert!(!old_video.exists());
+        assert!(recent_video.exists());
+        assert!(old_other.exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

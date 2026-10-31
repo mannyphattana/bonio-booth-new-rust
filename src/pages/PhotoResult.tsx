@@ -22,6 +22,17 @@ import {
 
 const CTX = "[PhotoResult]";
 
+/**
+ * ส่วนของชื่อไฟล์ชั่วคราวที่ใช้อัปโหลด — แต่ละ transaction ต้องมีไฟล์ของตัวเอง
+ *
+ * เดิมใช้ชื่อเดียวกันทุกรายการ ("framed-video.mp4") พอเน็ตช้าอัปโหลดลากหลายนาที ลูกค้าคนถัดไป
+ * รวมวิดีโอทับไฟล์เดิมก่อนรายการเก่าอัปขึ้น ลิงก์ของลูกค้าคนก่อนเลยได้วิดีโอของคนถัดไป
+ * (เจอจริง 31 Oct 2026 ตู้ BACCARAT) — ไฟล์เก่าลบเองใน prune_stale_upload_files (video.rs)
+ */
+function uploadFileTag(txId: string | number): string {
+  return String(txId).replace(/[^\w-]/g, "_");
+}
+
 interface Props {
   theme: ThemeData;
   machineData: MachineData;
@@ -330,7 +341,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             slots: videoSlots,
             frameWidth: frameWidth,
             frameHeight: frameHeight,
-            outputFilename: "framed-video.mp4",
+            outputFilename: `framed-video-${uploadFileTag(txId)}.mp4`,
             lutPath: lutPath,
             hflipVideo:
               localStorage.getItem("cameraType") !== "canon" &&
@@ -477,7 +488,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         setStatusText("กำลังอัปโหลดรูปเฟรม...");
         const composedPath: string = await invoke("save_temp_image", {
           imageDataBase64: composedImage,
-          filename: "frame-photo.jpg",
+          filename: `upload-${uploadFileTag(localTxIdRef.current)}-frame.jpg`,
         });
         try {
           await invoke("upload_to_presigned_url", {
@@ -520,7 +531,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         setStatusText(`กำลังอัปโหลดรูป ${i + 1}/${frameCaptures.length}...`);
         const photoPath: string = await invoke("save_temp_image", {
           imageDataBase64: frameCaptures[i].photo,
-          filename: `photo-${i + 1}.jpg`,
+          filename: `upload-${uploadFileTag(localTxIdRef.current)}-photo-${i + 1}.jpg`,
         });
         try {
           await invoke("upload_to_presigned_url", {
