@@ -325,21 +325,12 @@ export default function PrintAgainModal({
           )}
         </div>
 
+        {/* คำเตือนอยู่ทุกหน้าจนจ่ายเสร็จ — ลูกค้าหลายคนเข้าใจว่าเป็นการถ่ายใหม่ */}
+        {step !== "success" && <PrintOnlyWarning compact={step !== "confirm"} />}
+
         {/* -------- STEP: confirm (ป้องกันเข้าใจผิดว่าเป็นการถ่ายใหม่) -------- */}
         {step === "confirm" && (
           <>
-            <div style={{ textAlign: "center", width: "100%", padding: "8px 0" }}>
-              <p style={{ margin: 0, fontSize: "1.25rem", color: "#2c2c2c", lineHeight: 1.5 }}>
-                ระบบจะพิมพ์รูปภาพที่แสดงบนหน้าจอนี้เท่านั้น
-                <br />
-                <strong>(ไม่ใช่บริการถ่ายภาพใหม่)</strong>
-              </p>
-              <p style={{ margin: "16px 0 0", fontSize: "1rem", color: "#666", lineHeight: 1.5 }}>
-                Only the current photos on screen will be printed
-                <br />
-                <strong>(This action is not a retake).</strong>
-              </p>
-            </div>
 
             <div style={{ display: "flex", gap: 16, width: "100%", justifyContent: "center" }}>
               <button onClick={() => onClose()} style={{ ...cancelBtnStyle, flex: 1, maxWidth: 220 }}>
@@ -365,7 +356,8 @@ export default function PrintAgainModal({
         {/* -------- STEP: select quantity + payment method -------- */}
         {step === "select" && (
           <>
-            <div className="quantity-selector">
+            {/* margin ของหน้าจ่ายเงินหลักกว้างไป — ตัดออกให้ปุ่มยกเลิกยังอยู่ในจอเมื่อมีคำเตือนด้านบน */}
+            <div className="quantity-selector" style={{ margin: 0 }}>
               <button
                 onClick={handleDecrease}
                 disabled={quantity <= 1}
@@ -389,7 +381,7 @@ export default function PrintAgainModal({
               </button>
             </div>
 
-            <div className="price-display-row">
+            <div className="price-display-row" style={{ margin: 0 }}>
               <span className="price-value" style={{ color: "#2c2c2c" }}>
                 {currentPrice}
               </span>
@@ -546,6 +538,46 @@ export default function PrintAgainModal({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const WARNING_RED = "#e3262b";
+
+/** สามเหลี่ยมแดง "!" — วาดเองแทน emoji ⚠️ ที่บน Windows ออกมาเป็นสีเหลือง */
+function CautionIcon({ size }: { size: number }) {
+  return (
+    <svg width={size} height={(size * 48) / 52} viewBox="0 0 52 48" style={{ flexShrink: 0 }} aria-hidden="true">
+      <path
+        d="M22.5 4.2a4 4 0 0 1 7 0l21 37.6a4 4 0 0 1-3.5 6H5a4 4 0 0 1-3.5-6z"
+        fill={WARNING_RED}
+      />
+      <rect x="23" y="14" width="6" height="18" rx="3" fill="#fff" />
+      <circle cx="26" cy="39" r="3.4" fill="#fff" />
+    </svg>
+  );
+}
+
+/** "พิมพ์เฉพาะรูปบนจอ ไม่ใช่ถ่ายใหม่" — ตาม TIMELAB requirement 30 Oct 2026 หน้า 6 */
+// compact: หน้าเลือกจ่าย/QR สูงอยู่แล้ว ย่อลงนิดให้ปุ่มยกเลิกยังอยู่ในจอ
+function PrintOnlyWarning({ compact }: { compact: boolean }) {
+  const iconSize = compact ? 40 : 52;
+  return (
+    <div style={{ width: "100%", textAlign: "center", color: WARNING_RED }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
+        <CautionIcon size={iconSize} />
+        <p style={{ margin: 0, fontSize: compact ? "1.15rem" : "1.3rem", fontWeight: 800, lineHeight: 1.35 }}>
+          ระบบจะพิมพ์รูปภาพที่แสดงบนหน้าจอเท่านั้น
+          <br />
+          !!!! (ไม่ใช่การถ่ายภาพใหม่) !!!!
+        </p>
+        <CautionIcon size={iconSize} />
+      </div>
+      <p style={{ margin: compact ? "4px 0 0" : "8px 0 0", fontSize: compact ? "0.9rem" : "1rem", lineHeight: 1.35 }}>
+        !Only the current photo on screen will be printed
+        <br />
+        (This action is not a retake)
+      </p>
     </div>
   );
 }
