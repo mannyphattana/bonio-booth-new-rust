@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { logError } from "./utils/logger";
+import { initViewportScale } from "./utils/viewportScale";
 
 // Global uncaught JS error handler
 window.addEventListener("error", (event) => {
@@ -29,6 +30,8 @@ window.addEventListener("unhandledrejection", (event) => {
     "error"
   );
 });
+
+initViewportScale();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

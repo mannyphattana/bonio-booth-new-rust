@@ -71,7 +71,8 @@ export default function TermsAndServices({ theme, onFormatReset, onBeforeClose }
     alignItems: "center",
     justifyContent: "flex-start",
     overflowY: "auto",
-    padding: "4rem 2rem 2rem 2rem",
+    // Start below the BackButton (top: 8rem) so the title never sits under it
+    padding: "12rem 2rem 2rem 2rem",
     width: "100%",
     maxWidth: "1200px",
     margin: "0 auto",
