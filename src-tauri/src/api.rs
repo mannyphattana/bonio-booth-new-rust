@@ -210,11 +210,17 @@ pub async fn get_frames(
         .header("X-Machine-Id", &machine_id)
         .header("X-Machine-Port", &machine_port)
         .query(&[("machineId", &machine_id)])
+        .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
         .map_err(|e| format!("Request error: {}", e))?;
 
     let (status, body) = parse_response_body(res).await;
+
+    // ดึงได้ → เก็บลงเครื่องไว้ใช้ตอนเน็ตตู้มีปัญหา (หน้าเลือกกรอบอ่านจากในเครื่องก่อน)
+    if status.is_success() {
+        crate::image_processing::save_frame_list(&body);
+    }
 
     Ok(ApiResponse {
         success: status.is_success(),

@@ -8,8 +8,14 @@ import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+import LocalImage from "../components/LocalImage";
 
 const CTX = "[FrameSelection]";
+
+/** data ของ get_frames / get_cached_frames เป็นได้ทั้ง array และ { frames: [...] } */
+function toFrameList(data: any): FrameData[] {
+  return Array.isArray(data) ? data : data?.frames || [];
+}
 
 interface Props {
   theme: ThemeData;
@@ -75,26 +81,76 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
       );
   }, [selectedFrame?.imageUrl]);
 
+  const [loadFailed, setLoadFailed] = useState(false);
+  const mountedRef = useRef(true);
+
   useEffect(() => {
+    mountedRef.current = true;
     loadFrames();
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
+  const applyFrames = (list: FrameData[]) => {
+    setFrames(list);
+    // รายการใหม่จาก backend มาถึงระหว่างลูกค้าเลือกอยู่ — คงกรอบที่เลือกไว้ถ้ายังมี
+    setSelectedFrame((prev) => list.find((f) => f._id === prev?._id) ?? list[0] ?? null);
+  };
+
+  /**
+   * ใช้รายการกรอบที่เก็บในเครื่องก่อน แล้วค่อยดึงของใหม่จาก backend มาอัปเดต
+   *
+   * เคส 2026-10-31 ตู้ BACCARAT: เดิมดึงจาก backend อย่างเดียวครั้งเดียว เน็ตหลุดตอนนั้น
+   * หน้านี้ว่างเปล่า ลูกค้าที่จ่ายเงินแล้วไปต่อไม่ได้จนหมดเวลา
+   */
   const loadFrames = async () => {
+    setLoadFailed(false);
+    let hasLocal = false;
     try {
-      const result: any = await invoke("get_frames");
-      if (result.success && result.data) {
-        const frameList = Array.isArray(result.data)
-          ? result.data
-          : result.data.frames || [];
-        setFrames(frameList);
-        if (frameList.length > 0) {
-          setSelectedFrame(frameList[0]);
-        }
+      const cached: any = await invoke("get_cached_frames");
+      const list = toFrameList(cached);
+      if (list.length > 0 && mountedRef.current) {
+        applyFrames(list);
+        hasLocal = true;
+        setLoading(false);
       }
     } catch (err) {
-      appLogger.error(CTX, "Load frames error:", err);
+      appLogger.warn(CTX, `get_cached_frames failed: ${err}`);
     }
-    setLoading(false);
+
+    // มีในเครื่องแล้ว = ดึงครั้งเดียวเบื้องหลังพอ, ยังไม่มีเลย = ลูกค้ารออยู่ ลองซ้ำ
+    const retryDelaysMs = hasLocal ? [] : [2000, 4000];
+    let lastError = "";
+    for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
+      try {
+        const result: any = await invoke("get_frames");
+        if (result.success && result.data) {
+          if (mountedRef.current) applyFrames(toFrameList(result.data));
+          lastError = "";
+          break;
+        }
+        lastError = result.error || "get_frames returned no data";
+      } catch (err) {
+        lastError = String(err);
+      }
+      appLogger.warn(CTX, `Load frames attempt ${attempt + 1} failed: ${lastError}`);
+      if (attempt < retryDelaysMs.length) {
+        await new Promise((r) => setTimeout(r, retryDelaysMs[attempt]));
+      }
+    }
+
+    if (lastError && !hasLocal) {
+      appLogger.error(CTX, "Load frames error:", lastError);
+      logError(
+        "frames_load_failed",
+        `No frames on this machine and get_frames failed${state?.referenceId ? ` (txCode: ${state.referenceId})` : ""}: ${lastError}`,
+        undefined,
+        "error",
+      );
+      if (mountedRef.current) setLoadFailed(true);
+    }
+    if (mountedRef.current) setLoading(false);
   };
 
   const handleCountdownComplete = async () => {
@@ -168,6 +224,35 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
               }}
             >
               กำลังโหลด...
+            </div>
+          ) : loadFailed && frames.length === 0 ? (
+            <div
+              style={{
+                color: theme.fontColor,
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "16px",
+                textAlign: "center",
+                padding: "0 40px",
+              }}
+            >
+              <div style={{ fontSize: "22px" }}>โหลดกรอบรูปไม่สำเร็จ</div>
+              <div style={{ fontSize: "16px", opacity: 0.8 }}>
+                Couldn't load frames. Please check the connection and try again.
+              </div>
+              <button
+                onClick={() => {
+                  setLoading(true);
+                  loadFrames();
+                }}
+                className="page-action-btn"
+                style={{ background: theme.primaryColor, color: theme.textButtonColor }}
+              >
+                ลองใหม่ / Try again
+              </button>
             </div>
           ) : (
             <>
@@ -252,7 +337,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                           borderRadius: "5px",
                         }}
                       >
-                        <img
+                        <LocalImage
                           src={(frame.previewUrl || frame.imageUrl) || undefined}
                           alt={frame.name}
                           draggable={false}
@@ -318,7 +403,7 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                       boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
                     }}
                   >
-                    <img
+                    <LocalImage
                       src={selectedFrame.imageUrl || undefined}
                       alt="Selected"
                       style={{
