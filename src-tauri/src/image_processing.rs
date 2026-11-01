@@ -249,9 +249,14 @@ fn forget_failure(url: &str) {
 /// พอเปิดใหม่ memory cache ว่างเปล่า ลูกค้าคนแรกของวันจึงต้องแบกภาระโหลดเฟรม
 /// ผ่านเน็ตเสมอ — ซึ่งเป็นจังหวะที่พังมาแล้วจริง disk cache ทำให้โหลดครั้งเดียว
 /// แล้วใช้ได้ตลอดไป ไม่ต้องพึ่งเน็ตอีกเลย
+///
+/// เก็บรูปตัวอย่างกรอบ (previewUrl), wallpaper ของ theme และรายการกรอบ (frames.json) ไว้ที่นี่ด้วย
 const FRAME_DISK_CACHE_DIR: &str = r"C:\boniobooth\Frames";
-/// เก็บกี่ไฟล์ก่อนเริ่มลบตัวเก่าสุดทิ้ง (กรอบ ~3 MB ต่อไฟล์)
-const FRAME_DISK_CACHE_MAX_FILES: usize = 30;
+/// เก็บกี่ไฟล์ก่อนเริ่มลบตัวเก่าสุดทิ้ง (กรอบ ~3 MB ต่อไฟล์) — ตู้หนึ่งมีทั้งรูปกรอบ,
+/// รูปตัวอย่างกรอบ และ wallpaper ต้องเผื่อให้พอ ไม่งั้นจะลบตัวที่ยังใช้อยู่แล้วโหลดใหม่วนไป
+const FRAME_DISK_CACHE_MAX_FILES: usize = 100;
+/// รายการกรอบจาก backend ครั้งล่าสุดที่ดึงสำเร็จ (ทั้ง response ของ get_frames)
+const FRAME_LIST_FILE: &str = "frames.json";
 /// ไฟล์เก่ากว่านี้ prefetch จะไปโหลดใหม่ทับ เผื่อกรอบถูกแก้โดยใช้ URL เดิม
 const FRAME_DISK_REFRESH_DAYS: u64 = 7;
 
@@ -325,7 +330,7 @@ fn prune_disk_cache() {
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let meta = e.metadata().ok()?;
-            if !meta.is_file() {
+            if !meta.is_file() || e.file_name() == FRAME_LIST_FILE {
                 return None;
             }
             Some((e.path(), meta.modified().ok()?))
@@ -416,6 +421,102 @@ pub async fn prefetch_frame_image(frame_image_url: String) -> Result<u64, String
         Err(e) => {
             log::warn!("[frame_prefetch] failed (ไม่กระทบ flow): {}", e);
             Err(e)
+        }
+    }
+}
+
+/// URL ที่กำลังโหลดลงเครื่องอยู่เบื้องหลัง — กันโหลดไฟล์เดียวกันซ้อนกัน
+/// (หน้าเลือกกรอบขอรูปตัวอย่างทุกกรอบพร้อมกัน และ get_frames ก็สั่งโหลดชุดเดียวกัน)
+static BACKGROUND_DOWNLOADS: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+/// โหลดรูปลงเครื่องเบื้องหลัง ถ้ายังไม่มี — ไม่มีใครรอผล พังก็ลองใหม่รอบหน้าที่มีคนขอ
+fn download_in_background(url: String) {
+    if url.is_empty() || url.starts_with("data:") || frame_cache_path(&url).exists() {
+        return;
+    }
+    let started = BACKGROUND_DOWNLOADS
+        .lock()
+        .map(|mut in_flight| in_flight.insert(url.clone()))
+        .unwrap_or(false);
+    if !started {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = fetch_frame_image_bytes_inner(&url, false).await {
+            log::warn!("[local_image] โหลดลงเครื่องไม่สำเร็จ (จะลองใหม่ครั้งหน้า): {} — {}", url, e);
+        }
+        if let Ok(mut in_flight) = BACKGROUND_DOWNLOADS.lock() {
+            in_flight.remove(&url);
+        }
+    });
+}
+
+/// รูปกรอบ + รูปตัวอย่างกรอบทุกอันในรายการ (response เป็น array หรือ { frames: [...] })
+fn frame_list_image_urls(body: &serde_json::Value) -> Vec<String> {
+    let list = body
+        .as_array()
+        .or_else(|| body.get("frames").and_then(|f| f.as_array()));
+    let Some(list) = list else { return Vec::new() };
+    list.iter()
+        .flat_map(|frame| ["imageUrl", "previewUrl"].map(|key| frame.get(key)))
+        .filter_map(|v| v.and_then(|v| v.as_str()))
+        .filter(|url| !url.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// เก็บรายการกรอบที่ดึงจาก backend ได้ลงเครื่อง แล้วสั่งโหลดรูปของทุกกรอบลงเครื่องเบื้องหลัง
+///
+/// เคส 2026-10-31 ตู้ BACCARAT: เน็ตตู้หลุดตอนลูกค้าจ่ายเงินแล้วเข้าหน้าเลือกกรอบ
+/// get_frames พัง → หน้าเลือกกรอบว่าง ลูกค้าไปต่อไม่ได้ ตอนนี้หน้าเลือกกรอบอ่านจากไฟล์นี้ก่อน
+pub(crate) fn save_frame_list(body: &serde_json::Value) {
+    let urls = frame_list_image_urls(body);
+    if body.as_array().is_none() && body.get("frames").is_none() {
+        log::warn!("[frame_list] response ไม่มีรายการกรอบ — ไม่เก็บทับของเดิม");
+        return;
+    }
+    let dir = Path::new(FRAME_DISK_CACHE_DIR);
+    let path = dir.join(FRAME_LIST_FILE);
+    let tmp = path.with_extension("tmp");
+    let written = fs::create_dir_all(dir)
+        .and_then(|_| fs::write(&tmp, body.to_string()))
+        .and_then(|_| fs::rename(&tmp, &path));
+    if let Err(e) = written {
+        log::warn!("[frame_list] เก็บรายการกรอบลงเครื่องไม่ได้: {}", e);
+        let _ = fs::remove_file(&tmp);
+    }
+    for url in urls {
+        download_in_background(url);
+    }
+}
+
+/// รายการกรอบที่เก็บไว้ในเครื่อง (รูปแบบเดียวกับ data ของ get_frames) — None ถ้ายังไม่เคยดึงสำเร็จ
+#[tauri::command]
+pub fn get_cached_frames() -> Option<serde_json::Value> {
+    let text = fs::read_to_string(Path::new(FRAME_DISK_CACHE_DIR).join(FRAME_LIST_FILE)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// ไบต์ของรูปจาก URL (กรอบ, รูปตัวอย่างกรอบ, wallpaper) จากที่เก็บในเครื่อง
+///
+/// ไม่มีในเครื่อง → error ทันที (หน้าจอใช้ URL เดิมไปก่อน ไม่ต้องรอ) แล้วโหลดลงเครื่องเบื้องหลัง
+/// ให้ครั้งหน้าใช้จากเครื่องได้
+#[tauri::command]
+pub async fn get_local_image(url: String) -> Result<tauri::ipc::Response, String> {
+    if let Some(bytes) = cached_frame(&url) {
+        return Ok(tauri::ipc::Response::new(bytes));
+    }
+    // decode ตรวจไฟล์ใช้เวลา — อย่าบล็อก async runtime
+    let key = url.clone();
+    let on_disk = tauri::async_runtime::spawn_blocking(move || disk_cached_frame(&key))
+        .await
+        .map_err(|e| e.to_string())?;
+    match on_disk {
+        Some(bytes) => Ok(tauri::ipc::Response::new(bytes)),
+        None => {
+            download_in_background(url);
+            Err("not on disk yet".into())
         }
     }
 }
@@ -911,4 +1012,22 @@ pub async fn save_temp_image(
     fs::write(&file_path, &bytes).map_err(|e| format!("Write error: {}", e))?;
 
     Ok(file_path.to_string_lossy().to_string())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_list_image_urls_reads_both_response_shapes() {
+        let frames = serde_json::json!([
+            { "imageUrl": "https://cdn/a.png", "previewUrl": "https://cdn/a-preview.png" },
+            { "imageUrl": "https://cdn/b.png", "previewUrl": "" },
+            { "imageUrl": "https://cdn/c.png" },
+        ]);
+        let expected = ["https://cdn/a.png", "https://cdn/a-preview.png", "https://cdn/b.png", "https://cdn/c.png"];
+
+        assert_eq!(frame_list_image_urls(&frames), expected);
+        assert_eq!(frame_list_image_urls(&serde_json::json!({ "frames": frames })), expected);
+        assert!(frame_list_image_urls(&serde_json::json!({ "message": "Empty response from server" })).is_empty());
+    }
 }

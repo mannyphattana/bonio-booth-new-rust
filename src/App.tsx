@@ -1,5 +1,5 @@
 import { MemoryRouter as Router, Routes, Route, useLocation } from "react-router-dom";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Home from "./pages/Home";
@@ -31,6 +31,7 @@ import { REFETCH_INTERVAL } from "./config/appConfig";
 import { initSession, sendSessionLog } from "./utils/sessionManager";
 import { appLogger } from "./utils/appLogger";
 import { retryPendingUploads } from "./utils/retryUploadManager";
+import { useLocalImage } from "./utils/localImage";
 import "./App.css";
 
 export interface ThemeData {
@@ -108,6 +109,18 @@ function RouteSync({
 function App() {
   const [machineData, setMachineData] = useState<MachineData | null>(null);
   const [themeData, setThemeData] = useState<ThemeData | null>(null);
+  // wallpaper ใช้ไฟล์ในเครื่อง (C:\boniobooth\Frames) แทนการดึงจาก CDN ทุกครั้ง
+  const localBackground = useLocalImage(themeData?.background);
+  const localBackgroundSecond = useLocalImage(themeData?.backgroundSecond);
+  const displayTheme = useMemo(
+    () =>
+      themeData && {
+        ...themeData,
+        background: localBackground,
+        backgroundSecond: localBackgroundSecond,
+      },
+    [themeData, localBackground, localBackgroundSecond],
+  );
   const [isVerified, setIsVerified] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [maintenanceFromBackend, setMaintenanceFromBackend] = useState(false);
@@ -175,6 +188,12 @@ function App() {
               initResult.data.theme || initResult.data.machine.theme,
             );
             setIsVerified(true);
+
+            // ดึงรายการกรอบไว้ตั้งแต่ยังไม่มีลูกค้า — Rust เก็บรายการ + รูปทุกกรอบลงเครื่อง
+            // หน้าเลือกกรอบจะได้ใช้จากเครื่องได้เลย ไม่ต้องรอเน็ตตอนลูกค้าจ่ายเงินแล้ว
+            invoke("get_frames").catch((e) =>
+              appLogger.warn("[App]", `warm frame cache failed: ${e}`),
+            );
 
             if (maintenanceConfig === "network") {
               setMaintenanceConfig(null);
@@ -503,7 +522,7 @@ function App() {
             />
           ) : maintenanceConfig === "paper" ? (
             <OutOfPaper
-              theme={themeData!}
+              theme={displayTheme!}
               lineUrl={lineUrl || ""}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -514,7 +533,7 @@ function App() {
             <Maintenance
               onResolved={handleMaintenanceResolved}
               lineUrl={lineUrl}
-              backgroundSecond={themeData?.backgroundSecond}
+              backgroundSecond={displayTheme?.backgroundSecond}
               isNetworkError={maintenanceConfig === "network"}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -529,7 +548,7 @@ function App() {
           path="/"
           element={
             <Home
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -540,7 +559,7 @@ function App() {
           path="/terms-and-services"
           element={
             <TermsAndServices
-              theme={themeData!}
+              theme={displayTheme!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
             />
@@ -550,7 +569,7 @@ function App() {
           path="/get-help"
           element={
             <GetHelp
-              theme={themeData!}
+              theme={displayTheme!}
               lineUrl={lineUrl || ""}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -562,7 +581,7 @@ function App() {
           path="/payment-selection"
           element={
             <PaymentSelection
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -573,7 +592,7 @@ function App() {
           path="/payment-method"
           element={
             <PaymentMethod
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -584,7 +603,7 @@ function App() {
           path="/coupon-entry"
           element={
             <CouponEntry
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -595,7 +614,7 @@ function App() {
           path="/payment-qr"
           element={
             <PaymentQR
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -606,7 +625,7 @@ function App() {
           path="/frame-selection"
           element={
             <FrameSelection
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -617,7 +636,7 @@ function App() {
           path="/prepare-shooting"
           element={
             <PrepareShooting
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -628,7 +647,7 @@ function App() {
           path="/main-shooting"
           element={
             <MainShooting
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -639,7 +658,7 @@ function App() {
           path="/slot-selection"
           element={
             <SlotSelection
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -650,7 +669,7 @@ function App() {
           path="/apply-filter"
           element={
             <ApplyFilter
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -661,7 +680,7 @@ function App() {
           path="/photo-result"
           element={
             <PhotoResult
-              theme={themeData!}
+              theme={displayTheme!}
               machineData={machineData!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -672,7 +691,7 @@ function App() {
           path="/out-of-paper"
           element={
             <OutOfPaper
-              theme={themeData!}
+              theme={displayTheme!}
               lineUrl={lineUrl || ""}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
@@ -683,7 +702,7 @@ function App() {
           path="/request-image"
           element={
             <RequestImage
-              theme={themeData!}
+              theme={displayTheme!}
               onFormatReset={handleFormatReset}
               onBeforeClose={destroySSE}
             />

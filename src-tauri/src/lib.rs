@@ -631,6 +631,8 @@ pub fn run() {
             image_processing::apply_lut_filter_preview,
             image_processing::compose_frame,
             image_processing::prefetch_frame_image,
+            image_processing::get_cached_frames,
+            image_processing::get_local_image,
             image_processing::save_temp_image,
             // Printer
             printer::get_printers,

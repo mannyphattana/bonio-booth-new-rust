@@ -8,6 +8,7 @@ import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
+import { useLocalImage } from "../utils/localImage";
 
 const CTX = "[SlotSelection]";
 
@@ -27,6 +28,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
   const captures: Capture[] = state.captures || [];
   const selectedFrame: FrameData = state.selectedFrame;
   const slots: FrameSlot[] = selectedFrame?.grid?.slots || [];
+  const frameImageSrc = useLocalImage(selectedFrame?.imageUrl);
 
   const getFrameDimensions = () => {
     if (selectedFrame?.imageSize) {
@@ -347,7 +349,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                   <img
                     key={`frame-${copyIdx}`}
                     ref={copyIdx === 0 ? frameImgRef : undefined}
-                    src={selectedFrame.imageUrl}
+                    src={frameImageSrc || undefined}
                     alt=""
                     onLoad={copyIdx === 0 ? calculateScaleFactor : undefined}
                     style={{
