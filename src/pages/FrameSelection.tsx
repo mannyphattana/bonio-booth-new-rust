@@ -9,13 +9,9 @@ import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import LocalImage from "../components/LocalImage";
+import { toFrameList } from "../utils/frames";
 
 const CTX = "[FrameSelection]";
-
-/** data ของ get_frames / get_cached_frames เป็นได้ทั้ง array และ { frames: [...] } */
-function toFrameList(data: any): FrameData[] {
-  return Array.isArray(data) ? data : data?.frames || [];
-}
 
 interface Props {
   theme: ThemeData;
@@ -341,6 +337,11 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
                           src={(frame.previewUrl || frame.imageUrl) || undefined}
                           alt={frame.name}
                           draggable={false}
+                          placeholderWidth={
+                            frame.grid?.width && frame.grid?.height
+                              ? (128 * frame.grid.width) / frame.grid.height
+                              : 90
+                          }
                           style={{
                             height: "128px",
                             width: "auto",
