@@ -894,6 +894,7 @@ pub async fn save_temp_image(
 ) -> Result<String, String> {
     let temp_dir = std::env::temp_dir().join("bonio-booth");
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Create temp dir error: {}", e))?;
+    crate::video::prune_stale_upload_files(&temp_dir, "upload-");
 
     let file_path = temp_dir.join(&filename);
 
