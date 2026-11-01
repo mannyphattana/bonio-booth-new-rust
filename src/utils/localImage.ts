@@ -6,14 +6,24 @@
  * (Rust โหลดลงเครื่องเบื้องหลังให้ ครั้งหน้าก็มี)
  */
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { appLogger } from "./appLogger";
 
-/** URL → blob URL ของไฟล์ในเครื่อง (อยู่ได้ตลอดอายุแอป ใช้ข้ามหน้าได้) */
+/** URL → src ของไฟล์ในเครื่อง (asset protocol) ที่เปิดเป็นรูปได้จริงแล้ว ใช้ข้ามหน้าได้ */
 const resolved = new Map<string, string>();
 const pending = new Map<string, Promise<string>>();
 
 function needsLookup(url: string): boolean {
   return /^https?:\/\//.test(url);
+}
+
+function canDisplay(src: string): Promise<boolean> {
+  return new Promise((done) => {
+    const img = new Image();
+    img.onload = () => done(true);
+    img.onerror = () => done(false);
+    img.src = src;
+  });
 }
 
 /** src ที่ใช้แสดงผลได้ทันที: ไฟล์ในเครื่องถ้ามี ไม่งั้น URL เดิม */
@@ -24,9 +34,14 @@ export function localImageSrc(url: string | null | undefined): Promise<string> {
 
   let p = pending.get(url);
   if (!p) {
-    p = invoke<ArrayBuffer>("get_local_image", { url })
-      .then((buf) => {
-        const src = URL.createObjectURL(new Blob([buf]));
+    p = invoke<string>("get_local_image", { url })
+      .then(async (path) => {
+        const src = convertFileSrc(path);
+        // เปิดไม่ขึ้นก็ต้องไม่ทำให้จอว่าง — กลับไปใช้ URL เดิม (เคส v2.5.18)
+        if (!(await canDisplay(src))) {
+          appLogger.warn("[localImage]", `Local copy won't display, using URL: ${url}`);
+          return url;
+        }
         resolved.set(url, src);
         return src;
       })
