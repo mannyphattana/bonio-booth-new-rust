@@ -498,26 +498,25 @@ pub fn get_cached_frames() -> Option<serde_json::Value> {
     serde_json::from_str(&text).ok()
 }
 
-/// ไบต์ของรูปจาก URL (กรอบ, รูปตัวอย่างกรอบ, wallpaper) จากที่เก็บในเครื่อง
+/// path ในเครื่องของรูปจาก URL (กรอบ, รูปตัวอย่างกรอบ, wallpaper) ให้หน้าจอเปิดผ่าน asset protocol
+///
+/// คืน path ไม่ใช่ไบต์: CSP ของแอปทำให้ IPC ใช้ postMessage ไบต์จะมาถึง JS เป็น array ตัวเลข
+/// (ไฟล์ 3 MB กลายเป็น JSON ~10 MB) แล้ว Blob ที่สร้างจากมันไม่ใช่รูป — เคส v2.5.18
 ///
 /// ไม่มีในเครื่อง → error ทันที (หน้าจอใช้ URL เดิมไปก่อน ไม่ต้องรอ) แล้วโหลดลงเครื่องเบื้องหลัง
 /// ให้ครั้งหน้าใช้จากเครื่องได้
 #[tauri::command]
-pub async fn get_local_image(url: String) -> Result<tauri::ipc::Response, String> {
-    if let Some(bytes) = cached_frame(&url) {
-        return Ok(tauri::ipc::Response::new(bytes));
-    }
+pub async fn get_local_image(url: String) -> Result<String, String> {
     // decode ตรวจไฟล์ใช้เวลา — อย่าบล็อก async runtime
     let key = url.clone();
-    let on_disk = tauri::async_runtime::spawn_blocking(move || disk_cached_frame(&key))
+    let on_disk = tauri::async_runtime::spawn_blocking(move || disk_cached_frame(&key).is_some())
         .await
         .map_err(|e| e.to_string())?;
-    match on_disk {
-        Some(bytes) => Ok(tauri::ipc::Response::new(bytes)),
-        None => {
-            download_in_background(url);
-            Err("not on disk yet".into())
-        }
+    if on_disk {
+        Ok(frame_cache_path(&url).to_string_lossy().to_string())
+    } else {
+        download_in_background(url);
+        Err("not on disk yet".into())
     }
 }
 
