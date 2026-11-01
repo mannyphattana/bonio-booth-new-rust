@@ -22,14 +22,23 @@ import {
   incrementRetryCount,
   isUploadActive,
   addPendingUpload,
+  MAX_RETRY_COUNT,
   type PendingUploadRecord,
   type PendingUploadFile,
 } from "./pendingUploadStore";
 
 const CTX = "[RetryUpload]";
 
-/** ป้องกัน concurrent retry runs */
-let _isRetrying = false;
+/**
+ * รอบ retry ที่กำลังรันอยู่ — ป้องกัน concurrent retry runs
+ * คนที่เรียกระหว่างนั้นจะได้ promise ตัวเดียวกันไปรอ (รอบนี้หยิบ record ที่เพิ่งเข้าคิวไปทำด้วย)
+ */
+let _currentRun: Promise<void> | null = null;
+
+/** ยิงไฟล์เดียวไม่ขึ้น → ลองซ้ำทันทีอีกกี่ครั้ง (presign URL อยู่ได้ 30 นาที ใช้ซ้ำได้) */
+const FILE_RETRY_DELAYS_MS = [2000, 5000];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * ตรวจสอบว่าไฟล์มีอยู่บน disk หรือเปล่า
@@ -132,58 +141,39 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
   const photoFiles = availableFiles.filter((f) => f.type !== "video");
   const videoFiles = availableFiles.filter((f) => f.type === "video");
 
+  const jobs = [
+    ...photoFiles.slice(0, photoUrls.length).map((file, i) => ({ file, urlInfo: photoUrls[i], type: "photo" })),
+    ...videoFiles.slice(0, videoUrls.length).map((file, i) => ({ file, urlInfo: videoUrls[i], type: "video" })),
+  ];
+
   const uploadedFiles: { key: string; type: string; order: number }[] = [];
+  const failedFiles: PendingUploadFile[] = [];
 
-  // 5. Upload photo files
-  for (let i = 0; i < photoFiles.length && i < photoUrls.length; i++) {
-    const file = photoFiles[i];
-    const urlInfo = photoUrls[i];
-    try {
-      await invoke("upload_to_presigned_url", {
-        url: urlInfo.uploadUrl,
-        filePath: file.localPath,
-        contentType: file.contentType,
-      });
-      uploadedFiles.push({
-        key: urlInfo.key,
-        type: "photo",
-        order: urlInfo.order,
-      });
-      appLogger.info(
-        CTX,
-        `Uploaded ${file.type} OK — key=${urlInfo.key}`
-      );
-    } catch (err) {
-      appLogger.error(
-        CTX,
-        `Upload ${file.type} failed (path=${file.localPath}):`,
-        err
-      );
-    }
-  }
-
-  // 6. Upload video file
-  for (let i = 0; i < videoFiles.length && i < videoUrls.length; i++) {
-    const file = videoFiles[i];
-    const urlInfo = videoUrls[i];
-    try {
-      await invoke("upload_to_presigned_url", {
-        url: urlInfo.uploadUrl,
-        filePath: file.localPath,
-        contentType: file.contentType,
-      });
-      uploadedFiles.push({
-        key: urlInfo.key,
-        type: "video",
-        order: urlInfo.order,
-      });
-      appLogger.info(CTX, `Uploaded video OK — key=${urlInfo.key}`);
-    } catch (err) {
-      appLogger.error(
-        CTX,
-        `Upload video failed (path=${file.localPath}):`,
-        err
-      );
+  // 5. Upload ทีละไฟล์ (รูปก่อน วิดีโอทีหลัง) — เน็ตหลุดมักแค่ไม่กี่วินาที เลยลองซ้ำทันทีก่อนยอมแพ้
+  for (const { file, urlInfo, type } of jobs) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await invoke("upload_to_presigned_url", {
+          url: urlInfo.uploadUrl,
+          filePath: file.localPath,
+          contentType: file.contentType,
+        });
+        uploadedFiles.push({ key: urlInfo.key, type, order: urlInfo.order });
+        appLogger.info(CTX, `Uploaded ${file.type} OK — key=${urlInfo.key}`);
+        break;
+      } catch (err) {
+        const delay = FILE_RETRY_DELAYS_MS[attempt];
+        appLogger.error(
+          CTX,
+          `Upload ${file.type} failed (path=${file.localPath}, attempt ${attempt + 1}):`,
+          err
+        );
+        if (delay === undefined) {
+          failedFiles.push(file);
+          break;
+        }
+        await sleep(delay);
+      }
     }
   }
 
@@ -193,6 +183,23 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       `No files uploaded for txId=${record.txId}`
     );
     return false;
+  }
+
+  // 6. ขาดไฟล์ → ยังไม่ confirm ให้รอบหน้ายิงใหม่ทั้งชุด
+  // confirm ไปตอนนี้ backend จะเรียงลำดับใหม่จากไฟล์ที่มี (รูปเฟรมหาย = รูปดิบใบแรกขึ้นเป็นรูปหลัก)
+  // แล้ว record ถูกลบจากคิว ไม่มีใครยิงไฟล์ที่ขาดอีกเลย
+  // ยกเว้นรอบสุดท้าย: confirm เท่าที่มีดีกว่าไม่มีอะไรให้ลูกค้าเลย ถ้ารูปเฟรม (ใบแรก) ขึ้นแล้ว
+  if (failedFiles.length > 0) {
+    const isLastAttempt = record.retryCount + 1 >= MAX_RETRY_COUNT;
+    const frameUploaded = photoFiles.length > 0 && !failedFiles.includes(photoFiles[0]);
+    appLogger.warn(
+      CTX,
+      `${failedFiles.length}/${jobs.length} file(s) still failing for txId=${record.txId}: ${failedFiles.map((f) => f.localPath).join(", ")}`
+    );
+    if (!isLastAttempt || !frameUploaded) {
+      return false;
+    }
+    appLogger.warn(CTX, `Last attempt for txId=${record.txId} — confirming the files that did upload`);
   }
 
   // 7. Confirm upload
@@ -218,51 +225,63 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
 
 /**
  * Main entry point — เรียกจาก App.tsx เป็น background task
- * idempotent: ถ้ามี retry อยู่แล้วจะ skip
+ * idempotent: ถ้ามีรอบที่รันอยู่แล้ว จะคืน promise ของรอบนั้นแทนการเริ่มรอบใหม่
  */
-export async function retryPendingUploads(): Promise<void> {
-  if (_isRetrying) {
-    appLogger.info(CTX, "Already retrying — skipping");
-    return;
+export function retryPendingUploads(): Promise<void> {
+  if (_currentRun) {
+    appLogger.info(CTX, "Already retrying — new records will be picked up by the current cycle");
+    return _currentRun;
   }
 
-  const pending = getRetryablePending();
-  if (pending.length === 0) {
-    return;
-  }
+  _currentRun = runRetryCycle().finally(() => {
+    _currentRun = null;
+  });
+  return _currentRun;
+}
 
-  _isRetrying = true;
-  appLogger.info(CTX, `Starting retry cycle — ${pending.length} pending record(s)`);
+async function runRetryCycle(): Promise<void> {
+  // txId ที่รอบนี้หยิบไปแล้ว — กันการยิง record เดิมซ้ำในรอบเดียว
+  const attempted = new Set<string>();
+  let started = false;
 
-  try {
-    for (const record of pending) {
-      // ข้าม record ที่กำลังอัพโหลดสดอยู่ในหน้า PhotoResult
-      // ป้องกันการอัพซ้ำจากการชนกันระหว่าง upload ปกติกับ retry cycle
-      if (isUploadActive(record.txId)) {
-        appLogger.info(
-          CTX,
-          `Skipping txId=${record.txId} — upload currently in-flight`
-        );
-        continue;
-      }
+  // อ่านคิวใหม่ทุกครั้งที่ทำเสร็จหนึ่ง record: dashboard กด Re-upload หลายอันติดกัน
+  // อันที่เข้ามาระหว่างรอบจะได้ทำต่อเลย ไม่ต้องรอรอบ 10 นาที
+  for (;;) {
+    const record = getRetryablePending().find((r) => !attempted.has(r.txId));
+    if (!record) break;
+    attempted.add(record.txId);
 
-      const success = await retryOneRecord(record);
-      if (success) {
-        removePendingUpload(record.txId);
-        appLogger.info(CTX, `✅ Retry success — removed txId=${record.txId}`);
-      } else {
-        incrementRetryCount(record.txId);
-        appLogger.warn(
-          CTX,
-          `Retry failed — txId=${record.txId} retryCount now ${record.retryCount + 1}`
-        );
-      }
+    if (!started) {
+      started = true;
+      appLogger.info(CTX, "Starting retry cycle");
     }
-  } finally {
-    _isRetrying = false;
+
+    // ข้าม record ที่กำลังอัพโหลดสดอยู่ในหน้า PhotoResult
+    // ป้องกันการอัพซ้ำจากการชนกันระหว่าง upload ปกติกับ retry cycle
+    if (isUploadActive(record.txId)) {
+      appLogger.info(
+        CTX,
+        `Skipping txId=${record.txId} — upload currently in-flight`
+      );
+      continue;
+    }
+
+    const success = await retryOneRecord(record);
+    if (success) {
+      removePendingUpload(record.txId);
+      appLogger.info(CTX, `✅ Retry success — removed txId=${record.txId}`);
+    } else {
+      incrementRetryCount(record.txId);
+      appLogger.warn(
+        CTX,
+        `Retry failed — txId=${record.txId} retryCount now ${record.retryCount + 1}`
+      );
+    }
   }
 
-  appLogger.info(CTX, "Retry cycle complete");
+  if (started) {
+    appLogger.info(CTX, `Retry cycle complete — ${attempted.size} record(s)`);
+  }
 }
 
 /**
@@ -326,8 +345,13 @@ export async function reuploadTransactionFromDisk(
     `Queued re-upload for ${txId} — ${record.files.length} file(s) found on disk`,
   );
 
-  // ยิงรอบ retry ทันที (ตัว guard ภายในกันการรันซ้อนอยู่แล้ว)
+  // ยิงรอบ retry ทันที — ถ้ามีรอบรันอยู่ รอบนั้นจะหยิบ record นี้ไปทำต่อเอง
   await retryPendingUploads();
+  // แต่ถ้ารอบนั้นทำ tx นี้ไปแล้วก่อนที่เราจะเพิ่ม record ใหม่ (กดซ้ำระหว่างรอบ)
+  // record ใหม่จะยังไม่ถูกแตะ (retryCount ยังเป็น 0) → เริ่มอีกรอบให้
+  if (getRetryablePending().some((r) => r.txId === txId && r.retryCount === 0)) {
+    await retryPendingUploads();
+  }
 
   const stillPending = getRetryablePending().some((r) => r.txId === txId);
   return stillPending
