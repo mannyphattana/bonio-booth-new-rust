@@ -535,6 +535,164 @@ fn loop_clip_without_head(frames: u64, duration: f64) -> String {
     )
 }
 
+/// ตำแหน่งและขนาดของคลิปบนวิดีโอ สำหรับช่องรูปหนึ่งช่อง
+struct SlotVideoLayout {
+    /// ขนาดที่ scale+crop คลิปให้พอดีช่อง (เลขคู่)
+    clip_w: i64,
+    clip_h: i64,
+    /// มุมซ้ายบนตอน overlay (เลขคู่) — ถ้าช่องเอียงคือมุมของกล่องหลังหมุนแล้ว
+    overlay_x: i64,
+    overlay_y: i64,
+    /// filter หมุนคลิป ต่อท้าย chain ของคลิป — ว่างถ้าช่องไม่เอียง
+    rotate_filter: String,
+}
+
+fn slot_video_layout(slot: &serde_json::Value, scale_x: f64, scale_y: f64) -> SlotVideoLayout {
+    let value = |key: &str, default: f64| slot.get(key).and_then(|v| v.as_f64()).unwrap_or(default);
+    let x = value("x", 0.0) * scale_x;
+    let y = value("y", 0.0) * scale_y;
+    let width = value("width", 100.0) * scale_x;
+    let height = value("height", 100.0) * scale_y;
+
+    let orig_sx = x.floor() as i64;
+    let orig_sy = y.floor() as i64;
+    let orig_sw = width.ceil() as i64;
+    let orig_sh = height.ceil() as i64;
+
+    let mut sx = orig_sx;
+    let mut sy = orig_sy;
+    if sx % 2 != 0 { sx -= 1; }
+    if sy % 2 != 0 { sy -= 1; }
+
+    let mut sw = orig_sx + orig_sw - sx;
+    let mut sh = orig_sy + orig_sh - sy;
+    if sw % 2 != 0 { sw += 1; }
+    if sh % 2 != 0 { sh += 1; }
+
+    // เกณฑ์เดียวกับ draw_photo_in_slot ฝั่งภาพนิ่ง
+    let rotate = value("rotate", 0.0);
+    if rotate.abs() <= 0.1 {
+        return SlotVideoLayout {
+            clip_w: sw,
+            clip_h: sh,
+            overlay_x: sx,
+            overlay_y: sy,
+            rotate_filter: String::new(),
+        };
+    }
+
+    // หมุนตามเข็มนาฬิการอบกลางช่อง เหมือน draw_photo_in_slot และ CSS rotate() ของ dashboard
+    // กล่องหลังหมุนใหญ่กว่าเดิม จึงคิดมุมซ้ายบนจากจุดกลางช่อง ให้กลางช่องอยู่ที่เดิมตรงกับภาพนิ่ง
+    let radians = rotate.to_radians();
+    let (sin_a, cos_a) = (radians.sin().abs(), radians.cos().abs());
+    let even_up = |v: f64| { let v = v.ceil() as i64; v + v % 2 };
+    let rot_w = even_up(sw as f64 * cos_a + sh as f64 * sin_a);
+    let rot_h = even_up(sw as f64 * sin_a + sh as f64 * cos_a);
+    let nearest_even = |v: f64| (v / 2.0).round() as i64 * 2;
+
+    SlotVideoLayout {
+        clip_w: sw,
+        clip_h: sh,
+        overlay_x: nearest_even(x + width / 2.0 - rot_w as f64 / 2.0),
+        overlay_y: nearest_even(y + height / 2.0 - rot_h as f64 / 2.0),
+        // ต้องเป็น black@0 ไม่ใช่ none — none คือไม่เติมมุมเลย มุมจะเป็นค่าค้างใน buffer ไม่ใช่โปร่งใส
+        rotate_filter: format!(",rotate=a={:.6}:ow={}:oh={}:c=black@0", radians, rot_w, rot_h),
+    }
+}
+
+/// สร้าง -filter_complex ของ compose_frame_video คืน (filter, label ของ stream สุดท้าย)
+///
+/// `clip_prefixes` คือ filter ต้น chain ของแต่ละคลิป (ดู loop_clip_without_head) จำนวนเท่ากับคลิปที่ใช้
+fn build_frame_video_filter(
+    slots: &[serde_json::Value],
+    clip_prefixes: &[String],
+    hflip: bool,
+    lut_filename: Option<&str>,
+    (out_w, out_h): (u32, u32),
+    (scale_x, scale_y): (f64, f64),
+    frame_ratio: f64,
+) -> (String, String) {
+    let num_videos = clip_prefixes.len();
+    let layouts: Vec<SlotVideoLayout> = slots[..num_videos]
+        .iter()
+        .map(|slot| slot_video_layout(slot, scale_x, scale_y))
+        .collect();
+
+    let mut filter_parts: Vec<String> = Vec::new();
+
+    for i in 0..num_videos {
+        let layout = &layouts[i];
+        let hflip_prefix = if hflip { "hflip," } else { "" };
+        let mut chain = format!(
+            "[{}:v]{}trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
+            i, clip_prefixes[i], hflip_prefix, layout.clip_w+2, layout.clip_h+2, layout.clip_w, layout.clip_h
+        );
+        if let Some(lut_fn) = lut_filename {
+            chain.push_str(&format!(",lut3d={}", lut_fn));
+        }
+        chain.push_str(&format!(",format=rgba{}[v{}]", layout.rotate_filter, i));
+        filter_parts.push(chain);
+    }
+
+    // Use lanczos for the frame overlay so its text/logo edges stay crisp when scaled.
+    filter_parts.push(format!(
+        "[{}:v]format=rgba,scale={}:{}:flags=lanczos+accurate_rnd+full_chroma_int[frame_img]",
+        num_videos, out_w, out_h
+    ));
+
+    filter_parts.push(format!("color=c=white:s={}x{}:d=9:r=30,format=rgba[bg]", out_w, out_h));
+
+    let mut prev = "bg".to_string();
+
+    for i in 0..num_videos {
+        let z_index = slots[i].get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
+        if z_index < 0 {
+            let out = format!("b{}", i);
+            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat:format=auto[{}]", prev, i, layouts[i].overlay_x, layouts[i].overlay_y, out));
+            prev = out;
+        }
+    }
+
+    filter_parts.push(format!("[{}][frame_img]overlay=0:0:eof_action=repeat:format=auto[af]", prev));
+    prev = "af".to_string();
+
+    for i in 0..num_videos {
+        let z_index = slots[i].get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
+        if z_index >= 0 {
+            let out = format!("f{}", i);
+            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat:format=auto[{}]", prev, i, layouts[i].overlay_x, layouts[i].overlay_y, out));
+            prev = out;
+        }
+    }
+
+    // 2x6/6x2 -> 4x6 duplicate: เหมือนกับ compose_frame ฝั่งภาพนิ่ง (image_processing.rs)
+    // หลังรวม element ทั้งหมดในเฟรมแล้ว (stream `prev`) split ตัวเองเป็น 2 แล้ว
+    // hstack (2x6, สูงแคบ) หรือ vstack (6x2, กว้าง) เพื่อให้ output วิดีโอ/GIF เป็น
+    // layout 4x6 duplicate ตรงกับภาพนิ่งจาก compose_frame. เกณฑ์ตัดสินเดียวกันทุกจุด:
+    // ratio < 0.5 -> 2x6, ratio > 2.0 -> 6x2, อื่นๆ ไม่แตะ.
+    // หมายเหตุ: `frame_ratio`/`will_duplicate` คำนวณไว้ตั้งแต่ต้นฟังก์ชันแล้ว เพราะขนาด
+    // base (out_w/out_h) ต้องถูกหารครึ่งล่วงหน้าให้ผลลัพธ์หลัง stack ไม่เกินเพดาน iOS
+    if frame_ratio < 0.5 {
+        // 2x6 (สูงแคบ) -> hstack ซ้าย-ขวา เป็น 4x6
+        filter_parts.push(format!("[{}]split=2[dupL][dupR]", prev));
+        filter_parts.push("[dupL][dupR]hstack=inputs=2[dup]".to_string());
+        prev = "dup".to_string();
+    } else if frame_ratio > 2.0 {
+        // 6x2 (กว้าง) -> vstack บน-ล่าง เป็น 4x6
+        filter_parts.push(format!("[{}]split=2[dupT][dupB]", prev));
+        filter_parts.push("[dupT][dupB]vstack=inputs=2[dup]".to_string());
+        prev = "dup".to_string();
+    }
+
+    let final_label = format!("{}out", prev);
+    filter_parts.push(format!(
+        "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[{}]",
+        prev, final_label
+    ));
+
+    (filter_parts.join(";"), final_label)
+}
+
 /// Compose multiple videos into a single framed video using a SINGLE FFmpeg call.
 #[tauri::command]
 pub async fn compose_frame_video(
@@ -611,115 +769,24 @@ pub async fn compose_frame_video(
     }
     final_args.extend(vec!["-i".to_string(), frame_path.to_string_lossy().to_string()]);
 
-    let mut filter_parts: Vec<String> = Vec::new();
+    let clip_prefixes: Vec<String> = video_paths[..num_videos]
+        .iter()
+        .map(|path| {
+            probe_clip(path)
+                .map(|(frames, duration)| loop_clip_without_head(frames, duration))
+                .unwrap_or_else(|| "fps=30,".to_string())
+        })
+        .collect();
 
-    for i in 0..num_videos {
-        let slot = &slots[i];
-        let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
-        let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
-        let orig_sw = (slot.get("width").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_x).ceil() as i64;
-        let orig_sh = (slot.get("height").and_then(|v| v.as_f64()).unwrap_or(100.0) * scale_y).ceil() as i64;
-
-        let mut sx = orig_sx;
-        let mut sy = orig_sy;
-        if sx % 2 != 0 { sx -= 1; }
-        if sy % 2 != 0 { sy -= 1; }
-
-        let mut sw = orig_sx + orig_sw - sx;
-        let mut sh = orig_sy + orig_sh - sy;
-        if sw % 2 != 0 { sw += 1; }
-        if sh % 2 != 0 { sh += 1; }
-
-        let hflip_prefix = if hflip_video.unwrap_or(false) { "hflip," } else { "" };
-        let loop_prefix = probe_clip(&video_paths[i])
-            .map(|(frames, duration)| loop_clip_without_head(frames, duration))
-            .unwrap_or_else(|| "fps=30,".to_string());
-        let mut chain = format!(
-            "[{}:v]{}trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
-            i, loop_prefix, hflip_prefix, sw+2, sh+2, sw, sh
-        );
-        if let Some(ref lut_fn) = lut_filename {
-            chain.push_str(&format!(",lut3d={}", lut_fn));
-        }
-        chain.push_str(&format!(",format=rgba[v{}]", i));
-        filter_parts.push(chain);
-    }
-
-    // Use lanczos for the frame overlay so its text/logo edges stay crisp when scaled.
-    filter_parts.push(format!(
-        "[{}:v]format=rgba,scale={}:{}:flags=lanczos+accurate_rnd+full_chroma_int[frame_img]",
-        num_videos, out_w, out_h
-    ));
-
-    filter_parts.push(format!("color=c=white:s={}x{}:d=9:r=30,format=rgba[bg]", out_w, out_h));
-
-    let mut prev = "bg".to_string();
-
-    for i in 0..num_videos {
-        let slot = &slots[i];
-        let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
-        let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
-
-        let mut sx = orig_sx;
-        let mut sy = orig_sy;
-        if sx % 2 != 0 { sx -= 1; }
-        if sy % 2 != 0 { sy -= 1; }
-
-        let z_index = slot.get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
-        if z_index < 0 {
-            let out = format!("b{}", i);
-            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat:format=auto[{}]", prev, i, sx, sy, out));
-            prev = out;
-        }
-    }
-
-    filter_parts.push(format!("[{}][frame_img]overlay=0:0:eof_action=repeat:format=auto[af]", prev));
-    prev = "af".to_string();
-
-    for i in 0..num_videos {
-        let slot = &slots[i];
-        let orig_sx = (slot.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_x).floor() as i64;
-        let orig_sy = (slot.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) * scale_y).floor() as i64;
-
-        let mut sx = orig_sx;
-        let mut sy = orig_sy;
-        if sx % 2 != 0 { sx -= 1; }
-        if sy % 2 != 0 { sy -= 1; }
-
-        let z_index = slot.get("zIndex").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
-        if z_index >= 0 {
-            let out = format!("f{}", i);
-            filter_parts.push(format!("[{}][v{}]overlay={}:{}:eof_action=repeat:format=auto[{}]", prev, i, sx, sy, out));
-            prev = out;
-        }
-    }
-
-    // 2x6/6x2 -> 4x6 duplicate: เหมือนกับ compose_frame ฝั่งภาพนิ่ง (image_processing.rs)
-    // หลังรวม element ทั้งหมดในเฟรมแล้ว (stream `prev`) split ตัวเองเป็น 2 แล้ว
-    // hstack (2x6, สูงแคบ) หรือ vstack (6x2, กว้าง) เพื่อให้ output วิดีโอ/GIF เป็น
-    // layout 4x6 duplicate ตรงกับภาพนิ่งจาก compose_frame. เกณฑ์ตัดสินเดียวกันทุกจุด:
-    // ratio < 0.5 -> 2x6, ratio > 2.0 -> 6x2, อื่นๆ ไม่แตะ.
-    // หมายเหตุ: `frame_ratio`/`will_duplicate` คำนวณไว้ตั้งแต่ต้นฟังก์ชันแล้ว เพราะขนาด
-    // base (out_w/out_h) ต้องถูกหารครึ่งล่วงหน้าให้ผลลัพธ์หลัง stack ไม่เกินเพดาน iOS
-    if frame_ratio < 0.5 {
-        // 2x6 (สูงแคบ) -> hstack ซ้าย-ขวา เป็น 4x6
-        filter_parts.push(format!("[{}]split=2[dupL][dupR]", prev));
-        filter_parts.push("[dupL][dupR]hstack=inputs=2[dup]".to_string());
-        prev = "dup".to_string();
-    } else if frame_ratio > 2.0 {
-        // 6x2 (กว้าง) -> vstack บน-ล่าง เป็น 4x6
-        filter_parts.push(format!("[{}]split=2[dupT][dupB]", prev));
-        filter_parts.push("[dupT][dupB]vstack=inputs=2[dup]".to_string());
-        prev = "dup".to_string();
-    }
-
-    let final_label = format!("{}out", prev);
-    filter_parts.push(format!(
-        "[{}]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[{}]",
-        prev, final_label
-    ));
-
-    let filter_complex = filter_parts.join(";");
+    let (filter_complex, final_label) = build_frame_video_filter(
+        &slots,
+        &clip_prefixes,
+        hflip_video.unwrap_or(false),
+        lut_filename.as_deref(),
+        (out_w, out_h),
+        (scale_x, scale_y),
+        frame_ratio,
+    );
     println!("[compose_frame_video] filter: {}", filter_complex);
 
     final_args.extend(vec![
@@ -946,6 +1013,71 @@ mod tests {
         let filter = loop_clip_without_head(55, 2.92);
         assert!(filter.starts_with(r"select='gte(mod(n\,55)\,7)'"), "{}", filter);
         assert!(filter.ends_with("fps=30,"), "{}", filter);
+    }
+
+    /// filter ของ fixture นี้ก่อนรองรับ rotate จับมาจากการรันโค้ดเดิมจริง — ช่องไม่เอียงต้องได้ตัวเดียวกันเป๊ะ
+    const STRAIGHT_FILTER: &str = "[0:v]fps=30,trim=duration=9,setpts=PTS-STARTPTS,scale=580:868:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop=578:866,format=rgb24,format=rgba[v0];[1:v]fps=30,trim=duration=9,setpts=PTS-STARTPTS,scale=578:866:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop=576:864,format=rgb24,format=rgba[v1];[2:v]format=rgba,scale=1440:2160:flags=lanczos+accurate_rnd+full_chroma_int[frame_img];color=c=white:s=1440x2160:d=9:r=30,format=rgba[bg];[bg][v0]overlay=120:116:eof_action=repeat:format=auto[b0];[b0][frame_img]overlay=0:0:eof_action=repeat:format=auto[af];[af][v1]overlay=768:1080:eof_action=repeat:format=auto[f1];[f1]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[f1out]";
+
+    fn filter_for(slots: &[serde_json::Value]) -> String {
+        let prefixes = vec!["fps=30,".to_string(); slots.len()];
+        let (filter, label) =
+            build_frame_video_filter(slots, &prefixes, false, None, (1440, 2160), (1.2, 1.2), 2.0 / 3.0);
+        assert_eq!(label, "f1out");
+        filter
+    }
+
+    fn two_slots(under_rotate: serde_json::Value, over_rotate: serde_json::Value) -> Vec<serde_json::Value> {
+        let mut under = serde_json::json!({"x": 101.3, "y": 97.7, "width": 480.5, "height": 720.2, "zIndex": -1});
+        let mut over = serde_json::json!({"x": 640, "y": 900, "width": 480, "height": 720, "zIndex": 1});
+        if !under_rotate.is_null() { under["rotate"] = under_rotate; }
+        if !over_rotate.is_null() { over["rotate"] = over_rotate; }
+        vec![under, over]
+    }
+
+    #[test]
+    fn straight_slots_keep_the_original_filter() {
+        // ไม่มี field, ค่า 0, และเอียงไม่เกินเกณฑ์ที่ภาพนิ่งใช้ ต้องไม่มีการหมุน
+        for (a, b) in [
+            (serde_json::Value::Null, serde_json::Value::Null),
+            (serde_json::json!(0), serde_json::json!(0.0)),
+            (serde_json::json!(0.05), serde_json::json!(-0.1)),
+        ] {
+            assert_eq!(filter_for(&two_slots(a, b)), STRAIGHT_FILTER);
+        }
+    }
+
+    #[test]
+    fn tilted_slots_rotate_with_transparent_corners() {
+        let filter = filter_for(&two_slots(serde_json::json!(8), serde_json::json!(-12)));
+
+        // หมุนหลัง format=rgba มุมโปร่งใส ทิศตามเข็มนาฬิกาเป็นบวก
+        assert!(filter.contains("crop=578:866,format=rgb24,format=rgba,rotate=a=0.139626:ow=694:oh=940:c=black@0[v0]"), "{}", filter);
+        assert!(filter.contains("crop=576:864,format=rgb24,format=rgba,rotate=a=-0.209440:ow=744:oh=966:c=black@0[v1]"), "{}", filter);
+
+        // กลางช่องยังอยู่ที่เดิม (ตำแหน่งเป็นเลขคู่) และ z-index ยังคุมลำดับใต้/บนกรอบ
+        let under = filter.find("[bg][v0]overlay=62:80:").expect(&filter);
+        let frame = filter.find("[b0][frame_img]overlay=0:0:").expect(&filter);
+        let over = filter.find("[af][v1]overlay=684:1030:").expect(&filter);
+        assert!(under < frame && frame < over, "{}", filter);
+    }
+
+    #[test]
+    fn tilted_layout_keeps_slot_centre_and_even_values() {
+        for rotate in [-45.0, -12.0, 8.0, 15.0, 90.0, 180.0, 359.0] {
+            let slot = serde_json::json!({"x": -40.7, "y": 33.3, "width": 480, "height": 721, "rotate": rotate});
+            let l = slot_video_layout(&slot, 1.2, 1.2);
+            let args = l.rotate_filter.trim_start_matches(",rotate=").split(':').collect::<Vec<_>>();
+            let rot_w: i64 = args[1].trim_start_matches("ow=").parse().unwrap();
+            let rot_h: i64 = args[2].trim_start_matches("oh=").parse().unwrap();
+
+            for v in [l.clip_w, l.clip_h, l.overlay_x, l.overlay_y, rot_w, rot_h] {
+                assert_eq!(v % 2, 0, "rotate {}: {}", rotate, v);
+            }
+            let centre_x = l.overlay_x as f64 + rot_w as f64 / 2.0;
+            let centre_y = l.overlay_y as f64 + rot_h as f64 / 2.0;
+            assert!((centre_x - (-40.7 + 240.0) * 1.2).abs() <= 1.0, "rotate {}: {}", rotate, centre_x);
+            assert!((centre_y - (33.3 + 360.5) * 1.2).abs() <= 1.0, "rotate {}: {}", rotate, centre_y);
+        }
     }
 
     #[test]
