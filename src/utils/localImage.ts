@@ -40,6 +40,7 @@ export function localImageSrc(url: string | null | undefined): Promise<string> {
         // เปิดไม่ขึ้นก็ต้องไม่ทำให้จอว่าง — กลับไปใช้ URL เดิม (เคส v2.5.18)
         if (!(await canDisplay(src))) {
           appLogger.warn("[localImage]", `Local copy won't display, using URL: ${url}`);
+          invoke("check_local_image", { url }).catch(() => {});
           return url;
         }
         resolved.set(url, src);
@@ -51,6 +52,17 @@ export function localImageSrc(url: string | null | undefined): Promise<string> {
     pending.set(url, p);
   }
   return p;
+}
+
+/**
+ * เตรียมรูปของทุกกรอบไว้ล่วงหน้าตอนยังไม่มีลูกค้า หน้าเลือกกรอบจะได้ขึ้นทันที
+ * ทำทีละรูป จะได้ไม่แย่งเครื่องกับงานอื่น
+ */
+export async function preloadFrameImages(frames: { imageUrl?: string; previewUrl?: string }[]) {
+  for (const frame of frames) {
+    await localImageSrc(frame.previewUrl);
+    await localImageSrc(frame.imageUrl);
+  }
 }
 
 /**

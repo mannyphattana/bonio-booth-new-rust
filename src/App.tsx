@@ -31,7 +31,8 @@ import { REFETCH_INTERVAL } from "./config/appConfig";
 import { initSession, sendSessionLog } from "./utils/sessionManager";
 import { appLogger } from "./utils/appLogger";
 import { retryPendingUploads } from "./utils/retryUploadManager";
-import { useLocalImage } from "./utils/localImage";
+import { preloadFrameImages, useLocalImage } from "./utils/localImage";
+import { toFrameList } from "./utils/frames";
 import "./App.css";
 
 export interface ThemeData {
@@ -191,6 +192,9 @@ function App() {
 
             // ดึงรายการกรอบไว้ตั้งแต่ยังไม่มีลูกค้า — Rust เก็บรายการ + รูปทุกกรอบลงเครื่อง
             // หน้าเลือกกรอบจะได้ใช้จากเครื่องได้เลย ไม่ต้องรอเน็ตตอนลูกค้าจ่ายเงินแล้ว
+            invoke("get_cached_frames")
+              .then((cached) => preloadFrameImages(toFrameList(cached)))
+              .catch((e) => appLogger.warn("[App]", `preload frame images failed: ${e}`));
             invoke("get_frames").catch((e) =>
               appLogger.warn("[App]", `warm frame cache failed: ${e}`),
             );

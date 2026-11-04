@@ -505,19 +505,32 @@ pub fn get_cached_frames() -> Option<serde_json::Value> {
 ///
 /// ไม่มีในเครื่อง → error ทันที (หน้าจอใช้ URL เดิมไปก่อน ไม่ต้องรอ) แล้วโหลดลงเครื่องเบื้องหลัง
 /// ให้ครั้งหน้าใช้จากเครื่องได้
+///
+/// เช็คแค่ว่ามีไฟล์ ไม่ decode: หน้าเลือกกรอบขอทุกกรอบพร้อมกัน ไฟล์ใหญ่สุด ~10 MB
+/// decode ทุกไฟล์ทำให้รูปขึ้นช้า ส่วนหน้าจอเช็คเองอยู่แล้วว่าเปิดเป็นรูปได้ (ดู check_local_image)
 #[tauri::command]
-pub async fn get_local_image(url: String) -> Result<String, String> {
-    // decode ตรวจไฟล์ใช้เวลา — อย่าบล็อก async runtime
+pub fn get_local_image(url: String) -> Result<String, String> {
+    let path = frame_cache_path(&url);
+    match fs::metadata(&path) {
+        Ok(meta) if meta.len() > 0 => Ok(path.to_string_lossy().to_string()),
+        _ => {
+            download_in_background(url);
+            Err("not on disk yet".into())
+        }
+    }
+}
+
+/// หน้าจอเปิดไฟล์ในเครื่องไม่ขึ้น — ตรวจไฟล์จริง ถ้าเสียจะถูกลบแล้วโหลดใหม่เบื้องหลัง
+#[tauri::command]
+pub async fn check_local_image(url: String) -> Result<(), String> {
     let key = url.clone();
-    let on_disk = tauri::async_runtime::spawn_blocking(move || disk_cached_frame(&key).is_some())
+    let valid = tauri::async_runtime::spawn_blocking(move || disk_cached_frame(&key).is_some())
         .await
         .map_err(|e| e.to_string())?;
-    if on_disk {
-        Ok(frame_cache_path(&url).to_string_lossy().to_string())
-    } else {
+    if !valid {
         download_in_background(url);
-        Err("not on disk yet".into())
     }
+    Ok(())
 }
 
 async fn fetch_frame_image_bytes_inner(

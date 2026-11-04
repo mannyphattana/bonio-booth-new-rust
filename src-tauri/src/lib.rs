@@ -633,6 +633,7 @@ pub fn run() {
             image_processing::prefetch_frame_image,
             image_processing::get_cached_frames,
             image_processing::get_local_image,
+            image_processing::check_local_image,
             image_processing::save_temp_image,
             // Printer
             printer::get_printers,
