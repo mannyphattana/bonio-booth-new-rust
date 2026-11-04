@@ -341,6 +341,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
               maxHeight: "100%",
               maxWidth: "100%",
               aspectRatio: `${displayAspectRatio}`,
+              overflow: "hidden", // ช่องเอียงอาจล้นขอบกรอบ — รูปจริงถูกตัดที่ขอบกรอบเหมือนกัน
             }}>
               {Array.from({ length: cols * rows }).map((_, copyIdx) => {
                 const c = copyIdx % cols;
@@ -393,6 +394,7 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
                         height: `${slot.height * scaleFactor.y}px`,
                         borderRadius: `${slot.radius * scaleFactor.x}px`,
                         background: "rgba(0,0,0,0.05)",
+                        transform: slot.rotate ? `rotate(${slot.rotate}deg)` : undefined,
                       }}
                     >
                       {captureIdx !== undefined && (
