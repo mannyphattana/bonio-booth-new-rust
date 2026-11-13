@@ -133,3 +133,16 @@ npm run release
 - Tag format: `vMAJOR.MINOR.PATCH-BUILD` (เช่น `v0.4.0-16`)
 - ไฟล์ installer จะอยู่ใน `src-tauri/target/release/bundle/nsis/`
 - ไฟล์ updater จะอยู่ใน `src-tauri/target/release/bundle/updater/`
+
+## Build สำหรับเทส (ไม่ใช่ release)
+
+```bash
+npm run build:test            # version = tag ล่าสุด + "-test" เช่น 2.5.19-test
+npm run build:test -- 2.5.20  # ระบุ version เอง → 2.5.20-test
+```
+
+ได้ installer ที่ชี้ `api-booth-test.boniolabs.com` เปิดเป็นหน้าต่างปกติ (ไม่ fullscreen ย่อขยายได้) และปิด auto-update
+ไม่ต้องแก้ URL ใน `api.rs` / `sse.rs` / `printer.rs` หรือ `tauri.conf.json` เอง — ค่าเทสอยู่ใน feature `test-api` และ `src-tauri/tauri.test.conf.json`
+`npm run release` และ CI ตอน push tag ยังเป็น production เสมอ
+
+ไม่ต้องมี signing key และไม่สร้าง `latest.json` — ห้ามอัพโหลด build นี้ขึ้น GitHub Releases
