@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Notify;
 
-const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+use crate::api::API_BASE_URL;
 
 /// SSE Client that runs in the Rust backend.
 /// Maintains a persistent HTTP connection to the backend SSE endpoint.

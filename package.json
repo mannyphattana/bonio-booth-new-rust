@@ -12,6 +12,7 @@
     "tauri:build:debug": "tauri build --debug",
     "build:only": "npm run build && tauri build -- --no-bundle",
     "build:app": "npm run build && npm run tauri:build",
+    "build:test": "node scripts/build-test.js",
     "run:release": "node scripts/run-release.js",
     "release": "npm run build && npm run tauri:build"
   },

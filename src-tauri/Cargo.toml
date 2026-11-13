@@ -37,3 +37,6 @@ tauri-plugin-process = "2.3.1"
 tauri-plugin-store = "2"
 kamadak-exif = "0.6.1"
 
+[features]
+# เปิดโดย `npm run build:test` — ชี้ backend เทส (ดู API_BASE_URL ใน api.rs)
+test-api = []

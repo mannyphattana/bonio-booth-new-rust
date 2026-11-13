@@ -4,7 +4,12 @@ use serde_json::Value;
 use std::sync::Mutex;
 use tauri::Manager;
 
-const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+/// backend ที่ทุก request ใช้ — `npm run build:test` เปิด feature `test-api` ให้ชี้ backend เทส
+/// build ปกติ (`npm run release`, CI ตอน push tag) เป็น production เสมอ
+#[cfg(not(feature = "test-api"))]
+pub(crate) const API_BASE_URL: &str = "https://api-booth.boniolabs.com";
+#[cfg(feature = "test-api")]
+pub(crate) const API_BASE_URL: &str = "https://api-booth-test.boniolabs.com";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaperPositionConfig {
