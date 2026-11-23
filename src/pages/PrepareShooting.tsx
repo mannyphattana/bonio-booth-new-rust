@@ -1,8 +1,9 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import type { ThemeData, MachineData } from "../App";
 import { logError } from "../utils/logger";
 import { appLogger } from "../utils/appLogger";
+import { checkpoint } from "../utils/sessionRecovery";
 import { invoke } from "@tauri-apps/api/core";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
@@ -23,6 +24,15 @@ export default function PrepareShooting({ theme, machineData, onFormatReset, onB
   const { showContextMenu, setShowContextMenu, handleContextMenu, handleTouchStart } = useContextMenu();
   // const [countdown, setCountdown] = useState(PREPARE_DURATION); // Removed custom state
   const cameraCountdown = machineData.cameraCountdown || 5;
+
+  // เลือกกรอบแล้ว — โปรแกรมค้างตั้งแต่ตรงนี้จนถ่ายเสร็จ เปิดใหม่จะกลับมาเริ่มถ่ายที่หน้านี้
+  useEffect(() => {
+    void checkpoint("frame_selected", state, {
+      captures: undefined,
+      selectedCaptureIndexes: undefined,
+      resultPhotoPaths: undefined,
+    }, `frame ${state.selectedFrame?.name || state.selectedFrame?._id || "?"}`);
+  }, []);
 
   /*
   useEffect(() => {

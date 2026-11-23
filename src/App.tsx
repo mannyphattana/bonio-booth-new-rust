@@ -1,4 +1,4 @@
-import { MemoryRouter as Router, Routes, Route, useLocation } from "react-router-dom";
+import { MemoryRouter as Router, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -29,6 +29,7 @@ import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { useTimerShutdown } from "./hooks/useTimerShutdown";
 import { REFETCH_INTERVAL } from "./config/appConfig";
 import { initSession, sendSessionLog } from "./utils/sessionManager";
+import { runStartupRecovery, endSession } from "./utils/sessionRecovery";
 import { appLogger } from "./utils/appLogger";
 import { retryPendingUploads } from "./utils/retryUploadManager";
 import { preloadFrameImages, useLocalImage } from "./utils/localImage";
@@ -107,6 +108,40 @@ function RouteSync({
   return null;
 }
 
+/**
+ * กู้ session ที่จ่ายเงินแล้วแต่โปรแกรมค้าง/เครื่องดับ — เช็คครั้งเดียวตอนเปิดโปรแกรม
+ * แล้วพากลับไปหน้าที่ทำต่อได้ (ดู utils/sessionRecovery.ts)
+ * หลังจากนั้นทุกครั้งที่กลับหน้า Home = session จบ → ลบ checkpoint
+ */
+function SessionRecoveryGate({ onChecked }: { onChecked: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const checkedRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    runStartupRecovery().then((target) => {
+      checkedRef.current = true;
+      if (alive && target) {
+        appLogger.warn("[App]", `Resuming paid session at ${target.route}`);
+        navigate(target.route, { state: target.state, replace: true });
+      }
+      onChecked();
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (checkedRef.current && location.pathname === "/") {
+      void endSession("returned home");
+    }
+  }, [location.pathname]);
+
+  return null;
+}
+
 function App() {
   const [machineData, setMachineData] = useState<MachineData | null>(null);
   const [themeData, setThemeData] = useState<ThemeData | null>(null);
@@ -137,6 +172,9 @@ function App() {
   const [pendingPaperOut, setPendingPaperOut] = useState(false);
 
   const initRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // ยังไม่ได้เช็ค session ค้าง → ห้าม auto-update ติดตั้ง (จะปิดโปรแกรมทับตอนกำลังพาลูกค้ากลับไปทำต่อ)
+  const [recoveryChecked, setRecoveryChecked] = useState(false);
+  const handleRecoveryChecked = useCallback(() => setRecoveryChecked(true), []);
 
   const handleRouteChange = useCallback((path: string) => {
     const isHome = path === "/";
@@ -355,7 +393,7 @@ function App() {
     onMaintenanceNeeded: handleMaintenanceNeeded,
   });
 
-  useAutoUpdate({ enabled: true, isOnHomePage });
+  useAutoUpdate({ enabled: true, isOnHomePage: isOnHomePage && recoveryChecked });
 
   // Background retry สำหรับ pending uploads ที่ค้างไว้
   // เริ่มหลัง machine verified แล้ว 30 วินาที จากนั้น retry ทุก 10 นาที
@@ -505,6 +543,7 @@ function App() {
   return (
     <Router>
       <RouteSync onRouteChange={handleRouteChange} />
+      <SessionRecoveryGate onChecked={handleRecoveryChecked} />
       {/* Shutdown countdown overlay */}
       <ShutdownOverlay
         state={shutdownState}

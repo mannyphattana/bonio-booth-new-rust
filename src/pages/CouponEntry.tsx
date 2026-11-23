@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { appLogger } from "../utils/appLogger";
+import { checkpoint } from "../utils/sessionRecovery";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
@@ -124,15 +125,15 @@ export default function CouponEntry({ theme, onFormatReset, onBeforeClose }: Pro
 
       if (isFree) {
         // Free coupon — skip payment QR, go directly to frame selection
-        navigate("/frame-selection", {
-          state: {
-            ...state,
-            couponCode: code,
-            paymentMethod: "coupon",
-            transactionId,
-            referenceId,
-          },
-        });
+        const paidState = {
+          ...state,
+          couponCode: code,
+          paymentMethod: "coupon",
+          transactionId,
+          referenceId,
+        };
+        void checkpoint("paid", paidState, {}, `free coupon ${code}`);
+        navigate("/frame-selection", { state: paidState });
       } else {
         // Discounted but not free — go to payment QR with existing payment data
         navigate("/payment-qr", {

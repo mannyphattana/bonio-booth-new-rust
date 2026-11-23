@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { appLogger } from "../utils/appLogger";
+import { saveResult, markPrintResult, markPrintStarted } from "../utils/sessionRecovery";
 import { logError } from "../utils/logger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -103,6 +104,18 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
   const hasLoggedMissingVideoRef = useRef(false);
   const localTxIdRef = useRef<string>("");
   const pendingRecordRef = useRef<PendingUploadRecord | null>(null);
+
+  // ออกจากหน้านี้ก่อนเริ่มอัปโหลด → คืน record ที่เข้าคิวไว้ให้ retry manager
+  useEffect(() => {
+    return () => {
+      if (!hasUploadedFiles.current) markUploadInactive(localTxIdRef.current);
+    };
+  }, []);
+
+  // ถึงหน้าผลลัพธ์ — เก็บรูปที่ผ่าน filter แล้ว ถ้าค้าง/ดับก่อนพิมพ์ออก เปิดใหม่จะกลับมาพิมพ์ที่หน้านี้
+  useEffect(() => {
+    void saveResult(state, frameCaptures);
+  }, []);
 
   const buildVideoPathsBySlot = useCallback((): string[] => {
     const slotVideoPaths = frameCaptures.map((cap) => cap.videoPath || "");
@@ -259,6 +272,8 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             "warning"
           );
           hasCreatedPresign.current = false; 
+          // presign ไม่ได้ = หน้านี้ไม่อัปโหลดแล้ว → ปล่อยให้ retry manager จัดการ record ที่เข้าคิวไว้
+          markUploadInactive(localTxIdRef.current);
         }
       } catch (err) {
         appLogger.error(CTX, "createPresignSession failed:", err);
@@ -269,6 +284,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
           "error"
         );
         hasCreatedPresign.current = false; 
+        markUploadInactive(localTxIdRef.current);
       }
     };
 
@@ -418,7 +434,13 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             files: pendingFiles,
             retryCount: 0,
           };
-          appLogger.info(CTX, `[PhotoResult] PendingUploadRecord prepared (not committed) — txId=${txIdStr} files=${pendingFiles.length}`);
+          // เข้าคิว retry ไว้ก่อนเลย — ถ้าโปรแกรมค้าง/เครื่องดับระหว่าง presign/upload
+          // ไฟล์ยังอยู่บนดิสก์ retry manager จะอัปโหลดให้ตอนกลับหน้า Home
+          // (upload สำเร็จจะลบออกเอง, ระหว่างกำลังอัปโหลด retry จะข้ามเพราะ markUploadActive)
+          addPendingUpload(pendingRecordRef.current);
+          // กัน retry cycle หยิบไปอัปซ้ำระหว่างหน้านี้ยังรอ presign/อัปโหลดอยู่
+          markUploadActive(txIdStr);
+          appLogger.info(CTX, `[PhotoResult] PendingUploadRecord queued — txId=${txIdStr} files=${pendingFiles.length}`);
         } catch (err) {
           appLogger.warn(CTX, "prepare PendingUploadRecord failed (non-blocking):", err);
         }
@@ -671,7 +693,12 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
   }, [mediaReady, sessionId, uploadUrls, uploadFiles]);
 
   const printFrame = useCallback(
-    async (composedImg: string, printQuantity: number = 1) => {
+    async (composedImg: string, printQuantity: number = 1, isReprint: boolean = false) => {
+      // ผลการพิมพ์รอบแรกบอก session recovery ว่าถ้าเปิดใหม่ต้องพิมพ์ซ้ำไหม (รอบ Print again ไม่นับ)
+      const reportPrint = (ok: boolean, detail?: string) => {
+        if (!isReprint) void markPrintResult(state, ok, detail);
+      };
+      if (!isReprint) void markPrintStarted(state);
       try {
         setPrintStatus("printing");
 
@@ -741,6 +768,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             await invoke("reduce_paper_level", { copies: printQuantity });
             appLogger.info(CTX, "Print done — qty:", printQuantity);
             setPrintStatus("done");
+            reportPrint(true);
           } catch (err) {
             appLogger.error(CTX, "print_photo failed:", err);
             logError(
@@ -750,6 +778,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
               "error"
             );
             setPrintStatus("error");
+            reportPrint(false, String(err));
           } finally {
             setPrinting(false);
           }
@@ -757,6 +786,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
           appLogger.warn(CTX, "No printer found — skipping print");
           logError("print_no_printer", "No printer available — print skipped", undefined, "warning");
           setPrintStatus("no-printer");
+          reportPrint(false, "no printer");
         }
       } catch (err) {
         appLogger.error(CTX, "printFrame outer error:", err);
@@ -768,8 +798,10 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         );
         setPrintStatus("error");
         setPrinting(false);
+        reportPrint(false, String(err));
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [frameWidth, frameHeight],
   );
 
@@ -780,6 +812,8 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         const hasPrinter = printers.some((p: any) => p.is_online);
         if (!hasPrinter && printStatus === "printing") {
           setError("เครื่องปริ้นถูกถอดออก กรุณาเชื่อมต่อใหม่");
+          // รูปไม่ออก — เก็บ session ไว้ เปิดโปรแกรมใหม่จะพากลับมาพิมพ์
+          void markPrintResult(state, false, "printer disconnected while printing");
           setTimeout(() => navigate("/"), 3000);
         }
       } catch {}
@@ -810,7 +844,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
       setShowReprintModal(false);
       setCountdownKey((k) => k + 1);
       if (composedImage) {
-        await printFrame(composedImage, reprintQty);
+        await printFrame(composedImage, reprintQty, true);
       }
     },
     // printFrame เป็น useCallback ที่ผูกกับ frameWidth/frameHeight เท่านั้น

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { appLogger } from "../utils/appLogger";
+import { saveCaptures } from "../utils/sessionRecovery";
 import { logError } from "../utils/logger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -59,6 +60,11 @@ export default function SlotSelection({ theme, onFormatReset, onBeforeClose }: P
   const containerRef = useRef<HTMLDivElement>(null);
   const frameImgRef = useRef<HTMLImageElement>(null);
   const autoContinuedRef = useRef(false);
+
+  // ถ่ายเสร็จแล้ว — เก็บรูป + วิดีโอลงดิสก์ เปิดโปรแกรมใหม่จะกลับมาหน้านี้ด้วยรูปชุดเดิม
+  useEffect(() => {
+    void saveCaptures(state, captures, state.captureVideoDiagnostics || []);
+  }, []);
 
   const getAssignedCount = () => selectedPhotos.length;
 

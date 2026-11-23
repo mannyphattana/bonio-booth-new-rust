@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { appLogger } from "../utils/appLogger";
+import { checkpoint } from "../utils/sessionRecovery";
 import { logError } from "../utils/logger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -45,6 +46,16 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   const resolvedPathsRef = useRef<Record<string, string>>({});
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const autoContinuedRef = useRef(false);
+
+  // เลือกรูปลงช่องแล้ว — ค้างหน้านี้ เปิดใหม่กลับมาเลือก filter (รูปดึงจากที่เก็บไว้ตอนถ่าย)
+  useEffect(() => {
+    void checkpoint("slots_selected", state, {
+      selectedCaptureIndexes: state.selectedCaptureIndexes || [],
+      resultPhotoPaths: undefined,
+      printDone: undefined,
+      printFailed: undefined,
+    });
+  }, []);
 
   useEffect(() => {
     setPreviewImage(previewFullSource);

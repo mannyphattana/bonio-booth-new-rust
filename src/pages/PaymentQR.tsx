@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { appLogger } from "../utils/appLogger";
+import { checkpoint } from "../utils/sessionRecovery";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemeData, MachineData } from "../App";
@@ -75,6 +76,7 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
       setReferenceId(state.referenceId);
       setPaymentTransactionId(state.transactionId || "");
       setStatus("PENDING");
+      void checkpoint("payment_pending", state, {}, "QR shown (reused from coupon)");
       return;
     }
 
@@ -91,6 +93,18 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
         setReferenceId(result.data.reference_id || "");
         setPaymentTransactionId(result.data.transactionId || "");
         setStatus("PENDING");
+        // เผื่อโปรแกรมค้างระหว่างรอ QR แล้วลูกค้าจ่ายไปแล้ว — เปิดใหม่จะเช็คสถานะ order นี้ให้
+        void checkpoint(
+          "payment_pending",
+          {
+            ...state,
+            paymentOption,
+            referenceId: result.data.reference_id || "",
+            transactionId: result.data.transactionId || "",
+          },
+          {},
+          "QR created",
+        );
       } else {
         setError("ไม่สามารถสร้าง QR Code ได้");
         setStatus("ERROR");
@@ -129,17 +143,23 @@ export default function PaymentQR({ theme, onFormatReset, onBeforeClose }: Props
           if (pollRef.current) clearInterval(pollRef.current);
           if (timerRef.current) clearInterval(timerRef.current);
 
+          const paidState = {
+            ...state,
+            paymentMethod: "qrcode",
+            transactionId:
+              statusTransactionId || paymentTransactionId || referenceId,
+            referenceId,
+          };
+          appLogger.info(
+            CTX,
+            `Payment SUCCESS — referenceId=${referenceId} transactionId=${paidState.transactionId} amount=${state.totalPrice} qty=${state.quantity} option=${paymentOption}`,
+          );
+          // จ่ายแล้ว — บันทึกลงดิสก์ทันที ไม่รอ 2 วินาที (โปรแกรมค้างช่วงนี้ เปิดใหม่ก็ไปหน้าเลือกกรอบต่อ)
+          void checkpoint("paid", paidState, {}, "payment success");
+
           // Navigate after 2 seconds
           setTimeout(() => {
-            navigate("/frame-selection", {
-              state: {
-                ...state,
-                paymentMethod: "qrcode",
-                transactionId:
-                  statusTransactionId || paymentTransactionId || referenceId,
-                referenceId,
-              },
-            });
+            navigate("/frame-selection", { state: paidState });
           }, 2000);
         }
         // Per Ksher docs:
