@@ -107,3 +107,14 @@ export const DEVICE_CHECK = {
   /** true = ข้าม maintenance เมื่อไม่เจอกล้อง/ปริ้น (สำหรับเทส) */
   ALLOW_TEST_WITHOUT_DEVICES: false,
 };
+
+/**
+ * กู้ session ที่จ่ายเงินแล้วหลังโปรแกรมค้าง/เครื่องดับ (utils/sessionRecovery.ts)
+ * เช็คครั้งเดียวตอนเปิดโปรแกรม
+ */
+export const SESSION_RECOVERY = {
+  /** session ที่ค้างนานกว่านี้ถือว่าลูกค้าไปแล้ว — ไม่พากลับไปทำต่อ (แต่ยังบันทึกลง journal) */
+  MAX_AGE_MINUTES: 60,
+  /** กู้ session เดิมซ้ำได้กี่รอบ กันกรณีขั้นนั้นทำโปรแกรมพังทุกครั้งจนวนไม่จบ */
+  MAX_RESUMES: 3,
+};

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { appLogger } from "../utils/appLogger";
+import { checkpoint } from "../utils/sessionRecovery";
 import { logError } from "../utils/logger";
 import { useNavigate, useLocation } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -34,6 +35,15 @@ export default function FrameSelection({ theme, onFormatReset, onBeforeClose }: 
   const [startX, setStartX] = useState(0);
   const [scrollLeftPos, setScrollLeftPos] = useState(0);
   const dragDistanceRef = useRef(0);
+
+  // จ่ายเงินแล้ว — โปรแกรมค้างหน้านี้ เปิดใหม่จะกลับมาหน้าเลือกกรอบ
+  useEffect(() => {
+    void checkpoint("paid", state, {
+      captures: undefined,
+      selectedCaptureIndexes: undefined,
+      resultPhotoPaths: undefined,
+    });
+  }, []);
 
   const scrollLeft = () =>
     scrollContainerRef.current?.scrollBy({ left: -280, behavior: "smooth" });

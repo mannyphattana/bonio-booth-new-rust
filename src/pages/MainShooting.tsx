@@ -7,6 +7,7 @@ import { useContextMenu } from "../hooks/useContextMenu";
 import ContextMenu from "../components/ContextMenu";
 import { logError } from "../utils/logger";
 import { appLogger } from "../utils/appLogger";
+import { checkpoint } from "../utils/sessionRecovery";
 
 const CTX = "[MainShooting]";
 
@@ -215,6 +216,12 @@ export default function MainShooting({ theme, machineData, onFormatReset, onBefo
   useEffect(() => {
     appLogger.info(CTX, `Mounted — frame: ${selectedFrame?.name || 'unknown'}, slots: ${totalSlots}, totalCaptures: ${totalCaptures}`);
     // บันทึก crash flag ไว้ใน localStorage — ถ้า app crash จะยังค้างอยู่ → ตรวจพบตอน startup ครั้งถัดไป
+    // ค้างระหว่างถ่าย → เปิดใหม่เริ่มถ่ายใหม่ทั้งชุด (ทิ้งรูปที่ถ่ายไปแล้วของรอบนี้)
+    void checkpoint("frame_selected", state, {
+      captures: undefined,
+      selectedCaptureIndexes: undefined,
+      resultPhotoPaths: undefined,
+    }, "shooting started");
     if (state?.referenceId) {
       localStorage.setItem("bonio_shooting_crash", JSON.stringify({
         transactionCode: (state.referenceId || '').replace(/^MCH-/, 'TXN-'),

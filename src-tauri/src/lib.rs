@@ -5,6 +5,7 @@ mod edsdk_sys;
 mod image_processing;
 mod lut;
 mod printer;
+mod recovery;
 mod shutdown;
 mod sse;
 mod video;
@@ -658,6 +659,14 @@ pub fn run() {
             video::copy_video_to_local_drive,
             video::check_file_exists,
             video::list_saved_transaction_files,
+            // Session recovery
+            recovery::recovery_save_state,
+            recovery::recovery_load_state,
+            recovery::recovery_clear,
+            recovery::recovery_journal,
+            recovery::recovery_save_image,
+            recovery::recovery_copy_file,
+            recovery::recovery_read_image,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
