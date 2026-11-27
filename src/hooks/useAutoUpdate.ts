@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { appLogger } from "../utils/appLogger";
 import { sendSessionLog } from "../utils/sessionManager";
@@ -125,6 +126,8 @@ export function useAutoUpdate(options: UseAutoUpdateOptions = {}) {
         } satisfies UpdateAttempt)
       );
 
+      // แอปจะปิดเพื่อให้ตัวติดตั้งทำงาน: บอก supervisor ไม่ต้องเปิดแอปเก่าขึ้นมาแย่ง
+      await invoke("supervisor_quit_for_good").catch(() => {});
       // Windows: เปิดตัวติดตั้งแล้วปิดแอปทันที ไม่กลับมาที่บรรทัดถัดไป — ตัวติดตั้งเปิดแอปใหม่ให้เอง
       await update.install();
       // ถึงตรงนี้ได้เฉพาะ OS ที่ install แล้วไม่ปิดแอปให้
@@ -134,6 +137,8 @@ export function useAutoUpdate(options: UseAutoUpdateOptions = {}) {
       appLogger.error("[Updater]", `Install failed: ${msg}`);
       // ถ้า error เกิดขึ้นระหว่าง install → clear attempt flag เพื่อไม่ให้ block ครั้งหน้า
       localStorage.removeItem(UPDATE_ATTEMPT_KEY);
+      // ไม่ได้ติดตั้งจริง: ถ้าแอปปิดไปหลังจากนี้ ให้ supervisor เปิดใหม่ตามปกติ
+      await invoke("supervisor_cancel_quit").catch(() => {});
       pendingUpdateRef.current = null;
       installingRef.current = false;
       if (onErrorRef.current) onErrorRef.current(msg);

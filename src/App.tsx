@@ -1,6 +1,7 @@
 import { MemoryRouter as Router, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { logError } from "./utils/logger";
 import { listen } from "@tauri-apps/api/event";
 import Home from "./pages/Home";
 import PaymentSelection from "./pages/PaymentSelection";
@@ -175,6 +176,31 @@ function App() {
   // ยังไม่ได้เช็ค session ค้าง → ห้าม auto-update ติดตั้ง (จะปิดโปรแกรมทับตอนกำลังพาลูกค้ากลับไปทำต่อ)
   const [recoveryChecked, setRecoveryChecked] = useState(false);
   const handleRecoveryChecked = useCallback(() => setRecoveryChecked(true), []);
+
+  // Watchdog: บอก Rust ว่าหน้าจอยังทำงานทุก 5 วินาที — เงียบเกิน 60 วินาที supervisor เปิดแอปใหม่
+  useEffect(() => {
+    const beat = () => void invoke("ui_heartbeat").catch(() => {});
+    beat();
+    const id = window.setInterval(beat, 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // แอปเพิ่งถูก supervisor เปิดใหม่ (crash / ค้าง / ปิดหน้าต่าง): ส่งเข้า error log ของ backend
+  // หลังยืนยันตู้แล้ว เพราะ log ต้องรู้ว่าเป็นตู้ไหน
+  useEffect(() => {
+    if (!isVerified) return;
+    invoke<{ reason: string; exitCode: number | null; restarts: number } | null>("supervisor_last_exit")
+      .then((last) => {
+        if (!last) return;
+        logError(
+          "app_restarted",
+          `App restarted by the supervisor after ${last.reason} (exit code ${last.exitCode ?? "none"}, restart #${last.restarts})`,
+          undefined,
+          last.reason === "closed" ? "warning" : "error",
+        );
+      })
+      .catch(() => {});
+  }, [isVerified]);
 
   const handleRouteChange = useCallback((path: string) => {
     const isHome = path === "/";

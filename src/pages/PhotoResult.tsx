@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { frameVideoHflip } from "../utils/frameVideo";
 import { appLogger } from "../utils/appLogger";
 import { saveResult, markPrintResult, markPrintStarted } from "../utils/sessionRecovery";
 import { logError } from "../utils/logger";
@@ -81,8 +82,6 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
   })();
 
   const [composedImage, setComposedImage] = useState<string>("");
-  const [finalVideoPath, setFinalVideoPath] = useState<string>("");
-  const [mediaReady, setMediaReady] = useState<boolean>(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
   const [sessionId, setSessionId] = useState<string>("");
   const [uploadUrls, setUploadUrls] = useState<any[]>([]);
@@ -104,6 +103,17 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
   const hasLoggedMissingVideoRef = useRef(false);
   const localTxIdRef = useRef<string>("");
   const pendingRecordRef = useRef<PendingUploadRecord | null>(null);
+  /** รูป (เฟรม + รูปเดี่ยว) พร้อมอัปโหลดแล้ว — ไม่ต้องรอวิดีโอ */
+  const [imagesReady, setImagesReady] = useState(false);
+  /** วิดีโอเสร็จ (path, หรือ "" ถ้าไม่มี/ทำไม่สำเร็จ) — การอัปโหลดรอตัวนี้หลังรูปขึ้นแล้ว */
+  const videoDone = useRef<{ promise: Promise<string>; resolve: (path: string) => void } | null>(null);
+  if (!videoDone.current) {
+    let resolve: (path: string) => void = () => {};
+    const promise = new Promise<string>((r) => {
+      resolve = r;
+    });
+    videoDone.current = { promise, resolve };
+  }
 
   // ออกจากหน้านี้ก่อนเริ่มอัปโหลด → คืน record ที่เข้าคิวไว้ให้ retry manager
   useEffect(() => {
@@ -299,94 +309,8 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
       const txId = state.transactionId || state.referenceId || new Date().getTime();
       localTxIdRef.current = String(txId);
 
-      const composedImg = await composeFrame();
-
-      for (let i = 0; i < frameCaptures.length; i++) {
-        if (frameCaptures[i].photo) {
-          try {
-            await invoke("save_to_local_drive", {
-              imageDataBase64: frameCaptures[i].photo,
-              filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
-            });
-          } catch (err) {
-            appLogger.error(CTX, `save_to_local_drive (photo ${i + 1}) failed:`, err);
-            logError("save_local_photo_failed", `save_to_local_drive photo ${i + 1} failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
-          }
-        }
-      }
-      appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
-
-      if (composedImg) {
-        try {
-          await invoke("save_to_local_drive", {
-            imageDataBase64: composedImg,
-            filename: `BonioBooth_${txId}_Frame.jpg`, 
-          });
-        } catch (err) {
-          appLogger.error(CTX, "save_to_local_drive (frame) failed:", err);
-          logError("save_local_photo_failed", `save_to_local_drive frame failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
-        }
-
-        printFrame(composedImg, quantity);
-      }
-
-      let composedVid = "";
-      const resolvedVideoBySlot = buildVideoPathsBySlot();
-      const slotVideoPairs = slots
-        .map((slot, idx) => ({ slot, videoPath: resolvedVideoBySlot[idx] || "" }))
-        .filter((pair) => !!pair.videoPath);
-
-      const videoPaths = slotVideoPairs.map((pair) => pair.videoPath);
-      const videoSlots = slotVideoPairs.map((pair) => pair.slot);
-
-      if (videoPaths.length > 0) {
-        setStatusText("กำลังรวมวิดีโอ...");
-        try {
-          let lutPath: string | null = null;
-          if (selectedFilter && selectedFilter.type === "lut" && selectedFilter.lutFile) {
-            try {
-              lutPath = await invoke<string>("resolve_lut_path", {
-                lutFile: selectedFilter.lutFile,
-              });
-            } catch (err) {}
-          }
-
-          composedVid = await invoke("compose_frame_video", {
-            frameImageUrl: selectedFrame?.imageUrl || "",
-            videoPaths,
-            slots: videoSlots,
-            frameWidth: frameWidth,
-            frameHeight: frameHeight,
-            outputFilename: `framed-video-${uploadFileTag(txId)}.mp4`,
-            lutPath: lutPath,
-            hflipVideo:
-              localStorage.getItem("cameraType") !== "canon" &&
-              localStorage.getItem("mirrorMode") === "false",
-          });
-
-          try {
-            await invoke("copy_video_to_local_drive", {
-              sourcePath: composedVid,
-              filename: `BonioBooth_${txId}_Video.mp4`, 
-            });
-            appLogger.info(CTX, "✅ [PhotoResult] Saved video to local drive successfully!");
-          } catch (err) {
-            appLogger.error(CTX, "copy_video_to_local_drive failed:", err);
-            logError("save_local_video_failed", `copy_video_to_local_drive failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
-          }
-
-        } catch (err) {
-          appLogger.error(CTX, "Video compose failed:", err);
-          logError(
-            "compose_video_failed",
-            `compose_frame_video threw: ${String(err)}`,
-            err instanceof Error ? err.stack : undefined,
-            "error"
-          );
-        }
-      }
-
-      if (composedImg) {
+      // เข้าคิว retry (ไฟล์อยู่บนดิสก์แล้ว) — เรียกครั้งแรกตอนรูปพร้อม อีกครั้งเมื่อวิดีโอเสร็จ
+      const queueRecord = (videoPath: string) => {
         try {
           const LOCAL_SAVE_DIR = "C:\\boniobooth\\Saved_Photos";
           const txIdStr = String(txId);
@@ -410,7 +334,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
             }
           }
 
-          if (composedVid) {
+          if (videoPath) {
             pendingFiles.push({
               type: "video",
               localPath: `${LOCAL_SAVE_DIR}\\BonioBooth_${txIdStr}_Video.mp4`,
@@ -444,13 +368,105 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         } catch (err) {
           appLogger.warn(CTX, "prepare PendingUploadRecord failed (non-blocking):", err);
         }
+      };
+
+      const composedImg = await composeFrame();
+
+      for (let i = 0; i < frameCaptures.length; i++) {
+        if (frameCaptures[i].photo) {
+          try {
+            await invoke("save_to_local_drive", {
+              imageDataBase64: frameCaptures[i].photo,
+              filename: `BonioBooth_${txId}_Photo_${i + 1}.jpg`,
+            });
+          } catch (err) {
+            appLogger.error(CTX, `save_to_local_drive (photo ${i + 1}) failed:`, err);
+            logError("save_local_photo_failed", `save_to_local_drive photo ${i + 1} failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+          }
+        }
+      }
+      appLogger.info(CTX, "✅ [PhotoResult] Saved all photos to local drive successfully!");
+
+      if (composedImg) {
+        try {
+          await invoke("save_to_local_drive", {
+            imageDataBase64: composedImg,
+            filename: `BonioBooth_${txId}_Frame.jpg`, 
+          });
+        } catch (err) {
+          appLogger.error(CTX, "save_to_local_drive (frame) failed:", err);
+          logError("save_local_photo_failed", `save_to_local_drive frame failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+        }
+
+        printFrame(composedImg, quantity);
       }
 
-      setFinalVideoPath(composedVid);
-      setMediaReady(true);
+      // รูปพร้อมแล้ว (สั่งพิมพ์แล้ว): เข้าคิวไว้ก่อน แล้วเริ่มอัปโหลดรูปเลย ไม่ต้องรอวิดีโอ
+      // ลูกค้าสแกน QR ระหว่างกระดาษออกจะเห็นรูปเฟรมก่อน วิดีโอตามมาทีหลัง
+      if (composedImg) queueRecord("");
+      setImagesReady(true);
+
+      let composedVid = "";
+      const resolvedVideoBySlot = buildVideoPathsBySlot();
+      const slotVideoPairs = slots
+        .map((slot, idx) => ({ slot, videoPath: resolvedVideoBySlot[idx] || "" }))
+        .filter((pair) => !!pair.videoPath);
+
+      const videoPaths = slotVideoPairs.map((pair) => pair.videoPath);
+      const videoSlots = slotVideoPairs.map((pair) => pair.slot);
+
+      if (videoPaths.length > 0) {
+        setStatusText("กำลังรวมวิดีโอ...");
+        try {
+          let lutPath: string | null = null;
+          if (selectedFilter && selectedFilter.type === "lut" && selectedFilter.lutFile) {
+            try {
+              lutPath = await invoke<string>("resolve_lut_path", {
+                lutFile: selectedFilter.lutFile,
+              });
+            } catch (err) {}
+          }
+
+          composedVid = await invoke("compose_frame_video", {
+            frameImageUrl: selectedFrame?.imageUrl || "",
+            videoPaths,
+            slots: videoSlots,
+            frameWidth: frameWidth,
+            frameHeight: frameHeight,
+            outputFilename: `framed-video-${uploadFileTag(txId)}.mp4`,
+            lutPath: lutPath,
+            hflipVideo: frameVideoHflip(),
+          });
+
+          try {
+            await invoke("copy_video_to_local_drive", {
+              sourcePath: composedVid,
+              filename: `BonioBooth_${txId}_Video.mp4`, 
+            });
+            appLogger.info(CTX, "✅ [PhotoResult] Saved video to local drive successfully!");
+          } catch (err) {
+            appLogger.error(CTX, "copy_video_to_local_drive failed:", err);
+            logError("save_local_video_failed", `copy_video_to_local_drive failed: ${String(err)}`, err instanceof Error ? err.stack : undefined, "warning");
+          }
+
+        } catch (err) {
+          appLogger.error(CTX, "Video compose failed:", err);
+          logError(
+            "compose_video_failed",
+            `compose_frame_video threw: ${String(err)}`,
+            err instanceof Error ? err.stack : undefined,
+            "error"
+          );
+        }
+      }
+
+      if (composedImg) queueRecord(composedVid);
+
+      videoDone.current?.resolve(composedVid);
     };
 
-    processMedia();
+    // พังกลางทางก็ต้องปล่อยให้การอัปโหลดไปต่อ (ไม่งั้นรอวิดีโอค้างตลอด)
+    processMedia().finally(() => videoDone.current?.resolve(""));
   }, [
     buildVideoPathsBySlot,
     composeFrame,
@@ -467,7 +483,7 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
 
   const uploadFiles = useCallback(async () => {
     if (hasUploadedFiles.current) return;
-    if (!mediaReady || !sessionId || uploadUrls.length === 0) return;
+    if (!imagesReady || !sessionId || uploadUrls.length === 0) return;
     
     hasUploadedFiles.current = true;
 
@@ -505,6 +521,21 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
       // รูปรวมกรอบ = ไฟล์แรกของชุดเสมอ ถ้าใบนี้หายผลลัพธ์ที่ลูกค้าเห็นจะไม่สมบูรณ์
       let frameUploadFailed = false;
       let photoIdx = 0;
+
+      // ลูกค้าเห็นรูปเร็วขึ้น: confirm เป็นช่วง (เฟรม → รูปเดี่ยว → วิดีโอ) ไม่ต้องรอครบทุกไฟล์
+      // backend แทนที่รายการเดิมตามลำดับ confirm รอบหลังจึงไม่ทำให้รูปซ้ำ (deploy-prod ตั้งแต่ 2026-11-01)
+      // รูปเฟรมไม่ขึ้น = ไม่ confirm ก่อน (กติกาเดิม ด้านล่าง)
+      let confirmedCount = 0;
+      const confirmSoFar = async (stage: string) => {
+        if (frameUploadFailed || uploadedFiles.length === 0 || uploadedFiles.length === confirmedCount) return;
+        try {
+          await invoke("confirm_upload", { sessionId, uploadedFiles: [...uploadedFiles] });
+          confirmedCount = uploadedFiles.length;
+          appLogger.info(CTX, `confirm_upload (${stage}) OK — files: ${uploadedFiles.length}`);
+        } catch (err) {
+          appLogger.warn(CTX, `confirm_upload (${stage}) failed — the final confirm tries again:`, err);
+        }
+      };
 
       if (photoIdx < photoUrls.length && composedImage) {
         setStatusText("กำลังอัปโหลดรูปเฟรม...");
@@ -548,6 +579,8 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         photoIdx++;
       }
 
+      await confirmSoFar("frame");
+
       for (let i = 0; i < frameCaptures.length && photoIdx < photoUrls.length; i++) {
         if (!frameCaptures[i].photo) continue;
         setStatusText(`กำลังอัปโหลดรูป ${i + 1}/${frameCaptures.length}...`);
@@ -580,12 +613,18 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         photoIdx++;
       }
 
-      if (videoUrls.length > 0 && finalVideoPath) {
+      await confirmSoFar("photos");
+
+      // วิดีโอทำหลังสั่งพิมพ์ อาจยังไม่เสร็จ — รอตรงนี้ (รูปขึ้นไปแล้ว)
+      setStatusText("กำลังรวมวิดีโอ...");
+      const videoPath = await (videoDone.current?.promise ?? Promise.resolve(""));
+
+      if (videoUrls.length > 0 && videoPath) {
         setStatusText("กำลังอัปโหลดวิดีโอ...");
         try {
           await invoke("upload_to_presigned_url", {
             url: videoUrls[0].uploadUrl,
-            filePath: finalVideoPath,
+            filePath: videoPath,
             contentType: "video/mp4",
           });
           appLogger.info(CTX, "Uploaded video OK — key:", videoUrls[0].key);
@@ -684,13 +723,13 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
     } finally {
       markUploadInactive(localTxIdRef.current);
     }
-  }, [sessionId, uploadUrls, composedImage, finalVideoPath, frameCaptures, mediaReady]);
+  }, [sessionId, uploadUrls, composedImage, frameCaptures, imagesReady]);
 
   useEffect(() => {
-    if (mediaReady && sessionId && uploadUrls.length > 0 && !hasUploadedFiles.current) {
+    if (imagesReady && sessionId && uploadUrls.length > 0 && !hasUploadedFiles.current) {
       uploadFiles();
     }
-  }, [mediaReady, sessionId, uploadUrls, uploadFiles]);
+  }, [imagesReady, sessionId, uploadUrls, uploadFiles]);
 
   const printFrame = useCallback(
     async (composedImg: string, printQuantity: number = 1, isReprint: boolean = false) => {

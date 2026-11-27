@@ -40,7 +40,7 @@
     "resources": {
       "../EDSDK/**/*": "EDSDK/",
       "../filters/*": "filters/",
-      "../node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe": "ffmpeg.exe",
+      "ffmpeg/ffmpeg.exe": "ffmpeg.exe",
       "../public/Print test 4x6.png": "Print test 4x6.png",
       "../public/Print test 2x6.png": "Print test 2x6.png",
       "../public/Print test 6x4.png": "Print test 6x4.png",

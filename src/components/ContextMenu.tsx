@@ -80,6 +80,10 @@ export default function ContextMenu({
   const [printerStatus, setPrinterStatus] = useState("");
   const [appVersion, setAppVersion] = useState("");
   const [mirrorMode, setMirrorModeState] = useState(() => localStorage.getItem("mirrorMode") !== "false");
+  /** เปิดโปรแกรมเองตอนเปิดเครื่อง (registry Run ของ user นี้) — null = ยังไม่รู้ */
+  const [autostart, setAutostart] = useState<{ enabled: boolean; otherPath?: string | null } | null>(null);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  const [autostartError, setAutostartError] = useState("");
 
   // Load status summaries when menu opens
   useEffect(() => {
@@ -102,6 +106,11 @@ export default function ContextMenu({
     setPinChangeSuccess("");
     setMenuPinState(getMenuPin());
     setCloseAppPinState(getCloseAppPin());
+
+    setAutostartError("");
+    invoke<{ enabled: boolean; otherPath?: string | null }>("get_autostart")
+      .then(setAutostart)
+      .catch(() => setAutostart(null));
 
     // Get app version
     getVersion().then(v => setAppVersion(v)).catch((e) => appLogger.error("[ContextMenu]", `getVersion error: ${e}`));
@@ -658,6 +667,47 @@ export default function ContextMenu({
             textAlign: "center",
           }}>
             {cameraIsCanon ? "🔒" : (mirrorMode ? "ON" : "OFF")}
+          </div>
+        </button>
+
+        {/* 3b. เปิดเองตอนเปิดเครื่อง — โปรแกรมค้าง/ปิดไปเอง supervisor เปิดใหม่ให้อยู่แล้ว */}
+        <button
+          className="context-menu-item context-menu-config-item"
+          disabled={autostartBusy || autostart === null}
+          onClick={async () => {
+            if (!autostart) return;
+            setAutostartBusy(true);
+            setAutostartError("");
+            try {
+              setAutostart(await invoke("set_autostart", { enabled: !autostart.enabled }));
+            } catch (e) {
+              setAutostartError(String(e));
+            }
+            setAutostartBusy(false);
+          }}
+        >
+          <span style={{ fontSize: 24 }}>🔁</span>
+          <div style={{ flex: 1, textAlign: "left" }}>
+            <div style={{ fontWeight: 600 }}>เปิดโปรแกรมเองตอนเปิดเครื่อง</div>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+              {autostartError
+                ? autostartError
+                : autostart?.otherPath
+                  ? `ตั้งไว้กับโปรแกรมตัวอื่น: ${autostart.otherPath}`
+                  : "โปรแกรมค้างเกิน 1 นาทีหรือปิดไปเอง จะเปิดใหม่ให้เองเสมอ"}
+            </div>
+          </div>
+          <div style={{
+            padding: "4px 14px",
+            borderRadius: 20,
+            background: autostart?.enabled ? "#2a5f2a" : "#5f2a2a",
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 700,
+            minWidth: 44,
+            textAlign: "center",
+          }}>
+            {autostart === null ? "…" : autostart.enabled ? "ON" : "OFF"}
           </div>
         </button>
 

@@ -421,9 +421,10 @@ async fn execute_close_app(app_handle: Arc<Mutex<Option<AppHandle>>>) {
     info!("[ShutdownManager] Waiting {}s before closing app...", POST_DESTROY_DELAY_SECONDS);
     tokio::time::sleep(std::time::Duration::from_secs(POST_DESTROY_DELAY_SECONDS)).await;
 
-    // Step 4: Exit app
+    // Step 4: Exit app (for good: the supervisor does not reopen it)
     if let Some(ref app) = app_opt {
         info!("[ShutdownManager] Exiting application...");
+        crate::supervisor::quit_for_good();
         app.exit(0);
     }
 }

@@ -345,6 +345,8 @@ fn process_sse_event(app: &AppHandle, event_type: &str, data: &str) {
         }
         "close-app" => {
             info!("[SSE] Close-app event received, notifying backend and exiting...");
+            // ปิดถาวรตามที่ backend สั่ง: supervisor ไม่ต้องเปิดใหม่
+            crate::supervisor::quit_for_good();
             // Notify backend before exit
             if let Some(state) = app.try_state::<crate::api::AppState>() {
                 let machine_id = state.machine_id.lock().unwrap().clone();

@@ -60,6 +60,13 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      # FFmpeg n8.1.3 with the GPU H.264 encoders (src-tauri/src/encoder.rs), kept on the
+      # prerelease "ffmpeg-n8.1.3" of this repo like the WebView2 runtime (scripts/fetch-ffmpeg.mjs)
+      - name: Fetch FFmpeg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run fetch:ffmpeg
+
       # WebView2 Fixed Version Runtime ที่ tauri.conf.json ฝังเข้าตัวติดตั้ง (bundle.windows.webviewInstallMode)
       # ไม่ได้อยู่ใน git เพราะแตกแล้วใหญ่ราว 661 MB — ไฟล์ .cab เก็บไว้ที่ release "webview2-runtime-<เวอร์ชัน>"
       # ของ repo นี้ (ตั้งเป็น prerelease ไว้ ไม่ให้กลายเป็น latest ที่ตู้ใช้เช็คอัปเดต)
