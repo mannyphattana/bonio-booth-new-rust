@@ -9,6 +9,7 @@ import { FILTERS, type FilterConfig } from "../config/filters";
 import Countdown from "../components/Countdown";
 import { COUNTDOWN } from "../config/appConfig";
 import { useContextMenu } from "../hooks/useContextMenu";
+import { prepareFrameVideo } from "../utils/frameVideo";
 import ContextMenu from "../components/ContextMenu";
 
 const CTX = "[ApplyFilter]";
@@ -60,6 +61,17 @@ export default function ApplyFilter({ theme, onFormatReset, onBeforeClose }: Pro
   useEffect(() => {
     setPreviewImage(previewFullSource);
   }, [previewFullSource]);
+
+  // ระหว่างลูกค้าเลือกฟิลเตอร์: เตรียมคลิปของแต่ละช่องไว้ก่อน วิดีโอหลังสั่งพิมพ์จะเสร็จเร็วขึ้น
+  // รอ 2 วินาทีให้ภาพตัวอย่างฟิลเตอร์ขึ้นก่อน (ffmpeg ฝั่งนี้รันแบบ priority ต่ำอยู่แล้ว)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void prepareFrameVideo(state.selectedFrame, frameCaptures);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+    // ครั้งเดียวต่อการเข้าหน้า: ช่องกับคลิปไม่เปลี่ยนในหน้านี้
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const resolvePaths = async () => {

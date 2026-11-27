@@ -7,11 +7,26 @@
 
 const STORAGE_KEY = "bonio_pending_uploads";
 
-/** MAX_RETRY_COUNT ตรงกับค่าที่ตกลงกัน (3 ครั้ง) */
+/**
+ * ลองครบกี่รอบแล้วยอม confirm เท่าที่ขึ้นได้ (ถ้ารูปเฟรมขึ้นแล้ว) ลูกค้าจะได้มีอะไรให้โหลดก่อน
+ * — record ไม่ถูกทิ้งเพราะจำนวนครั้งแล้ว: ลองต่อไปเรื่อยๆ จนสำเร็จ ไฟล์หาย หรือเก่าเกิน RECORD_EXPIRY_DAYS
+ * (เดิมลอง 3 รอบแล้วทิ้ง: เน็ตหลุดครึ่งชั่วโมงไฟล์ลูกค้าก็ไม่ขึ้นอีกเลย)
+ */
 export const MAX_RETRY_COUNT = 3;
 
-/** RECORD_EXPIRY_DAYS ตรงกับค่าที่ตกลงกัน (2 วัน) */
-export const RECORD_EXPIRY_DAYS = 2;
+/** เก่ากว่านี้เลิกลอง (ไฟล์ยังอยู่ใน C:\boniobooth\Saved_Photos ให้ dashboard สั่ง re-upload ได้) */
+export const RECORD_EXPIRY_DAYS = 7;
+
+/** หลังลองครบ MAX_RETRY_COUNT รอบ เว้นระยะห่างขึ้นเรื่อยๆ: 30 นาที, 1, 2, 4 ชั่วโมง, แล้วทุก 6 ชั่วโมง */
+const BACKOFF_START_MS = 30 * 60 * 1000;
+const BACKOFF_MAX_MS = 6 * 60 * 60 * 1000;
+
+/** ถึงเวลาลองรอบหน้าของ record นี้หรือยัง */
+export function isDue(record: PendingUploadRecord, now: number = Date.now()): boolean {
+  if (record.retryCount < MAX_RETRY_COUNT || !record.lastAttempt) return true;
+  const wait = Math.min(BACKOFF_START_MS * 2 ** (record.retryCount - MAX_RETRY_COUNT), BACKOFF_MAX_MS);
+  return now - new Date(record.lastAttempt).getTime() >= wait;
+}
 
 export interface PendingUploadFile {
   /** "frame" = รูปที่รวมกรอบแล้ว, "photo" = รูปเดี่ยว, "video" = วิดีโอ */
@@ -111,25 +126,21 @@ export function incrementRetryCount(txId: string): void {
 }
 
 /**
- * ลบ records ที่เก่าเกิน maxAgeDays หรือที่ retryCount ถึง MAX_RETRY_COUNT แล้ว
- * เรียกก่อนเริ่ม retry cycle เพื่อทำความสะอาด
+ * ลบ records ที่เก่าเกิน maxAgeDays เรียกก่อนเริ่ม retry cycle เพื่อทำความสะอาด
  */
-export function cleanExpiredAndExhausted(maxAgeDays: number = RECORD_EXPIRY_DAYS): void {
+export function cleanExpired(maxAgeDays: number = RECORD_EXPIRY_DAYS): void {
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-  const records = loadAll().filter((r) => {
-    const tooOld = new Date(r.createdAt).getTime() < cutoff;
-    const exhausted = r.retryCount >= MAX_RETRY_COUNT;
-    return !tooOld && !exhausted;
-  });
-  saveAll(records);
+  const all = loadAll();
+  const records = all.filter((r) => new Date(r.createdAt).getTime() >= cutoff);
+  if (records.length !== all.length) saveAll(records);
 }
 
 /**
- * ดึง records ที่ยังสามารถ retry ได้ (retryCount < MAX_RETRY_COUNT)
+ * records ที่ยังต้องอัปโหลด ใหม่สุดก่อน (ลูกค้าที่เพิ่งถ่ายรอดูอยู่)
  */
 export function getRetryablePending(): PendingUploadRecord[] {
-  cleanExpiredAndExhausted();
-  return getAllPending().filter((r) => r.retryCount < MAX_RETRY_COUNT);
+  cleanExpired();
+  return getAllPending().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 // ============================================================

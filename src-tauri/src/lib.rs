@@ -2,11 +2,13 @@ mod api;
 mod canon;
 #[cfg(target_os = "windows")]
 mod edsdk_sys;
+mod encoder;
 mod image_processing;
 mod lut;
 mod printer;
 mod recovery;
 mod shutdown;
+pub mod supervisor;
 mod sse;
 mod video;
 
@@ -79,6 +81,8 @@ fn exit_app(
 ) {
     // Mark as clean exit (ป้องกัน crash handler ใน RunEvent ยิง session log ซ้ำ)
     *state.clean_exit.lock().unwrap() = true;
+    // ปิดถาวร: supervisor ไม่ต้องเปิดใหม่
+    supervisor::quit_for_good();
 
     // Step 1: Notify backend before exit (synchronous block_on for immediate notification)
     {
@@ -526,6 +530,14 @@ pub fn run() {
                 log::info!("[App] Window maximized (borderless)");
             }
 
+            // Restarted by the supervisor? Note why; the screen sends it to the error log.
+            // Then watch the screen's heartbeat (supervised runs only).
+            supervisor::note_startup();
+            supervisor::start_watchdog();
+
+            // Pick the video encoder (graphics card first) in the background
+            encoder::detect_in_background();
+
             // Give shutdown manager an app handle
             if let Some(shutdown_mgr) = app.try_state::<Arc<ShutdownManager>>() {
                 shutdown_mgr.set_app_handle(app.handle().clone());
@@ -654,6 +666,7 @@ pub fn run() {
             video::convert_video_to_mp4,
             video::process_frame_video,
             video::compose_frame_video,
+            video::prepare_frame_video,
             video::cleanup_temp,
             video::save_to_local_drive,
             video::copy_video_to_local_drive,
@@ -667,6 +680,13 @@ pub fn run() {
             recovery::recovery_save_image,
             recovery::recovery_copy_file,
             recovery::recovery_read_image,
+            // Supervisor: watchdog heartbeat, updates, start with Windows
+            supervisor::ui_heartbeat,
+            supervisor::supervisor_quit_for_good,
+            supervisor::supervisor_cancel_quit,
+            supervisor::supervisor_last_exit,
+            supervisor::get_autostart,
+            supervisor::set_autostart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

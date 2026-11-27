@@ -13,6 +13,7 @@
     "build:only": "npm run build && tauri build -- --no-bundle",
     "build:app": "npm run build && npm run tauri:build",
     "build:test": "node scripts/build-test.js",
+    "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
     "run:release": "node scripts/run-release.js",
     "release": "npm run build && npm run tauri:build"
   },

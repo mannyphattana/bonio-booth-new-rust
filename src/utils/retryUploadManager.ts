@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appLogger } from "./appLogger";
 import {
   getRetryablePending,
+  isDue,
   removePendingUpload,
   incrementRetryCount,
   isUploadActive,
@@ -54,9 +55,9 @@ async function fileExists(path: string): Promise<boolean> {
 
 /**
  * Retry upload สำหรับ 1 pending record
- * Returns true ถ้าสำเร็จ, false ถ้าล้มเหลว
+ * "ok" = สำเร็จ, "failed" = ลองใหม่รอบหน้า, "gone" = ไฟล์บนดิสก์หายหมด ลองต่อไม่มีประโยชน์
  */
-async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
+async function retryOneRecord(record: PendingUploadRecord): Promise<"ok" | "failed" | "gone"> {
   appLogger.info(
     CTX,
     `Retrying txId=${record.txId} retryCount=${record.retryCount} files=${record.files.length}`
@@ -79,7 +80,7 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       `All files missing for txId=${record.txId} — giving up`
     );
     // ไฟล์หายหมด ไม่มีประโยชน์ retry ต่อ
-    return false;
+    return "gone";
   }
 
   // 2. สร้าง filesMeta สำหรับ presign API (video ใช้ type "video", รูปอื่นๆ ใช้ "photo")
@@ -102,7 +103,7 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       `create_presign_upload failed for txId=${record.txId}:`,
       err
     );
-    return false;
+    return "failed";
   }
 
   const responseData = presignResult?.data || presignResult;
@@ -111,7 +112,7 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       CTX,
       `create_presign_upload returned no uploadUrls for txId=${record.txId}`
     );
-    return false;
+    return "failed";
   }
 
   const sessionId: string = responseData.photoSession?.id || "";
@@ -122,7 +123,7 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       CTX,
       `No sessionId or uploadUrls for txId=${record.txId}`
     );
-    return false;
+    return "failed";
   }
 
   appLogger.info(
@@ -182,13 +183,13 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       CTX,
       `No files uploaded for txId=${record.txId}`
     );
-    return false;
+    return "failed";
   }
 
   // 6. ขาดไฟล์ → ยังไม่ confirm ให้รอบหน้ายิงใหม่ทั้งชุด
   // confirm ไปตอนนี้ backend จะเรียงลำดับใหม่จากไฟล์ที่มี (รูปเฟรมหาย = รูปดิบใบแรกขึ้นเป็นรูปหลัก)
   // แล้ว record ถูกลบจากคิว ไม่มีใครยิงไฟล์ที่ขาดอีกเลย
-  // ยกเว้นรอบสุดท้าย: confirm เท่าที่มีดีกว่าไม่มีอะไรให้ลูกค้าเลย ถ้ารูปเฟรม (ใบแรก) ขึ้นแล้ว
+  // ยกเว้นลองครบ MAX_RETRY_COUNT รอบแล้ว: confirm เท่าที่มีดีกว่าไม่มีอะไรให้ลูกค้าเลย ถ้ารูปเฟรม (ใบแรก) ขึ้นแล้ว
   if (failedFiles.length > 0) {
     const isLastAttempt = record.retryCount + 1 >= MAX_RETRY_COUNT;
     const frameUploaded = photoFiles.length > 0 && !failedFiles.includes(photoFiles[0]);
@@ -197,7 +198,7 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       `${failedFiles.length}/${jobs.length} file(s) still failing for txId=${record.txId}: ${failedFiles.map((f) => f.localPath).join(", ")}`
     );
     if (!isLastAttempt || !frameUploaded) {
-      return false;
+      return "failed";
     }
     appLogger.warn(CTX, `Last attempt for txId=${record.txId} — confirming the files that did upload`);
   }
@@ -212,14 +213,16 @@ async function retryOneRecord(record: PendingUploadRecord): Promise<boolean> {
       CTX,
       `confirm_upload OK for txId=${record.txId} files=${uploadedFiles.length}`
     );
-    return true;
+    // confirm ไปแค่บางส่วน: ลูกค้ามีรูปให้โหลดแล้ว แต่เก็บไว้ในคิวลองไฟล์ที่ขาดต่อ
+    // (backend แทนที่รายการเดิมตามลำดับ confirm ทั้งชุดรอบหน้าจึงไม่ทำให้รูปซ้ำ)
+    return failedFiles.length > 0 ? "failed" : "ok";
   } catch (err) {
     appLogger.error(
       CTX,
       `confirm_upload failed for txId=${record.txId}:`,
       err
     );
-    return false;
+    return "failed";
   }
 }
 
@@ -247,7 +250,7 @@ async function runRetryCycle(): Promise<void> {
   // อ่านคิวใหม่ทุกครั้งที่ทำเสร็จหนึ่ง record: dashboard กด Re-upload หลายอันติดกัน
   // อันที่เข้ามาระหว่างรอบจะได้ทำต่อเลย ไม่ต้องรอรอบ 10 นาที
   for (;;) {
-    const record = getRetryablePending().find((r) => !attempted.has(r.txId));
+    const record = getRetryablePending().find((r) => !attempted.has(r.txId) && isDue(r));
     if (!record) break;
     attempted.add(record.txId);
 
@@ -266,10 +269,13 @@ async function runRetryCycle(): Promise<void> {
       continue;
     }
 
-    const success = await retryOneRecord(record);
-    if (success) {
+    const result = await retryOneRecord(record);
+    if (result === "ok") {
       removePendingUpload(record.txId);
       appLogger.info(CTX, `✅ Retry success — removed txId=${record.txId}`);
+    } else if (result === "gone") {
+      removePendingUpload(record.txId);
+      appLogger.warn(CTX, `Files of txId=${record.txId} are gone from disk — removed from the queue`);
     } else {
       incrementRetryCount(record.txId);
       appLogger.warn(

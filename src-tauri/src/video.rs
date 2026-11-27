@@ -8,9 +8,11 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(target_os = "windows")]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
 
 /// Create a Command that hides the console window on Windows
-fn hidden_command(program: &str) -> std::process::Command {
+pub(crate) fn hidden_command(program: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new(program);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -23,7 +25,8 @@ pub fn get_ffmpeg_path_public() -> String {
 }
 
 /// Get the FFmpeg binary path
-/// Checks: 1) next to exe 2) _up_/ffmpeg.exe (NSIS) 3) node_modules (dev) 4) system PATH
+/// Checks: 1) next to exe 2) _up_/ffmpeg.exe (NSIS) 3) BONIO_FFMPEG / src-tauri/ffmpeg (dev,
+/// `npm run fetch:ffmpeg`) 4) node_modules (dev) 5) system PATH
 fn get_ffmpeg_path() -> String {
     let ffmpeg_bin = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
 
@@ -42,7 +45,22 @@ fn get_ffmpeg_path() -> String {
         }
     }
 
-    // 2. Check node_modules/@ffmpeg-installer (installed via npm)
+    // 2. Dev: an explicit binary, or the one `npm run fetch:ffmpeg` puts in src-tauri/ffmpeg
+    if let Ok(path) = std::env::var("BONIO_FFMPEG") {
+        if Path::new(&path).exists() {
+            return path;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for dir in [cwd.join("ffmpeg"), cwd.join("src-tauri").join("ffmpeg")] {
+            let ffmpeg = dir.join(ffmpeg_bin);
+            if ffmpeg.exists() {
+                return ffmpeg.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // 3. Check node_modules/@ffmpeg-installer (installed via npm)
     let platform_dir = if cfg!(target_os = "windows") {
         if cfg!(target_arch = "x86_64") { "win32-x64" } else { "win32-ia32" }
     } else if cfg!(target_os = "macos") {
@@ -535,6 +553,15 @@ fn loop_clip_without_head(frames: u64, duration: f64) -> String {
     )
 }
 
+/// วน ตัดหัว กลับซ้ายขวา แล้วย่อ/ครอปคลิปให้เท่าช่อง `w`x`h` เป็น RGB — ส่วนที่ทำล่วงหน้าได้
+fn fit_clip_chain(prefix: &str, hflip: bool, w: i64, h: i64) -> String {
+    let hflip_prefix = if hflip { "hflip," } else { "" };
+    format!(
+        "{}trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
+        prefix, hflip_prefix, w + 2, h + 2, w, h
+    )
+}
+
 /// ตำแหน่งและขนาดของคลิปบนวิดีโอ สำหรับช่องรูปหนึ่งช่อง
 struct SlotVideoLayout {
     /// ขนาดที่ scale+crop คลิปให้พอดีช่อง (เลขคู่)
@@ -600,12 +627,22 @@ fn slot_video_layout(slot: &serde_json::Value, scale_x: f64, scale_y: f64) -> Sl
     }
 }
 
+/// คลิปของช่องหนึ่งช่อง ตอนประกอบวิดีโอ
+#[derive(Clone, Debug)]
+enum ClipChain {
+    /// คลิปดิบ: วน ตัดหัว กลับซ้ายขวา ย่อ/ครอปให้พอดีช่อง ตรงนี้เลย — ค่าคือ filter ต้น chain
+    /// (ดู loop_clip_without_head)
+    Raw(String),
+    /// เตรียมไว้แล้วตอนลูกค้าเลือกฟิลเตอร์ (prepare_frame_video): 9 วินาที ขนาดเท่าช่องพอดี RGB
+    Prepared,
+}
+
 /// สร้าง -filter_complex ของ compose_frame_video คืน (filter, label ของ stream สุดท้าย)
 ///
-/// `clip_prefixes` คือ filter ต้น chain ของแต่ละคลิป (ดู loop_clip_without_head) จำนวนเท่ากับคลิปที่ใช้
+/// `clip_prefixes` คือคลิปของแต่ละช่อง จำนวนเท่ากับคลิปที่ใช้
 fn build_frame_video_filter(
     slots: &[serde_json::Value],
-    clip_prefixes: &[String],
+    clip_prefixes: &[ClipChain],
     hflip: bool,
     lut_filename: Option<&str>,
     (out_w, out_h): (u32, u32),
@@ -622,11 +659,10 @@ fn build_frame_video_filter(
 
     for i in 0..num_videos {
         let layout = &layouts[i];
-        let hflip_prefix = if hflip { "hflip," } else { "" };
-        let mut chain = format!(
-            "[{}:v]{}trim=duration=9,setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop={}:{},format=rgb24",
-            i, clip_prefixes[i], hflip_prefix, layout.clip_w+2, layout.clip_h+2, layout.clip_w, layout.clip_h
-        );
+        let mut chain = match &clip_prefixes[i] {
+            ClipChain::Raw(prefix) => format!("[{}:v]{}", i, fit_clip_chain(prefix, hflip, layout.clip_w, layout.clip_h)),
+            ClipChain::Prepared => format!("[{}:v]fps=30,trim=duration=9,setpts=PTS-STARTPTS,format=rgb24", i),
+        };
         if let Some(lut_fn) = lut_filename {
             chain.push_str(&format!(",lut3d={}", lut_fn));
         }
@@ -729,18 +765,9 @@ pub async fn compose_frame_video(
     fs::write(&frame_path, &frame_bytes)
         .map_err(|e| format!("Frame write error: {}", e))?;
 
-    let frame_img = image::load_from_memory(&frame_bytes)
-        .map_err(|e| format!("Frame load error (ไฟล์ที่โหลดมาไม่ใช่รูปภาพ หรือรูปเสีย): {}", e))?;
-        
-    let (orig_w, orig_h) = frame_img.dimensions();
-
-    let frame_ratio = frame_width as f64 / frame_height as f64;
-    let (dup_w, dup_h) = duplication_factors(frame_ratio);
+    let g = frame_geometry(&frame_bytes, frame_width, frame_height)?;
+    let FrameGeometry { orig_w, orig_h, dup_w, dup_h, out_w, out_h, scale_x, scale_y, frame_ratio } = g;
     let will_duplicate = dup_w > 1 || dup_h > 1;
-    let (out_w, out_h) = compose_output_size(orig_w, orig_h, dup_w, dup_h);
-
-    let scale_x = out_w as f64 / frame_width as f64;
-    let scale_y = out_h as f64 / frame_height as f64;
 
     let lut_filename = match &lut_path {
         Some(lp) if !lp.is_empty() && Path::new(lp).exists() => {
@@ -759,29 +786,29 @@ pub async fn compose_frame_video(
     let num_videos = video_paths.len().min(slots.len());
     let output_path = temp_dir.join(&output_filename);
 
+    let hflip = hflip_video.unwrap_or(false);
     let mut final_args: Vec<String> = vec!["-y".to_string()];
+    let mut clip_prefixes: Vec<ClipChain> = Vec::with_capacity(num_videos);
 
     for i in 0..num_videos {
-        final_args.extend(vec![
-            "-stream_loop".to_string(), "-1".to_string(),
-            "-i".to_string(), video_paths[i].clone(),
-        ]);
+        let layout = slot_video_layout(&slots[i], scale_x, scale_y);
+        let prepared = prepared_clip_path(&temp_dir, &video_paths[i], hflip, layout.clip_w, layout.clip_h);
+        let input = if prepared.exists() {
+            clip_prefixes.push(ClipChain::Prepared);
+            prepared.to_string_lossy().to_string()
+        } else {
+            clip_prefixes.push(ClipChain::Raw(clip_prefix(&video_paths[i])));
+            video_paths[i].clone()
+        };
+        final_args.extend(vec!["-stream_loop".to_string(), "-1".to_string(), "-i".to_string(), input]);
     }
     final_args.extend(vec!["-i".to_string(), frame_path.to_string_lossy().to_string()]);
-
-    let clip_prefixes: Vec<String> = video_paths[..num_videos]
-        .iter()
-        .map(|path| {
-            probe_clip(path)
-                .map(|(frames, duration)| loop_clip_without_head(frames, duration))
-                .unwrap_or_else(|| "fps=30,".to_string())
-        })
-        .collect();
+    let prepared_count = clip_prefixes.iter().filter(|c| matches!(c, ClipChain::Prepared)).count();
 
     let (filter_complex, final_label) = build_frame_video_filter(
         &slots,
         &clip_prefixes,
-        hflip_video.unwrap_or(false),
+        hflip,
         lut_filename.as_deref(),
         (out_w, out_h),
         (scale_x, scale_y),
@@ -792,59 +819,174 @@ pub async fn compose_frame_video(
     final_args.extend(vec![
         "-filter_complex".to_string(), filter_complex,
         "-map".to_string(), format!("[{}]", final_label),
-        "-c:v".to_string(), "libx264".to_string(),
-        "-pix_fmt".to_string(), "yuv420p".to_string(),
+    ]);
 
-        // บังคับ profile/level ให้อยู่ในกรอบที่ iOS hardware decoder รองรับแน่นอน
-        // ถ้าอนาคตมีเฟรมที่ทำให้ resolution บานเกิน ffmpeg จะ error ตั้งแต่ encode
-        // แทนที่จะไปเงียบตายบน Safari ของลูกค้า
-        "-profile:v".to_string(), "high".to_string(),
-        "-level".to_string(), "5.1".to_string(),
-
-        "-preset".to_string(), "medium".to_string(),
-        "-crf".to_string(), "18".to_string(),
-
-        // เพดาน bitrate กันไฟล์บวมจนลูกค้าโหลดผ่านมือถือไม่ไหว
-        // ที่ 16 Mbps คลิป 9 วินาทีจะไม่เกินราว 18 MB (ปกติ crf 18 จะต่ำกว่านี้อยู่แล้ว
-        // เพราะกรอบเป็นภาพนิ่ง — เพดานนี้จะทำงานเฉพาะฉากที่มีการเคลื่อนไหวหนักจริงๆ)
-        "-maxrate".to_string(), "16M".to_string(),
-        "-bufsize".to_string(), "32M".to_string(),
-
-        "-color_range".to_string(), "1".to_string(), 
-        "-colorspace".to_string(), "1".to_string(), 
-        "-color_primaries".to_string(), "1".to_string(), 
-        "-color_trc".to_string(), "1".to_string(), 
+    // ส่วนท้าย (หลัง codec): สี, -t, faststart, ไฟล์ปลายทาง
+    // codec/profile/level/bitrate มาจาก encoder.rs — High profile level 5.1 ให้อยู่ในกรอบที่ iOS
+    // hardware decoder รองรับแน่นอน ถ้าอนาคตมีเฟรมที่ทำให้ resolution บานเกิน ffmpeg จะ error ตั้งแต่ encode
+    // แทนที่จะไปเงียบตายบน Safari ของลูกค้า
+    let tail: Vec<String> = vec![
+        "-color_range".to_string(), "1".to_string(),
+        "-colorspace".to_string(), "1".to_string(),
+        "-color_primaries".to_string(), "1".to_string(),
+        "-color_trc".to_string(), "1".to_string(),
         "-bsf:v".to_string(), "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1".to_string(),
-        
         "-t".to_string(), "9".to_string(),
         "-an".to_string(),
         "-movflags".to_string(), "+faststart".to_string(),
         output_path.to_string_lossy().to_string(),
-    ]);
+    ];
 
-    println!("[compose_frame_video] running ffmpeg with {} args", final_args.len());
+    let started = std::time::Instant::now();
+    let encoder = crate::encoder::encode_with_fallback(crate::encoder::FRAME_VIDEO_BITRATE, |codec| {
+        let mut args = final_args.clone();
+        args.extend(codec.iter().cloned());
+        args.extend(tail.iter().cloned());
+        println!("[compose_frame_video] running ffmpeg with {} args ({})", args.len(), codec[1]);
 
-    let status = hidden_command(&get_ffmpeg_path())
-        .current_dir(&temp_dir)
-        .args(&final_args)
-        .output()
-        .map_err(|e| format!("FFmpeg compose error: {}", e))?;
+        let status = hidden_command(&get_ffmpeg_path())
+            .current_dir(&temp_dir)
+            .args(&args)
+            .output()
+            .map_err(|e| format!("FFmpeg compose error: {}", e))?;
 
-    let stderr_str = String::from_utf8_lossy(&status.stderr);
-    if !stderr_str.is_empty() {
-        let truncated = if stderr_str.len() > 5000 { &stderr_str[stderr_str.len()-3000..] } else { &stderr_str };
-        println!("[compose_frame_video] ffmpeg stderr (tail): {}", truncated);
-    }
+        let stderr_str = String::from_utf8_lossy(&status.stderr);
+        if !stderr_str.is_empty() {
+            let truncated = if stderr_str.len() > 5000 { &stderr_str[stderr_str.len()-3000..] } else { &stderr_str };
+            println!("[compose_frame_video] ffmpeg stderr (tail): {}", truncated);
+        }
+        if !status.status.success() {
+            return Err(format!("FFmpeg compose video failed: {}", stderr_str));
+        }
+        Ok(())
+    })?;
 
-    if !status.status.success() {
-        return Err(format!("FFmpeg compose video failed: {}", stderr_str));
-    }
-
-    if let Ok(meta) = fs::metadata(&output_path) {
-        println!("[compose_frame_video] output: {} ({} bytes)", output_path.display(), meta.len());
-    }
+    let size = fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+    log::info!(
+        "[compose_frame_video] {}x{} with {} in {:.1}s ({} of {} clips prepared), {} KB",
+        delivered_w, delivered_h, encoder.ffmpeg_name(), started.elapsed().as_secs_f64(),
+        prepared_count, num_videos, size / 1024
+    );
 
     Ok(output_path.to_string_lossy().to_string())
+}
+
+/// ขนาดวิดีโอและสเกลจากไฟล์เฟรม — compose_frame_video กับ prepare_frame_video ต้องได้ค่าเดียวกัน
+#[derive(Clone, Copy, Debug)]
+struct FrameGeometry {
+    orig_w: u32,
+    orig_h: u32,
+    dup_w: u32,
+    dup_h: u32,
+    out_w: u32,
+    out_h: u32,
+    scale_x: f64,
+    scale_y: f64,
+    frame_ratio: f64,
+}
+
+fn frame_geometry(frame_bytes: &[u8], frame_width: u32, frame_height: u32) -> Result<FrameGeometry, String> {
+    let frame_img = image::load_from_memory(frame_bytes)
+        .map_err(|e| format!("Frame load error (ไฟล์ที่โหลดมาไม่ใช่รูปภาพ หรือรูปเสีย): {}", e))?;
+    let (orig_w, orig_h) = frame_img.dimensions();
+    let frame_ratio = frame_width as f64 / frame_height as f64;
+    let (dup_w, dup_h) = duplication_factors(frame_ratio);
+    let (out_w, out_h) = compose_output_size(orig_w, orig_h, dup_w, dup_h);
+    Ok(FrameGeometry {
+        orig_w,
+        orig_h,
+        dup_w,
+        dup_h,
+        out_w,
+        out_h,
+        scale_x: out_w as f64 / frame_width as f64,
+        scale_y: out_h as f64 / frame_height as f64,
+        frame_ratio,
+    })
+}
+
+/// ต้น chain ของคลิปดิบ: วนแล้วตัดหัวทุกรอบ (ถ้าอ่านความยาวคลิปไม่ได้ก็แค่ fps=30)
+fn clip_prefix(path: &str) -> String {
+    probe_clip(path)
+        .map(|(frames, duration)| loop_clip_without_head(frames, duration))
+        .unwrap_or_else(|| "fps=30,".to_string())
+}
+
+/// ชื่อไฟล์คลิปที่เตรียมไว้: ผูกกับไฟล์ต้นทาง (path, ขนาด, เวลา), การกลับซ้ายขวา และขนาดช่อง
+fn prepared_clip_path(dir: &Path, clip: &str, hflip: bool, w: i64, h: i64) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    clip.hash(&mut hasher);
+    if let Ok(meta) = fs::metadata(clip) {
+        meta.len().hash(&mut hasher);
+        meta.modified().ok().hash(&mut hasher);
+    }
+    (hflip, w, h).hash(&mut hasher);
+    dir.join(format!("prep-{:016x}.mkv", hasher.finish()))
+}
+
+/// ทำส่วนต้นของ chain คลิป (วน ตัดหัว กลับซ้ายขวา ย่อ/ครอป) ไว้ล่วงหน้า เป็น RGB lossless 9 วินาที
+/// ผลลัพธ์ตรงกับที่ compose_frame_video ทำเองทุกพิกเซล เพราะเป็นขั้นตอนเดียวกันและไม่บีบอัดแบบเสีย
+fn prepare_clip(dir: &Path, clip: &str, hflip: bool, w: i64, h: i64) -> Result<(), String> {
+    let out = prepared_clip_path(dir, clip, hflip, w, h);
+    if out.exists() {
+        return Ok(());
+    }
+    let part = out.with_extension("part.mkv");
+    let chain = fit_clip_chain(&clip_prefix(clip), hflip, w, h);
+    let mut cmd = hidden_command(&get_ffmpeg_path());
+    // priority ต่ำ: ลูกค้ายังเลือกฟิลเตอร์อยู่ หน้าจอต้องลื่นกว่า
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    let status = cmd
+        .current_dir(dir)
+        .args(["-y", "-stream_loop", "-1", "-i", clip, "-vf", &chain, "-t", "9", "-an", "-c:v", "libx264rgb", "-preset", "ultrafast", "-crf", "0"])
+        .arg(&part)
+        .output()
+        .map_err(|e| format!("FFmpeg prepare error: {}", e))?;
+    if !status.status.success() {
+        let _ = fs::remove_file(&part);
+        let err = String::from_utf8_lossy(&status.stderr);
+        return Err(format!("prepare clip failed: {}", err.lines().last().unwrap_or("")));
+    }
+    fs::rename(&part, &out).map_err(|e| format!("prepare clip rename: {}", e))
+}
+
+/// ลูกค้าเลือกช่องครบแล้ว (หน้าเลือกฟิลเตอร์): เตรียมคลิปแต่ละช่องไว้ก่อน ให้ compose_frame_video
+/// หลังสั่งพิมพ์เหลือแค่วางคลิปลงเฟรม + ฟิลเตอร์ + เข้ารหัส
+///
+/// ทำได้ก็ดี ไม่ได้ก็ไม่เป็นไร: คลิปที่ยังไม่เตรียม compose_frame_video ทำเองเหมือนเดิม
+/// อาร์กิวเมนต์ชุดเดียวกับ compose_frame_video (ไม่มีฟิลเตอร์ เพราะลูกค้ายังเลือกอยู่)
+#[tauri::command]
+pub async fn prepare_frame_video(
+    frame_image_url: String,
+    video_paths: Vec<String>,
+    slots: Vec<serde_json::Value>,
+    frame_width: u32,
+    frame_height: u32,
+    hflip_video: Option<bool>,
+) -> Result<usize, String> {
+    let frame_bytes = crate::image_processing::fetch_frame_image_bytes(&frame_image_url).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let dir = std::env::temp_dir().join("bonio-booth").join("videos");
+        fs::create_dir_all(&dir).map_err(|e| format!("Create dir error: {}", e))?;
+        prune_stale_upload_files(&dir, "prep-");
+        let g = frame_geometry(&frame_bytes, frame_width, frame_height)?;
+        let hflip = hflip_video.unwrap_or(false);
+        let mut done = 0;
+        for (clip, slot) in video_paths.iter().zip(&slots) {
+            let layout = slot_video_layout(slot, g.scale_x, g.scale_y);
+            match prepare_clip(&dir, clip, hflip, layout.clip_w, layout.clip_h) {
+                Ok(()) => done += 1,
+                Err(e) => log::warn!("[prepare_frame_video] {}", e),
+            }
+        }
+        log::info!("[prepare_frame_video] prepared {} of {} clips in {:.1}s", done, video_paths.len(), started.elapsed().as_secs_f64());
+        Ok(done)
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
 }
 
 /// ไฟล์ที่ตั้งชื่อตาม transaction (เช่น `framed-video-<txId>.mp4`) อายุเกินนี้ลบได้ —
@@ -1019,7 +1161,7 @@ mod tests {
     const STRAIGHT_FILTER: &str = "[0:v]fps=30,trim=duration=9,setpts=PTS-STARTPTS,scale=580:868:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop=578:866,format=rgb24,format=rgba[v0];[1:v]fps=30,trim=duration=9,setpts=PTS-STARTPTS,scale=578:866:force_original_aspect_ratio=increase:out_range=pc:out_color_matrix=bt709,crop=576:864,format=rgb24,format=rgba[v1];[2:v]format=rgba,scale=1440:2160:flags=lanczos+accurate_rnd+full_chroma_int[frame_img];color=c=white:s=1440x2160:d=9:r=30,format=rgba[bg];[bg][v0]overlay=120:116:eof_action=repeat:format=auto[b0];[b0][frame_img]overlay=0:0:eof_action=repeat:format=auto[af];[af][v1]overlay=768:1080:eof_action=repeat:format=auto[f1];[f1]scale=iw:ih:out_color_matrix=bt709:out_range=tv,format=yuv420p[f1out]";
 
     fn filter_for(slots: &[serde_json::Value]) -> String {
-        let prefixes = vec!["fps=30,".to_string(); slots.len()];
+        let prefixes = vec![ClipChain::Raw("fps=30,".to_string()); slots.len()];
         let (filter, label) =
             build_frame_video_filter(slots, &prefixes, false, None, (1440, 2160), (1.2, 1.2), 2.0 / 3.0);
         assert_eq!(label, "f1out");
@@ -1129,6 +1271,94 @@ mod tests {
                 assert_ios_safe(dw, dh);
             }
         }
+    }
+
+    /// วิดีโอเฟรมจริงด้วย ffmpeg จริง: แบบเดิม, แบบเตรียมคลิปไว้ก่อน, แล้วด้วยการ์ดจอของเครื่องนี้
+    /// `BONIO_FFMPEG=C:/path/ffmpeg.exe cargo test --release --lib composes_a_frame_video -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn composes_a_frame_video() {
+        let dir = std::env::temp_dir().join("bonio-booth-test-video");
+        let _ = fs::create_dir_all(&dir);
+        let ffmpeg = get_ffmpeg_path();
+
+        // 4 คลิป 3.6 วินาที 1080x1920 แบบที่ตู้อัด
+        let clips: Vec<String> = (0..4)
+            .map(|i| {
+                let path = dir.join(format!("clip{}.mp4", i));
+                if !path.exists() {
+                    let src = format!("testsrc2=size=1080x1920:rate=30,hue=h={}", i * 60);
+                    let ok = hidden_command(&ffmpeg)
+                        .args(["-y", "-f", "lavfi", "-i", &src, "-t", "3.6", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
+                        .arg(&path)
+                        .status()
+                        .unwrap()
+                        .success();
+                    assert!(ok, "make test clip");
+                }
+                path.to_string_lossy().to_string()
+            })
+            .collect();
+
+        // เฟรม 2x6 (600x1800) ช่องโปร่งใส 4 ช่อง → ได้วิดีโอ 4x6 ซ้ายขวา
+        let mut frame = image::RgbaImage::from_pixel(600, 1800, image::Rgba([240, 200, 220, 255]));
+        let slots: Vec<serde_json::Value> = (0..4)
+            .map(|i| serde_json::json!({"x": 40, "y": 40 + i * 420, "width": 520, "height": 380, "zIndex": 1, "rotate": if i == 1 { 4 } else { 0 }}))
+            .collect();
+        for i in 0..4u32 {
+            for y in (40 + i * 420)..(40 + i * 420 + 380) {
+                for x in 40..560 {
+                    frame.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
+                }
+            }
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(frame).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let url = format!("data:image/png;base64,{}", STANDARD.encode(&png));
+
+        let videos = std::env::temp_dir().join("bonio-booth").join("videos");
+        if let Ok(entries) = fs::read_dir(&videos) {
+            for e in entries.flatten() {
+                if e.file_name().to_string_lossy().starts_with("prep-") {
+                    let _ = fs::remove_file(e.path());
+                }
+            }
+        }
+
+        let compose = |name: &str| {
+            let t = std::time::Instant::now();
+            let out = tauri::async_runtime::block_on(compose_frame_video(
+                url.clone(), clips.clone(), slots.clone(), 600, 1800, None, name.to_string(), Some(false),
+            ))
+            .unwrap();
+            let secs = t.elapsed().as_secs_f64();
+            let kb = fs::metadata(&out).unwrap().len() / 1024;
+            (out, secs, kb)
+        };
+
+        let (direct, secs, kb) = compose("bench-direct.mp4");
+        println!("direct: {:.2}s, {} KB with {:?}", secs, kb, crate::encoder::current());
+
+        let t = std::time::Instant::now();
+        let n = tauri::async_runtime::block_on(prepare_frame_video(url.clone(), clips.clone(), slots.clone(), 600, 1800, Some(false))).unwrap();
+        assert_eq!(n, 4);
+        println!("prepared {} clips in {:.2}s", n, t.elapsed().as_secs_f64());
+
+        let (prepared, secs, kb) = compose("bench-prepared.mp4");
+        println!("from prepared clips: {:.2}s, {} KB with {:?}", secs, kb, crate::encoder::current());
+
+        let ssim = hidden_command(&ffmpeg)
+            .args(["-hide_banner", "-i", &prepared, "-i", &direct, "-lavfi", "ssim", "-f", "null", "-"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&ssim.stderr);
+        let all: f64 = text.split("All:").nth(1).and_then(|s| s.split_whitespace().next()).and_then(|v| v.parse().ok()).unwrap();
+        println!("SSIM prepared vs direct: {}", all);
+        assert!(all > 0.98, "prepared clips change the video: SSIM {}", all);
+
+        crate::encoder::detect_now();
+        let (_, secs, kb) = compose("bench-gpu.mp4");
+        println!("from prepared clips: {:.2}s, {} KB with {:?}", secs, kb, crate::encoder::current());
     }
 }
 
