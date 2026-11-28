@@ -1068,41 +1068,29 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
         </p>
       )}
 
+      {/*
+       * HOME is the main way out, so it sits on top, full width and filled. Print again
+       * sits below it as a thin outlined button (same look as the Discount Coupon button
+       * on the payment screen) so customers don't hit it by mistake.
+       */}
       <div
         style={{
           display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
           gap: 12,
           marginBottom: 20,
           width: "100%",
           padding: "0 24px",
-          justifyContent: "center",
         }}
       >
-        <button
-          className="primary-button"
-          onClick={handleOpenReprint}
-          disabled={!composedImage || printStatus === "printing"}
-          style={{
-            flex: 1,
-            maxWidth: 260,
-            background: "#fff",
-            color: theme.primaryColor,
-            border: `2px solid ${theme.primaryColor}`,
-            cursor: !composedImage || printStatus === "printing" ? "not-allowed" : "pointer",
-            opacity: !composedImage || printStatus === "printing" ? 0.6 : 1,
-            transition: "all 0.3s ease",
-          }}
-        >
-          🖨️ พิมพ์อีกครั้ง / PRINT AGAIN
-        </button>
-
         <button
           className="primary-button"
           onClick={handleHome}
           disabled={isUploading}
           style={{
-            flex: 1,
-            maxWidth: 260,
+            width: "100%",
+            maxWidth: 480,
             background: isUploading ? "#888888" : theme.primaryColor,
             color: theme.textButtonColor,
             cursor: isUploading ? "not-allowed" : "pointer",
@@ -1111,6 +1099,27 @@ export default function PhotoResult({ theme, machineData, onFormatReset, onBefor
           }}
         >
           {isUploading ? "⏳ กำลังอัปโหลด..." : "กลับหน้าหลัก / HOME"}
+        </button>
+
+        <button
+          onClick={handleOpenReprint}
+          disabled={!composedImage || printStatus === "printing"}
+          style={{
+            width: "100%",
+            maxWidth: 480,
+            padding: "6px 16px",
+            borderRadius: 10,
+            background: "transparent",
+            color: theme.primaryColor,
+            border: `2px solid ${theme.primaryColor}`,
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: !composedImage || printStatus === "printing" ? "not-allowed" : "pointer",
+            opacity: !composedImage || printStatus === "printing" ? 0.6 : 1,
+            transition: "all 0.3s ease",
+          }}
+        >
+          พิมพ์รูปเพิ่ม / Print again
         </button>
       </div>
 
